@@ -1,0 +1,1 @@
+- 2026-01-28: lsp_diagnostics unavailable for .md (no Markdown LSP configured).

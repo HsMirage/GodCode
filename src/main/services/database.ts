@@ -1,9 +1,14 @@
 import { app } from 'electron'
 import path from 'path'
 import { PrismaClient } from '@prisma/client'
-import type { EmbeddedPostgres } from 'embedded-postgres'
 
-let embeddedPostgres: EmbeddedPostgres | null = null
+interface EmbeddedPostgresInstance {
+  initialise(): Promise<void>
+  start(): Promise<void>
+  stop(): Promise<void>
+}
+
+let embeddedPostgres: EmbeddedPostgresInstance | null = null
 let prismaClient: PrismaClient | null = null
 
 export class DatabaseService {

@@ -26,14 +26,17 @@
     "clsx": "^2.1.0",
     "electron-updater": "^6.6.2",
     "embedded-postgres": "18.1.0-beta.15",
+    "lucide-react": "^0.563.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-router-dom": "^7.13.0",
     "uuid": "^13.0.0",
     "winston": "^3.11.0",
     "zod": "^3.24.1",
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.3.13",
     "@playwright/test": "^1.57.0",
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.0",

@@ -1,0 +1,40 @@
+node_modules
+dist
+build
+out
+
+# TypeScript build cache
+*.tsbuildinfo
+.halo
+
+# Release notes temp file
+.release-notes-current.md
+
+# Local environment variables (secrets)
+.env.local
+
+# E2E test results
+tests/e2e/results/
+.claude/
+
+# Local docs
+local_docs/
+
+# Local plugins
+halo-local/
+product.json
+
+# Local deploy scripts
+scripts/deploy_local_*.sh
+
+# Backup files
+*.backup
+*copy.*
+
+# Website (landing page, managed separately)
+website/
+
+# OS files
+.DS_Store
+RELEASE_NOTES.md
+# temp
