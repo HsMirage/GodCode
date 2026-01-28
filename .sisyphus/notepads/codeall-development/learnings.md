@@ -434,3 +434,81 @@ Tasks 6-7, 9-13:
 - Added path alias resolution to `electron.vite.config.ts` for main/preload bundles
 - Fixed `@/main/services/*` imports not resolving during build
 
+
+## Task 15: WorkFlow Visualization (React Flow) ✅
+
+**Completed**: Full workflow visualization with React Flow
+
+**Implementation**:
+- Installed `@xyflow/react` v12.10.0
+- Created 3 workflow components (TaskNode, EdgeWithLabel, WorkflowView)
+- Modified ChatPage to add "对话"/"流程图" tab switcher
+- Implemented DAG layout algorithm with level-based positioning
+- Real-time status updates via `task:status-changed` IPC events
+- Empty state handling for sessions without workflow tasks
+
+**Components Created**:
+- `TaskNode.tsx` (71 lines): Custom node with status-based colors, model/agent display, duration
+- `EdgeWithLabel.tsx` (33 lines): Dependency edges with optional labels
+- `WorkflowView.tsx` (210 lines): Main canvas with DAG conversion, real-time updates
+
+**ChatPage Modifications**:
+- Added tab state management (chat/workflow)
+- Glassmorphism tab switcher UI
+- Conditional rendering based on view mode
+
+**Type System Updates**:
+- Added `Task` import to shims.d.ts
+- Added `task:list` IPC method signature
+- Added `task:status-changed` event handler signature
+
+**Key Features**:
+- Automatic DAG layout via level calculation
+- Topological positioning (dependencies above dependents)
+- Horizontal spreading for tasks at same level
+- Status-based node colors: pending=gray, running=blue, completed=green, failed=red, cancelled=amber
+- Real-time status animation during workflow execution
+- Duration display for completed tasks
+- MiniMap and Controls for large workflows
+
+**TypeScript Challenges Resolved**:
+- React Flow NodeProps generic type constraints
+- TaskNodeData extends Record<string, unknown> for compatibility
+- Type assertions for IPC invoke responses
+- Event listener typing for custom IPC events
+
+**Build Verification**:
+- ✅ TypeScript: Zero errors
+- ✅ Vite build: Success (all 3 bundles)
+- ✅ Dependencies: @xyflow/react integrated cleanly
+
+**Commit**: `99b8389` - feat(workflow): add React Flow visualization for task DAG
+
+
+## Task 15 Addendum: IPC Handler Implementation ✅
+
+**Additional Work**: Added missing `task:list` IPC handler
+
+**Problem**: WorkflowView calls `window.codeall.invoke('task:list', sessionId)` but handler didn't exist
+
+**Implementation**:
+- Created `src/main/ipc/handlers/task.ts` (40 lines)
+- `handleTaskList()`: Queries Prisma database for tasks by sessionId
+- Maps Prisma Task model fields to domain Task interface
+- Handles optional fields (parentTaskId, output, assignedModel, etc.)
+- Registered in `src/main/ipc/index.ts`
+
+**Key Pattern**:
+```typescript
+const prisma = db.getClient()  // NOT db.prisma (common mistake)
+const tasks = await prisma.task.findMany({ where: { sessionId } })
+return tasks.map((task): Task => ({ ... }))  // Explicit return type for map
+```
+
+**Verification**:
+- ✅ TypeScript: Clean
+- ✅ Build: Success
+- ✅ IPC handler registered correctly
+
+**Commit**: `<commit-hash>` - feat(ipc): add task:list handler
+

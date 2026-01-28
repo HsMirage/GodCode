@@ -14,6 +14,7 @@ import {
 } from './handlers/session'
 import { handleMessageList, handleMessageSend } from './handlers/message'
 import { handleRouterGetRules, handleRouterSaveRules } from './handlers/router'
+import { handleTaskList } from './handlers/task'
 
 export function registerIpcHandlers(): void {
   ipcMain.handle('model:create', handleModelCreate)
@@ -35,4 +36,7 @@ export function registerIpcHandlers(): void {
   // Router handlers
   ipcMain.handle('router:get-rules', handleRouterGetRules)
   ipcMain.handle('router:save-rules', handleRouterSaveRules)
+
+  // Task handlers
+  ipcMain.handle('task:list', handleTaskList)
 }
