@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import path from 'path'
 import { registerIpcHandlers } from './ipc'
+import { DatabaseService } from './services/database'
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -21,7 +22,10 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  const db = DatabaseService.getInstance()
+  await db.init()
+  
   registerIpcHandlers()
   createWindow()
 })
@@ -36,4 +40,9 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow()
   }
+})
+
+app.on('quit', async () => {
+  const db = DatabaseService.getInstance()
+  await db.shutdown()
 })
