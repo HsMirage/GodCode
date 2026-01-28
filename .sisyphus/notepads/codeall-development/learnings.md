@@ -34,3 +34,24 @@
 - Manual QA for Task 7 (requires Anthropic API key)
 - Resolve Task 8 blocker (schema design discussion needed)
 
+
+## Task 10: MVP1 Integration Tests & Acceptance ✅
+
+**Completed**:
+- Playwright installed and configured  
+- Basic E2E tests (app launch, navigation to Settings/Chat)
+- Comprehensive MVP1 Acceptance Report created at docs/mvp1-acceptance.md
+
+**Documented**:
+- 8/10 tasks complete (80% of MVP1)
+- Task 8 blocked by schema mismatch
+- Full chat flow E2E requires manual QA with API key
+- Known issues and technical debt cataloged
+
+**Files**:
+- playwright.config.ts
+- tests/e2e/mvp1.spec.ts  
+- docs/mvp1-acceptance.md (comprehensive 400+ line report)
+
+**Status**: MVP1 is functional for core chat use case, pending architecture review for Artifact feature.
+

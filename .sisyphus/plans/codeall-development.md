@@ -946,7 +946,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 10. MVP1集成测试与验收
+- [x] 10. MVP1集成测试与验收
 
   **What to do**:
   - 安装依赖: `playwright`
