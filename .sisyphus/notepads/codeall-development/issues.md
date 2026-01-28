@@ -19,3 +19,20 @@
 
 **Decision**: Skipping Task 8 - requires architecture discussion with user about schema design.
 
+
+## Task 11: Multi-LLM Adapters - DEFERRED
+
+**Status**: Implementation pattern clear, but deferred due to:
+1. Subagent consistently refusing valid full-stack tasks
+2. Time constraints - each adapter needs careful SDK integration
+3. Requires testing with real API keys for each provider
+
+**Implementation Plan** (for next session):
+- OpenAIAdapter: Use openai SDK, stream via chat.completions.create()
+- GeminiAdapter: Use @google/generative-ai, handle 'model' role conversion
+- OpenAICompatAdapter: Extend OpenAIAdapter with custom baseURL
+
+**Dependencies Installed**: ✅ openai v6.16.0, @google/generative-ai v0.24.1
+
+**Reference**: AnthropicAdapter provides complete pattern (201 lines)
+
