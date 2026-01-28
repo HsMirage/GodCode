@@ -1,0 +1,1 @@
+- 2026-01-28: Implemented session:get-or-create-default to return earliest session, or create "New Chat" in provided spaceId; if none provided, uses first space or throws when no spaces exist.

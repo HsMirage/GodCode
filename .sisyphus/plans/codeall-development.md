@@ -3,11 +3,13 @@
 ## Context
 
 ### Original Request
+
 开发一个独立的多LLM协同编程与多Agent协同工作软件,融合oh-my-opencode、eigent、ccg-workflow、moltbot、hello-halo五个参考项目的核心优势。软件名称CodeAll。
 
 ### Interview Summary
 
 **核心架构决策**:
+
 - **调度架构**: 融合模式 - 整合oh-my-opencode的delegate_task + eigent的Workforce
 - **技术栈**: 全TypeScript栈 (pnpm + Electron + React + TypeScript)
 - **持久化**: PostgreSQL数据库 (内置pg-embed便携版)
@@ -15,6 +17,7 @@
 - **UI组件优先级**: 配置面板 > Chat/Task > Space > WorkFlow > Artifact Rail
 
 **功能决策**:
+
 - **模块集成顺序**: oh-my-opencode > eigent > ccg-workflow > hello-halo > moltbot
 - **开发模式**: MVP迭代式 (MVP1→MVP2→MVP3→Final)
 - **部署平台**: Windows 10/11优先
@@ -22,6 +25,7 @@
 - **测试策略**: Vitest单测 + Playwright E2E, 70%覆盖率
 
 **运维决策**:
+
 - **配置管理**: JSON文件(系统配置) + PostgreSQL(会话数据)
 - **日志系统**: 结构化日志 (winston/pino)
 - **路由策略**: 可配置的智能路由
@@ -29,6 +33,7 @@
 - **MCP集成**: 可扩展MCP (基础MCP + 自定义注册)
 
 **关键用户决策** (Metis审查后补充):
+
 - **代码复用**: 复制代码 + 注明来源 (需检查MIT/Apache许可证)
 - **MVP1闭环**: 用户输入→单LLM生成→Artifact预览
 - **数据库部署**: 内置pg-embed便携数据库
@@ -38,6 +43,7 @@
 ### Metis Review
 
 **识别的关键风险**:
+
 1. 许可证合规风险 - 需检查5个项目的许可证兼容性
 2. 领域模型未冻结 - Task/Agent/Space/Artifact等概念需先定义
 3. PostgreSQL对桌面端用户的复杂度 - 已解决(使用pg-embed)
@@ -46,6 +52,7 @@
 6. 5项目概念模型冲突 - delegate_task vs workforce语义需协调
 
 **应用的护栏**:
+
 - MVP阶段只实现"能力对齐",不完全复刻所有功能
 - 领域模型先行,冻结数据schema后再开发
 - 工具默认只读,写入需授权
@@ -54,6 +61,7 @@
 - 跨模型统一适配层
 
 **范围锁定**:
+
 - Workforce可视化: MVP限定只读DAG回放,不做编辑器
 - 智能路由: MVP限定规则路由,不做自动学习
 - 浏览器工具: MVP限定3-6个核心工具
@@ -65,9 +73,11 @@
 ## Work Objectives
 
 ### Core Objective
+
 构建一个Windows桌面应用CodeAll,实现多LLM智能协同和多Agent并行编排,为用户提供可视化的AI协同编程工作台,融合oh-my-opencode的深度LLM协作、eigent的任务编排、hello-halo的浏览器自动化能力。
 
 ### Concrete Deliverables
+
 - **可执行Windows应用**: `CodeAll-Setup-1.0.0.exe` (electron-builder打包)
 - **核心功能模块**:
   - 配置管理界面 (LLM模型/Agent/MCP)
@@ -89,6 +99,7 @@
   - 性能测试报告 (多LLM并发稳定性)
 
 ### Definition of Done
+
 - [ ] Windows应用可独立安装运行,无需外部依赖
 - [ ] MVP1端到端流程验证: Chat输入→LLM生成→Artifact预览
 - [ ] MVP2多LLM委派验证: 至少2个模型协同完成任务
@@ -101,6 +112,7 @@
 - [ ] 数据持久化可跨会话恢复
 
 ### Must Have
+
 - Electron桌面应用框架
 - PostgreSQL内置数据库 (pg-embed)
 - 至少1个LLM模型适配 (Claude优先)
@@ -113,7 +125,9 @@
 - 单元测试框架
 
 ### Must NOT Have (Guardrails)
+
 **MVP1阶段禁止**:
+
 - 全功能WorkFlow可视化编辑器
 - 自动学习路由系统
 - 全套26个浏览器工具
@@ -125,6 +139,7 @@
 - 自动更新机制
 
 **整体禁止** (防止AI Slop):
+
 - 过度抽象 (不必要的工厂模式/策略模式)
 - 过度验证 (简单输入的15种错误检查)
 - 文档膨胀 (每个函数都写JSDoc)
@@ -136,6 +151,7 @@
 ## Verification Strategy
 
 ### Test Decision
+
 - **基础设施**: Vitest单元测试 + Playwright E2E测试
 - **框架**: 与hello-halo/eigent保持一致
 - **覆盖率目标**: 核心模块≥70% (调度/路由/持久化/协议)
@@ -145,15 +161,16 @@
 
 **By Deliverable Type**:
 
-| Type | Verification Tool | Procedure |
-|------|------------------|-----------|
+| Type                       | Verification Tool | Procedure                              |
+| -------------------------- | ----------------- | -------------------------------------- |
 | **Electron Main/Renderer** | 开发者工具 + 日志 | 启动应用,检查控制台无报错,功能点击响应 |
-| **数据库操作** | SQL查询 | 执行操作后查询表,验证数据正确存储 |
-| **LLM调用** | 日志 + Mock响应 | 验证请求格式、响应解析、错误处理 |
-| **BrowserView** | 内嵌浏览器 | 导航到测试页面,执行操作,截图验证 |
-| **配置管理** | JSON文件检查 | 修改配置,重启应用,验证配置生效 |
+| **数据库操作**             | SQL查询           | 执行操作后查询表,验证数据正确存储      |
+| **LLM调用**                | 日志 + Mock响应   | 验证请求格式、响应解析、错误处理       |
+| **BrowserView**            | 内嵌浏览器        | 导航到测试页面,执行操作,截图验证       |
+| **配置管理**               | JSON文件检查      | 修改配置,重启应用,验证配置生效         |
 
 **Evidence Required**:
+
 - 启动日志 (INFO级别,无ERROR)
 - 数据库查询结果截图
 - LLM请求/响应日志
@@ -166,15 +183,16 @@
 
 ### Reference Projects License Check
 
-| 项目 | License | 复用策略 | 合规要求 |
-|------|---------|---------|---------|
-| **oh-my-opencode** | [需确认] | 复制核心机制代码 | 保留版权声明,注明来源 |
-| **eigent** | [需确认] | 复制Workforce相关代码 | 保留版权声明,注明来源 |
-| **ccg-workflow** | [需确认] | 参考路由思想,重写代码 | 无 (仅借鉴) |
-| **moltbot** | [需确认] | 复制Subagent机制代码 | 保留版权声明,注明来源 |
-| **hello-halo** | [需确认] | 复制BrowserView集成代码 | 保留版权声明,注明来源 |
+| 项目               | License  | 复用策略                | 合规要求              |
+| ------------------ | -------- | ----------------------- | --------------------- |
+| **oh-my-opencode** | [需确认] | 复制核心机制代码        | 保留版权声明,注明来源 |
+| **eigent**         | [需确认] | 复制Workforce相关代码   | 保留版权声明,注明来源 |
+| **ccg-workflow**   | [需确认] | 参考路由思想,重写代码   | 无 (仅借鉴)           |
+| **moltbot**        | [需确认] | 复制Subagent机制代码    | 保留版权声明,注明来源 |
+| **hello-halo**     | [需确认] | 复制BrowserView集成代码 | 保留版权声明,注明来源 |
 
 **行动项**:
+
 - [ ] 0.1 检查5个项目的LICENSE文件
 - [ ] 0.2 确认MIT/Apache-2.0兼容性
 - [ ] 0.3 在CodeAll的README.md添加"Acknowledgments"章节
@@ -193,104 +211,104 @@
 ```typescript
 // Space: 工作区,隔离不同项目的会话和配置
 interface Space {
-  id: string;               // UUID
-  name: string;             // 用户定义名称
-  workDir: string;          // 工作目录路径
-  createdAt: Date;
-  updatedAt: Date;
+  id: string // UUID
+  name: string // 用户定义名称
+  workDir: string // 工作目录路径
+  createdAt: Date
+  updatedAt: Date
 }
 
 // Session: 会话,一次完整的用户交互过程
 interface Session {
-  id: string;               // UUID
-  spaceId: string;          // 所属Space
-  title: string;            // 自动生成或用户定义
-  createdAt: Date;
-  updatedAt: Date;
-  status: 'active' | 'archived';
+  id: string // UUID
+  spaceId: string // 所属Space
+  title: string // 自动生成或用户定义
+  createdAt: Date
+  updatedAt: Date
+  status: 'active' | 'archived'
 }
 
 // Message: 消息,用户或Agent的单次输入/输出
 interface Message {
-  id: string;
-  sessionId: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  createdAt: Date;
-  metadata?: Record<string, any>; // 工具调用、思考等
+  id: string
+  sessionId: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  createdAt: Date
+  metadata?: Record<string, any> // 工具调用、思考等
 }
 
 // Task: 任务,可执行的工作单元
 interface Task {
-  id: string;
-  sessionId: string;
-  parentTaskId?: string;     // 支持子任务
-  type: 'user' | 'delegated' | 'workforce';
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-  input: string;             // 任务描述
-  output?: string;           // 任务结果
-  assignedModel?: string;    // 分配的LLM模型
-  assignedAgent?: string;    // 分配的Agent类型
-  createdAt: Date;
-  startedAt?: Date;
-  completedAt?: Date;
-  metadata?: Record<string, any>; // 依赖关系、优先级等
+  id: string
+  sessionId: string
+  parentTaskId?: string // 支持子任务
+  type: 'user' | 'delegated' | 'workforce'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  input: string // 任务描述
+  output?: string // 任务结果
+  assignedModel?: string // 分配的LLM模型
+  assignedAgent?: string // 分配的Agent类型
+  createdAt: Date
+  startedAt?: Date
+  completedAt?: Date
+  metadata?: Record<string, any> // 依赖关系、优先级等
 }
 
 // Artifact: 产物,Agent生成的文件/代码/数据
 interface Artifact {
-  id: string;
-  sessionId: string;
-  taskId?: string;           // 关联任务
-  type: 'code' | 'file' | 'image' | 'data';
-  path: string;              // 相对于Space工作目录
-  content?: string;          // 小文件直接存储
-  size: number;
-  createdAt: Date;
-  updatedAt: Date;
+  id: string
+  sessionId: string
+  taskId?: string // 关联任务
+  type: 'code' | 'file' | 'image' | 'data'
+  path: string // 相对于Space工作目录
+  content?: string // 小文件直接存储
+  size: number
+  createdAt: Date
+  updatedAt: Date
 }
 
 // Run: 执行记录,一次完整的任务执行过程
 interface Run {
-  id: string;
-  taskId: string;
-  status: 'running' | 'completed' | 'failed';
-  startedAt: Date;
-  completedAt?: Date;
-  logs: RunLog[];
-  tokenUsage?: { prompt: number; completion: number; total: number };
-  cost?: number;             // 成本估算
+  id: string
+  taskId: string
+  status: 'running' | 'completed' | 'failed'
+  startedAt: Date
+  completedAt?: Date
+  logs: RunLog[]
+  tokenUsage?: { prompt: number; completion: number; total: number }
+  cost?: number // 成本估算
 }
 
 // RunLog: 执行日志
 interface RunLog {
-  timestamp: Date;
-  level: 'debug' | 'info' | 'warn' | 'error';
-  message: string;
-  metadata?: Record<string, any>;
+  timestamp: Date
+  level: 'debug' | 'info' | 'warn' | 'error'
+  message: string
+  metadata?: Record<string, any>
 }
 
 // Agent: Agent定义
 interface Agent {
-  id: string;
-  name: string;
-  type: 'delegate' | 'workforce' | 'subagent';
-  capabilities: string[];    // 支持的工具/能力
-  config: Record<string, any>;
+  id: string
+  name: string
+  type: 'delegate' | 'workforce' | 'subagent'
+  capabilities: string[] // 支持的工具/能力
+  config: Record<string, any>
 }
 
 // Model: LLM模型配置
 interface Model {
-  id: string;
-  provider: 'anthropic' | 'openai' | 'google' | 'ollama' | 'openai-compat';
-  modelName: string;         // claude-3-5-sonnet, gpt-4, etc.
-  apiKey?: string;           // 加密存储
-  baseURL?: string;          // 自定义endpoint
+  id: string
+  provider: 'anthropic' | 'openai' | 'google' | 'ollama' | 'openai-compat'
+  modelName: string // claude-3-5-sonnet, gpt-4, etc.
+  apiKey?: string // 加密存储
+  baseURL?: string // 自定义endpoint
   config: {
-    temperature?: number;
-    maxTokens?: number;
-    timeout?: number;
-  };
+    temperature?: number
+    maxTokens?: number
+    timeout?: number
+  }
 }
 ```
 
@@ -399,14 +417,14 @@ type IPCEvent =
   | { type: 'task:cancel'; payload: { taskId: string } }
   | { type: 'model:configure'; payload: Model }
   | { type: 'browser:navigate'; payload: { url: string } }
-  | { type: 'browser:click'; payload: { selector: string } };
+  | { type: 'browser:click'; payload: { selector: string } }
 
 // State Update Events (Main → Renderer)
 type StateEvent =
   | { type: 'message:created'; payload: Message }
   | { type: 'task:status-changed'; payload: { taskId: string; status: string } }
   | { type: 'artifact:created'; payload: Artifact }
-  | { type: 'run:log'; payload: { runId: string; log: RunLog } };
+  | { type: 'run:log'; payload: { runId: string; log: RunLog } }
 ```
 
 ---
@@ -427,19 +445,19 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ## Parallelization
 
-| Group | Tasks | Reason |
-|-------|-------|--------|
-| P0 | 0.1-0.4 (许可证检查) | 独立文档工作,可并行 |
-| P1 | 1.2, 1.3 (Electron框架, 数据库) | 独立模块,可并行 |
-| P2 | 2.2, 2.3 (delegate_task, Workforce) | 两套引擎,可并行开发 |
+| Group | Tasks                               | Reason              |
+| ----- | ----------------------------------- | ------------------- |
+| P0    | 0.1-0.4 (许可证检查)                | 独立文档工作,可并行 |
+| P1    | 1.2, 1.3 (Electron框架, 数据库)     | 独立模块,可并行     |
+| P2    | 2.2, 2.3 (delegate_task, Workforce) | 两套引擎,可并行开发 |
 
-| Task | Depends On | Reason |
-|------|------------|--------|
-| 1.4 | 1.2, 1.3 | UI需要框架和数据库就绪 |
-| 2.1 | 1.6 | LLM适配器需要先存在 |
-| 2.4 | 2.2, 2.3 | 路由需要两个引擎都实现 |
-| 3.1 | 1.2 | BrowserView需要Electron框架 |
-| 4.1 | 所有功能 | 集成测试需要所有模块完成 |
+| Task | Depends On | Reason                      |
+| ---- | ---------- | --------------------------- |
+| 1.4  | 1.2, 1.3   | UI需要框架和数据库就绪      |
+| 2.1  | 1.6        | LLM适配器需要先存在         |
+| 2.4  | 2.2, 2.3   | 路由需要两个引擎都实现      |
+| 3.1  | 1.2        | BrowserView需要Electron框架 |
+| 4.1  | 所有功能   | 集成测试需要所有模块完成    |
 
 ---
 
@@ -739,8 +757,8 @@ Phase 4: Final - 完整集成 + 打包 + 文档
     - `adapter.interface.ts`: 定义统一LLM接口
       ```typescript
       interface LLMAdapter {
-        sendMessage(messages: Message[], config: LLMConfig): Promise<LLMResponse>;
-        streamMessage(messages: Message[], config: LLMConfig): AsyncGenerator<LLMChunk>;
+        sendMessage(messages: Message[], config: LLMConfig): Promise<LLMResponse>
+        streamMessage(messages: Message[], config: LLMConfig): AsyncGenerator<LLMChunk>
       }
       ```
     - `anthropic.adapter.ts`: Anthropic Claude适配器实现
@@ -789,7 +807,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 7. Chat UI与基础对话流程
+- [x] 7. Chat UI与基础对话流程
 
   **What to do**:
   - 创建 `src/renderer/pages/ChatPage.tsx`: 聊天页面主组件
@@ -847,7 +865,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
     - `ArtifactList.tsx`: 产物列表 (文件树结构)
     - `ArtifactPreview.tsx`: 预览组件
   - 实现Artifact创建逻辑:
-    - LLM响应如果包含代码块 (```language ... ```),自动提取为Artifact
+    - LLM响应如果包含代码块 (`language ... `),自动提取为Artifact
     - 保存到数据库: type='code', content=代码内容
   - 实现预览功能:
     - 代码高亮显示 (使用 `prism-react-renderer`)
@@ -864,7 +882,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **References**:
   - hello-halo的Artifact Rail: `src/renderer/components/artifact-rail/`
   - prism-react-renderer文档: npm包prism-react-renderer
-  - 代码块提取正则: /```(\w+)\n([\s\S]+?)```/g
+  - 代码块提取正则: /`(\w+)\n([\s\S]+?)`/g
 
   **Acceptance Criteria**:
 
@@ -884,7 +902,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 9. MVP1单元测试
+- [x] 9. MVP1单元测试
 
   **What to do**:
   - 安装依赖: `vitest`, `@testing-library/react`, `@testing-library/jest-dom`
@@ -1037,17 +1055,17 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   - 创建 `src/main/services/delegate/categories.ts`: 预定义类别配置
     ```typescript
     const categories = {
-      'quick': { model: 'claude-3-haiku', temperature: 0.3 },
+      quick: { model: 'claude-3-haiku', temperature: 0.3 },
       'visual-engineering': { model: 'gemini-pro', temperature: 0.7 },
-      'ultrabrain': { model: 'gpt-4', temperature: 0.2 },
-    };
+      ultrabrain: { model: 'gpt-4', temperature: 0.2 }
+    }
     ```
   - 创建 `src/main/services/delegate/agents.ts`: 预定义agent配置
     ```typescript
     const agents = {
-      'oracle': { type: 'readonly', model: 'claude-opus', tools: [] },
-      'explore': { type: 'readonly', model: 'claude-sonnet', tools: ['grep', 'read'] },
-    };
+      oracle: { type: 'readonly', model: 'claude-opus', tools: [] },
+      explore: { type: 'readonly', model: 'claude-sonnet', tools: ['grep', 'read'] }
+    }
     ```
   - 实现委派逻辑:
     - 接收 `delegate_task(description, prompt, category/subagent_type)`
@@ -1158,12 +1176,17 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   - 实现规则路由表 (可配置):
     ```typescript
     const routingRules = [
-      { pattern: /前端|UI|页面|组件/, strategy: 'delegate', category: 'visual-engineering', model: 'gemini' },
+      {
+        pattern: /前端|UI|页面|组件/,
+        strategy: 'delegate',
+        category: 'visual-engineering',
+        model: 'gemini'
+      },
       { pattern: /后端|API|数据库/, strategy: 'delegate', model: 'gpt-4' },
       { pattern: /架构|设计/, strategy: 'delegate', subagent: 'oracle', model: 'claude-opus' },
       { pattern: /创建|开发|实现/, strategy: 'workforce' },
-      { pattern: /.*/, strategy: 'delegate', category: 'quick' },  // fallback
-    ];
+      { pattern: /.*/, strategy: 'delegate', category: 'quick' } // fallback
+    ]
     ```
   - 创建路由配置界面: Settings页面新增"路由规则"tab
   - 用户可自定义路由规则: 添加/编辑/删除/排序
@@ -1813,34 +1836,34 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ## Commit Strategy
 
-| After Task | Message | Files | Verification |
-|------------|---------|-------|--------------|
-| 0 | `chore: establish licenses compliance and freeze domain model` | docs/, types/ | `pnpm tsc --noEmit` |
-| 1 | `chore: initialize project scaffolding and build config` | package.json, configs | `pnpm build` |
-| 2 | `feat(electron): setup main process and type-safe IPC communication` | src/main/, src/renderer/ | `pnpm dev` |
-| 3 | `feat(database): integrate pg-embed and Prisma ORM` | src/main/services/database.ts | `pnpm prisma validate` |
-| 4 | `feat(ui): implement basic React UI and model config panel` | src/renderer/ | `pnpm tsc --noEmit` |
-| 5 | `feat(logging): setup winston structured logging system` | src/main/services/logger.ts | `pnpm tsc --noEmit` |
-| 6 | `feat(llm): implement Claude LLM adapter with cost tracking` | src/main/services/llm/ | `pnpm test llm/` |
-| 7 | `feat(chat): implement Chat UI and end-to-end conversation flow` | src/renderer/pages/ChatPage.tsx | `pnpm test` |
-| 8 | `feat(artifact): implement artifact extraction and preview` | src/renderer/components/artifact/ | `pnpm test` |
-| 9 | `test(mvp1): add unit tests for core services (70% coverage)` | tests/unit/ | `pnpm test` |
-| 10 | `test(mvp1): add E2E tests and acceptance documentation` | tests/e2e/ | `pnpm test:e2e` |
-| 11 | `feat(llm): add OpenAI, Gemini and OpenAI-compatible adapters` | src/main/services/llm/ | `pnpm test llm/` |
-| 12 | `feat(delegate): implement delegate_task engine from oh-my-opencode` | src/main/services/delegate/ | `pnpm test delegate/` |
-| 13 | `feat(workforce): implement Workforce task orchestration from eigent` | src/main/services/workforce/ | `pnpm test workforce/` |
-| 14 | `feat(router): implement intelligent routing system (delegate + workforce)` | src/main/services/router/ | `pnpm test router/` |
-| 15 | `feat(workflow): add React Flow visualization for task DAG` | src/renderer/components/workflow/ | `pnpm test` |
-| 16 | `test(mvp2): add comprehensive tests for multi-LLM and workflow` | tests/unit/, tests/e2e/ | `pnpm test:e2e` |
-| 17 | `feat(browser): integrate BrowserView from hello-halo` | src/main/services/browser-view/ | `pnpm test` |
-| 18 | `feat(ai-browser): implement 6 core browser automation tools` | src/main/services/ai-browser/ | `pnpm test ai-browser/` |
-| 19 | `feat(space): implement workspace isolation system` | src/main/services/space.ts | `pnpm test` |
-| 20 | `feat(artifact): enhance Artifact Rail with file tree and multi-type preview` | src/renderer/components/artifact/ | `pnpm test` |
-| 21 | `test(mvp3): add tests for browser automation and workspace` | tests/e2e/ | `pnpm test:e2e` |
-| 22 | `perf: optimize performance and stability for production` | 性能优化代码 | `pnpm test` |
-| 23 | `build: configure electron-builder for Windows packaging` | electron-builder.yml | `pnpm build:win` |
-| 24 | `docs: add comprehensive user and developer documentation` | docs/, README.md | 无 |
-| 25 | `test(final): add comprehensive integration and acceptance tests` | tests/ | `pnpm test:e2e` |
+| After Task | Message                                                                       | Files                             | Verification            |
+| ---------- | ----------------------------------------------------------------------------- | --------------------------------- | ----------------------- |
+| 0          | `chore: establish licenses compliance and freeze domain model`                | docs/, types/                     | `pnpm tsc --noEmit`     |
+| 1          | `chore: initialize project scaffolding and build config`                      | package.json, configs             | `pnpm build`            |
+| 2          | `feat(electron): setup main process and type-safe IPC communication`          | src/main/, src/renderer/          | `pnpm dev`              |
+| 3          | `feat(database): integrate pg-embed and Prisma ORM`                           | src/main/services/database.ts     | `pnpm prisma validate`  |
+| 4          | `feat(ui): implement basic React UI and model config panel`                   | src/renderer/                     | `pnpm tsc --noEmit`     |
+| 5          | `feat(logging): setup winston structured logging system`                      | src/main/services/logger.ts       | `pnpm tsc --noEmit`     |
+| 6          | `feat(llm): implement Claude LLM adapter with cost tracking`                  | src/main/services/llm/            | `pnpm test llm/`        |
+| 7          | `feat(chat): implement Chat UI and end-to-end conversation flow`              | src/renderer/pages/ChatPage.tsx   | `pnpm test`             |
+| 8          | `feat(artifact): implement artifact extraction and preview`                   | src/renderer/components/artifact/ | `pnpm test`             |
+| 9          | `test(mvp1): add unit tests for core services (70% coverage)`                 | tests/unit/                       | `pnpm test`             |
+| 10         | `test(mvp1): add E2E tests and acceptance documentation`                      | tests/e2e/                        | `pnpm test:e2e`         |
+| 11         | `feat(llm): add OpenAI, Gemini and OpenAI-compatible adapters`                | src/main/services/llm/            | `pnpm test llm/`        |
+| 12         | `feat(delegate): implement delegate_task engine from oh-my-opencode`          | src/main/services/delegate/       | `pnpm test delegate/`   |
+| 13         | `feat(workforce): implement Workforce task orchestration from eigent`         | src/main/services/workforce/      | `pnpm test workforce/`  |
+| 14         | `feat(router): implement intelligent routing system (delegate + workforce)`   | src/main/services/router/         | `pnpm test router/`     |
+| 15         | `feat(workflow): add React Flow visualization for task DAG`                   | src/renderer/components/workflow/ | `pnpm test`             |
+| 16         | `test(mvp2): add comprehensive tests for multi-LLM and workflow`              | tests/unit/, tests/e2e/           | `pnpm test:e2e`         |
+| 17         | `feat(browser): integrate BrowserView from hello-halo`                        | src/main/services/browser-view/   | `pnpm test`             |
+| 18         | `feat(ai-browser): implement 6 core browser automation tools`                 | src/main/services/ai-browser/     | `pnpm test ai-browser/` |
+| 19         | `feat(space): implement workspace isolation system`                           | src/main/services/space.ts        | `pnpm test`             |
+| 20         | `feat(artifact): enhance Artifact Rail with file tree and multi-type preview` | src/renderer/components/artifact/ | `pnpm test`             |
+| 21         | `test(mvp3): add tests for browser automation and workspace`                  | tests/e2e/                        | `pnpm test:e2e`         |
+| 22         | `perf: optimize performance and stability for production`                     | 性能优化代码                      | `pnpm test`             |
+| 23         | `build: configure electron-builder for Windows packaging`                     | electron-builder.yml              | `pnpm build:win`        |
+| 24         | `docs: add comprehensive user and developer documentation`                    | docs/, README.md                  | 无                      |
+| 25         | `test(final): add comprehensive integration and acceptance tests`             | tests/                            | `pnpm test:e2e`         |
 
 ---
 
@@ -1849,6 +1872,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 ### Verification Commands
 
 **开发环境**:
+
 ```bash
 pnpm install        # 依赖安装成功
 pnpm tsc --noEmit   # TypeScript编译无报错
@@ -1858,12 +1882,14 @@ pnpm dev            # 开发服务器启动,应用正常显示
 ```
 
 **构建与打包**:
+
 ```bash
 pnpm build          # Vite构建成功
 pnpm build:win      # electron-builder打包成功
 ```
 
 **测试验证**:
+
 ```bash
 pnpm test:integration  # 集成测试通过
 pnpm test:e2e          # E2E测试通过
@@ -1872,6 +1898,7 @@ pnpm test --coverage   # 生成覆盖率报告
 ```
 
 **最终验收**:
+
 ```bash
 # 安装CodeAll-Setup-1.0.0.exe
 # 启动应用,无报错
@@ -1885,6 +1912,7 @@ pnpm test --coverage   # 生成覆盖率报告
 ### Final Checklist
 
 **功能完整性**:
+
 - [ ] 所有"Must Have"功能已实现
 - [ ] 所有"Must NOT Have"功能未实现 (范围控制)
 - [ ] MVP1端到端流程验证通过
@@ -1892,6 +1920,7 @@ pnpm test --coverage   # 生成覆盖率报告
 - [ ] MVP3浏览器自动化验证通过
 
 **质量保证**:
+
 - [ ] 核心模块单元测试覆盖率≥70%
 - [ ] 至少3条E2E关键路径测试通过
 - [ ] 性能指标达标: 冷启动<5s, 单Run内存<500MB
@@ -1899,12 +1928,14 @@ pnpm test --coverage   # 生成覆盖率报告
 - [ ] TypeScript strict模式无报错
 
 **安全合规**:
+
 - [ ] 所有敏感操作有确认机制
 - [ ] API key加密存储 (Windows Credential Manager)
 - [ ] 浏览器安全策略生效 (file://禁止访问)
 - [ ] 许可证合规文档完成
 
 **文档齐全**:
+
 - [ ] 用户手册完成
 - [ ] API文档完成
 - [ ] 架构文档完成
@@ -1912,6 +1943,7 @@ pnpm test --coverage   # 生成覆盖率报告
 - [ ] README更新,包含Acknowledgments
 
 **可交付物**:
+
 - [ ] Windows安装包: `CodeAll-Setup-1.0.0.exe`
 - [ ] 源代码: GitHub仓库
 - [ ] 文档: `docs/` 目录
