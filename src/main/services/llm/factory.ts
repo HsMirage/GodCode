@@ -1,13 +1,27 @@
 import type { LLMAdapter } from './adapter.interface'
 import { AnthropicAdapter } from './anthropic.adapter'
+import { OpenAIAdapter } from './openai.adapter'
+import { GeminiAdapter } from './gemini.adapter'
+import { OpenAICompatAdapter } from './openai-compat.adapter'
 
 export const createLLMAdapter = (
-  provider: 'anthropic',
-  config: { apiKey: string }
+  provider: string,
+  config: { apiKey: string; baseURL?: string }
 ): LLMAdapter => {
-  if (provider === 'anthropic') {
-    return new AnthropicAdapter(config.apiKey)
+  switch (provider.toLowerCase()) {
+    case 'anthropic':
+      return new AnthropicAdapter(config.apiKey)
+    case 'openai':
+      return new OpenAIAdapter(config.apiKey)
+    case 'google':
+    case 'gemini':
+      return new GeminiAdapter(config.apiKey)
+    case 'openai-compat':
+      if (!config.baseURL) {
+        throw new Error('baseURL required for openai-compat provider')
+      }
+      return new OpenAICompatAdapter(config.apiKey, config.baseURL)
+    default:
+      throw new Error(`Unsupported LLM provider: ${provider}`)
   }
-
-  throw new Error(`Unsupported LLM provider: ${provider}`)
 }

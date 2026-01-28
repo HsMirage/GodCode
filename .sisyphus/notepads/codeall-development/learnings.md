@@ -161,3 +161,19 @@
 **Status**: Ready for stakeholder review and API key testing
 
 
+
+## Task 11: Multi-LLM Adapters ✅
+
+**Completed**: OpenAI, Gemini, OpenAI-compatible adapters
+- OpenAIAdapter: GPT-4/3.5 with streaming, retry, timeout
+- GeminiAdapter: Google Gemini with role conversion ('model' vs 'assistant')
+- OpenAICompatAdapter: Generic for DeepSeek, GLM, etc.
+- Factory updated to support all providers
+
+**Message Format Conversions**:
+- OpenAI: Direct mapping (role: user/assistant/system)
+- Gemini: 'model' role + parts array, system prepended to user message
+- All: Unified retry (3x exponential backoff), 30s timeout
+
+**Unified Interface**: All implement LLMAdapter with sendMessage + streamMessage
+

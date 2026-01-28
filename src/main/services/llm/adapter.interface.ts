@@ -1,6 +1,7 @@
 import type { Message } from '@/types/domain'
 
 export interface LLMConfig {
+  model?: string
   temperature?: number
   maxTokens?: number
   topP?: number
