@@ -162,3 +162,10 @@ tests/
 ### Next Steps
 - Task 4: UI Framework (React + TailwindCSS + Configuration Panel)
 - TODO: Manual runtime test needed - start app and verify database initializes
+
+## [2026-01-28] Task 4 (partial): Router Scaffold
+
+### Renderer Routing
+- Added `App.tsx` with `BrowserRouter` + `Routes` for `/` and `/settings`
+- Placeholder pages `ChatPage` and `SettingsPage` using Tailwind dark classes
+- `index.tsx` now renders `<App />` and keeps `index.css` import
