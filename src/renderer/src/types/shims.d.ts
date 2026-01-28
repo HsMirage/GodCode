@@ -2,7 +2,7 @@ declare module '../../types/domain' {
   export * from '../../../types/domain'
 }
 
-import type { Session, Message, Model } from '../../types/domain'
+import type { Session, Message, Model, Task } from '../../types/domain'
 
 interface RoutingRule {
   pattern: string
@@ -32,10 +32,15 @@ interface CodeAllAPI {
   invoke(channel: 'message:list', sessionId: string): Promise<Message[]>
   invoke(channel: 'router:get-rules'): Promise<RoutingRule[]>
   invoke(channel: 'router:save-rules', rules: RoutingRule[]): Promise<void>
+  invoke(channel: 'task:list', sessionId: string): Promise<Task[]>
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
   on(
     channel: 'message:stream-chunk',
     callback: (data: { content: string; done: boolean }) => void
+  ): () => void
+  on(
+    channel: 'task:status-changed',
+    callback: (data: { taskId: string; status: Task['status'] }) => void
   ): () => void
 }
 

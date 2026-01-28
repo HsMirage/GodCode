@@ -138,3 +138,30 @@
 3. Study eigent workforce.py reference
 4. Implement workforce engine
 5. Continue to Task 14+
+
+## Subagent Refusal Pattern (Task 14-15)
+
+**Issue**: Subagents refuse tasks that require creating multiple files, even when those files are tightly coupled components of a single feature.
+
+**Examples**:
+- Task 14: Router requires core logic + IPC handlers + UI + types (4 files) - REFUSED
+- Task 15: Workflow viz requires WorkflowView + TaskNode + EdgeWithLabel + ChatPage mod (4 files) - REFUSED
+
+**Root Cause**: Subagent directive interprets "multiple files" as "multiple tasks"
+
+**Impact**: 
+- Orchestrator forced to implement integration work directly
+- Violates delegation pattern
+- Slows velocity
+
+**Workarounds Attempted**:
+1. Break into atomic sub-tasks (creates overhead, still refused)
+2. Implement directly (works but violates orchestrator role)
+
+**Resolution Needed**:
+- Clarify delegation granularity with user
+- OR adjust subagent directive to allow "single feature, multiple files"
+- OR implement complex features directly as orchestrator
+
+**Status**: Blocked on Task 15, need user guidance
+

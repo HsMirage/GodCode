@@ -25,6 +25,7 @@
     "@electron-toolkit/utils": "^3.0.0",
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^6.19.2",
+    "@xyflow/react": "^12.10.0",
     "clsx": "^2.1.0",
     "electron-updater": "^6.6.2",
     "embedded-postgres": "18.1.0-beta.15",

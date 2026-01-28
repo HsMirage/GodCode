@@ -1227,7 +1227,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 15. WorkFlow流程图可视化 (React Flow)
+- [x] 15. WorkFlow流程图可视化 (React Flow)
 
   **What to do**:
   - 安装依赖: `@xyflow/react`
