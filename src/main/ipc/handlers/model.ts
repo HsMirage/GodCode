@@ -1,50 +1,18 @@
 import { IpcMainInvokeEvent } from 'electron'
+import { Model as PrismaModel } from '@prisma/client'
 import { DatabaseService } from '../../services/database'
-import { Model } from '../../../types/domain'
+import { Model as DomainModel } from '../../../types/domain'
 
-type ModelCreateInput = Omit<Model, 'id'>
+type ModelCreateInput = Omit<DomainModel, 'id'>
 type ModelUpdateInput = {
-  id: Model['id']
-  data: Partial<Omit<Model, 'id'>>
-}
-
-const modelProviders: Model['provider'][] = [
-  'anthropic',
-  'openai',
-  'google',
-  'ollama',
-  'openai-compat'
-]
-
-function toModelProvider(provider: string): Model['provider'] {
-  if (modelProviders.includes(provider as Model['provider'])) {
-    return provider as Model['provider']
-  }
-  throw new Error(`Unsupported model provider: ${provider}`)
-}
-
-function toDomainModel(record: {
-  id: string
-  provider: string
-  modelName: string
-  apiKey: string | null
-  baseURL: string | null
-  config: unknown
-}): Model {
-  return {
-    id: record.id,
-    provider: toModelProvider(record.provider),
-    modelName: record.modelName,
-    apiKey: record.apiKey ?? undefined,
-    baseURL: record.baseURL ?? undefined,
-    config: record.config as Model['config']
-  }
+  id: DomainModel['id']
+  data: Partial<Omit<DomainModel, 'id'>>
 }
 
 export async function handleModelCreate(
   _event: IpcMainInvokeEvent,
   input: ModelCreateInput
-): Promise<Model> {
+): Promise<PrismaModel> {
   const prisma = DatabaseService.getInstance().getClient()
   const createdRecord = await prisma.model.create({
     data: {
@@ -55,19 +23,19 @@ export async function handleModelCreate(
       config: input.config
     }
   })
-  return toDomainModel(createdRecord)
+  return createdRecord
 }
 
-export async function handleModelList(_event: IpcMainInvokeEvent): Promise<Model[]> {
+export async function handleModelList(_event: IpcMainInvokeEvent): Promise<PrismaModel[]> {
   const prisma = DatabaseService.getInstance().getClient()
   const models = await prisma.model.findMany()
-  return models.map(toDomainModel)
+  return models
 }
 
 export async function handleModelUpdate(
   _event: IpcMainInvokeEvent,
   input: ModelUpdateInput
-): Promise<Model> {
+): Promise<PrismaModel> {
   const prisma = DatabaseService.getInstance().getClient()
   const { id, data } = input
 
@@ -78,14 +46,14 @@ export async function handleModelUpdate(
       config: data.config ?? undefined
     }
   })
-  return toDomainModel(updatedRecord)
+  return updatedRecord
 }
 
 export async function handleModelDelete(
   _event: IpcMainInvokeEvent,
-  id: Model['id']
-): Promise<Model> {
+  id: DomainModel['id']
+): Promise<PrismaModel> {
   const prisma = DatabaseService.getInstance().getClient()
   const deletedRecord = await prisma.model.delete({ where: { id } })
-  return toDomainModel(deletedRecord)
+  return deletedRecord
 }

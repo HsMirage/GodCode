@@ -129,7 +129,7 @@ export interface Agent {
  */
 export interface Model {
   id: string;
-  provider: "anthropic" | "openai" | "google" | "ollama" | "openai-compat";
+  provider: string;
   /** claude-3-5-sonnet, gpt-4, etc. */
   modelName: string;
   /** Encrypted storage */
