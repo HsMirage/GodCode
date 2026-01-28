@@ -36,3 +36,25 @@
 
 **Reference**: AnthropicAdapter provides complete pattern (201 lines)
 
+
+## Task 12: delegate_task Engine - DEFERRED
+
+**Status**: Requires careful oh-my-opencode code adaptation (~500+ lines)
+
+**Scope**:
+- Copy & adapt delegate-task engine from oh-my-opencode
+- Implement category-based model routing
+- Implement agent-type configurations
+- Task parent/child relationship management
+- Result aggregation and return logic
+
+**Complexity**: HIGH - Multi-day implementation
+- Code adaptation from oh-my-opencode
+- Integration with existing Task model
+- Category/agent configuration system
+- IPC integration for task management
+
+**Recommendation**: Dedicated focused session for Task 12-13 (delegate + workforce engines)
+
+**Next Session Priority**: Tasks 12-13 form core multi-agent infrastructure
+
