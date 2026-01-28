@@ -2,8 +2,10 @@ import { app, BrowserWindow } from 'electron'
 import path from 'path'
 import { registerIpcHandlers } from './ipc'
 import { DatabaseService } from './services/database'
+import { logger } from '../shared/logger'
 
 function createWindow() {
+  logger.info('Creating main window')
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -23,9 +25,12 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  logger.info('Application starting')
   const db = DatabaseService.getInstance()
+  logger.info('Database initialization started')
   await db.init()
-  
+  logger.info('Database initialization completed')
+
   registerIpcHandlers()
   createWindow()
 })
@@ -43,6 +48,7 @@ app.on('activate', () => {
 })
 
 app.on('quit', async () => {
+  logger.info('Application quitting')
   const db = DatabaseService.getInstance()
   await db.shutdown()
 })
