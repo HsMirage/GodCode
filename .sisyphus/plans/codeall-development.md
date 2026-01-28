@@ -731,7 +731,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 6. LLM适配器 (Claude优先,统一接口)
+- [x] 6. LLM适配器 (Claude优先,统一接口)
 
   **What to do**:
   - 安装依赖: `@anthropic-ai/sdk`

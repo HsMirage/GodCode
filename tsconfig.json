@@ -15,6 +15,7 @@
     "allowSyntheticDefaultImports": true,
     "baseUrl": ".",
     "paths": {
+      "@/*": ["src/*"],
       "@main/*": ["src/main/*"],
       "@renderer/*": ["src/renderer/*"],
       "@shared/*": ["src/shared/*"],
