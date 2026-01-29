@@ -13,7 +13,7 @@ type MessageSendInput = {
 }
 
 const toDomainMessages = (messages: PrismaMessage[]): DomainMessage[] =>
-  messages.map((message) => ({
+  messages.map(message => ({
     id: message.id,
     sessionId: message.sessionId,
     role: message.role as DomainMessage['role'],
@@ -37,12 +37,14 @@ export async function handleMessageSend(
   const prisma = DatabaseService.getInstance().getClient()
   const logger = LoggerService.getInstance().getLogger()
 
-  const userMessage = await prisma.message.create({
-    data: {
-      sessionId: input.sessionId,
-      role: 'user',
-      content: input.content
-    }
+  const userMessage = await prisma.$transaction(async tx => {
+    return tx.message.create({
+      data: {
+        sessionId: input.sessionId,
+        role: 'user',
+        content: input.content
+      }
+    })
   })
 
   const model = await prisma.model.findFirst({ orderBy: { createdAt: 'desc' } })
@@ -84,12 +86,14 @@ export async function handleMessageSend(
     throw error
   }
 
-  const assistantMessage = await prisma.message.create({
-    data: {
-      sessionId: userMessage.sessionId,
-      role: 'assistant',
-      content: assistantContent
-    }
+  const assistantMessage = await prisma.$transaction(async tx => {
+    return tx.message.create({
+      data: {
+        sessionId: userMessage.sessionId,
+        role: 'assistant',
+        content: assistantContent
+      }
+    })
   })
 
   costTracker.trackUsage(model.provider, 0, 0)

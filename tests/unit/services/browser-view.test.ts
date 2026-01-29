@@ -137,4 +137,26 @@ describe('BrowserViewManager', () => {
     await browserViewManager.navigate(viewId, 'google.com')
     expect(wc!.loadURL).toHaveBeenCalledWith('https://google.com')
   })
+
+  it('should enforce maximum tab limit (FIFO)', async () => {
+    for (let i = 1; i <= 5; i++) {
+      await browserViewManager.create(`view-${i}`)
+    }
+
+    await browserViewManager.create('view-6')
+
+    const state1 = browserViewManager.getState('view-1')
+    expect(state1).toBeNull()
+
+    for (let i = 2; i <= 6; i++) {
+      const state = browserViewManager.getState(`view-${i}`)
+      expect(state).toBeDefined()
+    }
+
+    let count = 0
+    for (let i = 1; i <= 6; i++) {
+      if (browserViewManager.getState(`view-${i}`)) count++
+    }
+    expect(count).toBe(5)
+  })
 })

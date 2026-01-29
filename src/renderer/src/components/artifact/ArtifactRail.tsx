@@ -23,7 +23,8 @@ export const ArtifactRail: React.FC<ArtifactRailProps> = ({ sessionId, className
     try {
       setLoading(true)
       setError(null)
-      const result = await window.codeall.invoke('artifact:list', sessionId)
+      // Pass false to lazy load content (exclude content field)
+      const result = await window.codeall.invoke('artifact:list', sessionId, false)
       if (Array.isArray(result)) {
         setArtifacts(result)
       } else {
@@ -41,6 +42,22 @@ export const ArtifactRail: React.FC<ArtifactRailProps> = ({ sessionId, className
   useEffect(() => {
     fetchArtifacts()
   }, [fetchArtifacts])
+
+  const handleArtifactSelect = async (artifact: Artifact) => {
+    try {
+      if (artifact.content) {
+        setSelectedArtifact(artifact)
+        return
+      }
+
+      const fullArtifact = (await window.codeall.invoke('artifact:get', artifact.id)) as Artifact
+      setSelectedArtifact(fullArtifact)
+
+      setArtifacts(prev => prev.map(a => (a.id === artifact.id ? fullArtifact : a)))
+    } catch (err) {
+      console.error('Failed to load artifact content:', err)
+    }
+  }
 
   const handleCopy = async () => {
     if (!selectedArtifact?.content) return
@@ -127,7 +144,7 @@ export const ArtifactRail: React.FC<ArtifactRailProps> = ({ sessionId, className
             </button>
           </div>
         ) : (
-          <FileTree artifacts={artifacts} onFileClick={setSelectedArtifact} className="h-full" />
+          <FileTree artifacts={artifacts} onFileClick={handleArtifactSelect} className="h-full" />
         )}
       </div>
 

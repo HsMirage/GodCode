@@ -126,14 +126,16 @@ Only return the JSON, no other text.`
   ): Promise<WorkflowResult> {
     const session = await this.getOrCreateDefaultSession()
 
-    const workflow = await this.prisma.task.create({
-      data: {
-        sessionId: session.id,
-        type: 'workflow',
-        input,
-        status: 'running',
-        metadata: { category }
-      }
+    const workflow = await this.prisma.$transaction(async tx => {
+      return tx.task.create({
+        data: {
+          sessionId: session.id,
+          type: 'workflow',
+          input,
+          status: 'running',
+          metadata: { category }
+        }
+      })
     })
 
     this.logger.info('Executing workflow', { workflowId: workflow.id, input })

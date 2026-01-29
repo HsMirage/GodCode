@@ -53,17 +53,53 @@ export function registerArtifactHandlers(): void {
   })
 
   // 3. artifact:list
-  ipcMain.handle('artifact:list', async (_, sessionId: string) => {
+  ipcMain.handle('artifact:list', async (_, sessionId: string, includeContent = false) => {
     try {
       const db = DatabaseService.getInstance().getClient()
+      const select = includeContent
+        ? undefined
+        : {
+            id: true,
+            sessionId: true,
+            taskId: true,
+            type: true,
+            path: true,
+            size: true,
+            createdAt: true,
+            updatedAt: true,
+            content: false
+          }
+
+      // @ts-ignore - Prisma select type inference can be tricky with dynamic objects
       const artifacts = await db.artifact.findMany({
         where: { sessionId },
+        // @ts-ignore
+        select: select,
         orderBy: { createdAt: 'asc' }
       })
       return artifacts
     } catch (error) {
       console.error('Failed to list artifacts:', error)
       return []
+    }
+  })
+
+  // 4. artifact:get
+  ipcMain.handle('artifact:get', async (_, artifactId: string) => {
+    try {
+      const db = DatabaseService.getInstance().getClient()
+      const artifact = await db.artifact.findUnique({
+        where: { id: artifactId }
+      })
+
+      if (!artifact) {
+        throw new Error(`Artifact not found: ${artifactId}`)
+      }
+
+      return artifact
+    } catch (error) {
+      console.error(`Failed to get artifact ${artifactId}:`, error)
+      throw error
     }
   })
 }

@@ -46,6 +46,7 @@ class BrowserViewManager {
   private activeViewId: string | null = null
   private stateChangeDebounceTimers: Map<string, NodeJS.Timeout> = new Map()
   private static readonly STATE_CHANGE_DEBOUNCE_MS = 50
+  private static readonly MAX_TABS = 5
 
   initialize(mainWindow: BrowserWindow) {
     this.mainWindow = mainWindow
@@ -58,6 +59,13 @@ class BrowserViewManager {
   async create(viewId: string, url?: string): Promise<BrowserViewState> {
     if (this.views.has(viewId)) {
       return this.states.get(viewId)!
+    }
+
+    if (this.views.size >= BrowserViewManager.MAX_TABS) {
+      const oldestViewId = this.views.keys().next().value
+      if (oldestViewId) {
+        this.destroy(oldestViewId)
+      }
     }
 
     const view = new BrowserView({

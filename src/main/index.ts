@@ -4,6 +4,16 @@ import { registerIpcHandlers } from './ipc'
 import { DatabaseService } from './services/database'
 import { logger } from '../shared/logger'
 
+process.on('uncaughtException', error => {
+  console.error('[Main] Uncaught Exception:', error)
+  logger.error('[Main] Uncaught Exception:', error)
+})
+
+process.on('unhandledRejection', reason => {
+  console.error('[Main] Unhandled Rejection:', reason)
+  logger.error('[Main] Unhandled Rejection:', reason)
+})
+
 function createWindow() {
   logger.info('Creating main window')
   const mainWindow = new BrowserWindow({
@@ -49,8 +59,30 @@ app.on('activate', () => {
   }
 })
 
-app.on('quit', async () => {
-  logger.info('Application quitting')
-  const db = DatabaseService.getInstance()
-  await db.shutdown()
+app.on('will-quit', async event => {
+  logger.info('[Main] Resource cleanup started')
+
+  // Clean up BrowserViews
+  try {
+    const { browserViewManager } = await import('./services/browser-view.service')
+    browserViewManager.destroyAll()
+    logger.info('[Main] BrowserViews destroyed')
+  } catch (error) {
+    logger.error('[Main] Failed to destroy BrowserViews:', error)
+  }
+
+  // Clean up Database
+  try {
+    const db = DatabaseService.getInstance()
+    await db.shutdown()
+    logger.info('[Main] Database shutdown complete')
+  } catch (error) {
+    logger.error('[Main] Failed to shutdown database:', error)
+  }
+
+  logger.info('[Main] Resource cleanup complete')
+})
+
+app.on('quit', () => {
+  logger.info('Application quit')
 })
