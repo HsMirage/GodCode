@@ -75,7 +75,7 @@ const createDelegate = (modelName: string) => ({
       items = items.filter((item: any) =>
         Object.entries(where).every(([k, v]) => {
           if (v && typeof v === 'object' && 'in' in v) {
-            return v.in.includes(item[k])
+            return (v as { in: unknown[] }).in.includes(item[k])
           }
           return item[k] === v
         })
