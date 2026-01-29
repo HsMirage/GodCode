@@ -9,6 +9,19 @@ vi.mock('electron', () => ({
   }
 }))
 
+vi.mock('winston-daily-rotate-file', () => {
+  const TransportStream = require('winston-transport')
+  class MockDailyRotateFile extends TransportStream {
+    constructor(opts: any) {
+      super(opts)
+    }
+    log(info: any, callback: () => void) {
+      callback()
+    }
+  }
+  return { default: MockDailyRotateFile }
+})
+
 import { app } from 'electron'
 import { LoggerService } from '@/main/services/logger'
 
@@ -24,16 +37,6 @@ describe('LoggerService', () => {
     fs.mkdirSync(path.join(testLogDir, 'logs'), { recursive: true })
 
     vi.mocked(app.getPath).mockReturnValue(testLogDir)
-
-    vi.mock('winston-daily-rotate-file', () => {
-      return {
-        default: class MockDailyRotateFile {
-          constructor() {}
-          log = vi.fn()
-          on = vi.fn()
-        }
-      }
-    })
 
     logger = LoggerService.getInstance()
   })
