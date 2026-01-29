@@ -1,11 +1,57 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import path from 'path'
+import os from 'os'
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn(() => path.join(os.tmpdir(), `test-db-${Date.now()}`))
+  }
+}))
+
+vi.mock('embedded-postgres', () => ({
+  default: class MockEmbeddedPostgres {
+    constructor() {}
+    initialise = vi.fn().mockResolvedValue(undefined)
+    start = vi.fn().mockResolvedValue(undefined)
+    stop = vi.fn().mockResolvedValue(undefined)
+  }
+}))
+
+vi.mock('@prisma/client', () => ({
+  PrismaClient: class MockPrismaClient {
+    $connect = vi.fn().mockResolvedValue(undefined)
+    $disconnect = vi.fn().mockResolvedValue(undefined)
+    model = {
+      create: vi.fn().mockImplementation(args =>
+        Promise.resolve({
+          id: '1',
+          ...args.data
+        })
+      ),
+      findUnique: vi.fn().mockResolvedValue({
+        id: '1',
+        modelName: 'Test Model',
+        provider: 'anthropic',
+        apiKey: 'test-key-12345',
+        config: { temperature: 0.7 }
+      }),
+      delete: vi.fn().mockResolvedValue({ id: '1' })
+    }
+    session = {}
+  }
+}))
+
 import { DatabaseService } from '@/main/services/database'
 
 describe('DatabaseService', () => {
   let db: DatabaseService
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // @ts-ignore
+    DatabaseService.instance = undefined
+
     db = DatabaseService.getInstance()
+    await db.init()
   })
 
   it('should be a singleton', () => {
@@ -25,7 +71,7 @@ describe('DatabaseService', () => {
 
     const model = await client.model.create({
       data: {
-        name: 'Test Model',
+        modelName: 'Test Model',
         provider: 'anthropic',
         apiKey: 'test-key-12345',
         config: { temperature: 0.7 }
@@ -33,7 +79,7 @@ describe('DatabaseService', () => {
     })
 
     expect(model.id).toBeDefined()
-    expect(model.name).toBe('Test Model')
+    expect(model.modelName).toBe('Test Model')
     expect(model.provider).toBe('anthropic')
 
     const retrieved = await client.model.findUnique({
@@ -41,7 +87,7 @@ describe('DatabaseService', () => {
     })
 
     expect(retrieved).toBeDefined()
-    expect(retrieved?.name).toBe('Test Model')
+    expect(retrieved?.modelName).toBe('Test Model')
 
     await client.model.delete({ where: { id: model.id } })
   })
@@ -52,7 +98,7 @@ describe('DatabaseService', () => {
     const promises = Array.from({ length: 5 }, (_, i) =>
       client.model.create({
         data: {
-          name: `Model ${i}`,
+          modelName: `Model ${i}`,
           provider: 'openai',
           apiKey: `key-${i}`
         }

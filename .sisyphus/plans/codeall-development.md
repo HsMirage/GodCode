@@ -183,19 +183,19 @@
 
 ### Reference Projects License Check
 
-| 项目               | License  | 复用策略                | 合规要求              |
-| ------------------ | -------- | ----------------------- | --------------------- |
-| **oh-my-opencode** | [需确认] | 复制核心机制代码        | 保留版权声明,注明来源 |
-| **eigent**         | [需确认] | 复制Workforce相关代码   | 保留版权声明,注明来源 |
-| **ccg-workflow**   | [需确认] | 参考路由思想,重写代码   | 无 (仅借鉴)           |
-| **moltbot**        | [需确认] | 复制Subagent机制代码    | 保留版权声明,注明来源 |
-| **hello-halo**     | [需确认] | 复制BrowserView集成代码 | 保留版权声明,注明来源 |
+| 项目               | License        | 复用策略                | 合规要求                                |
+| ------------------ | -------------- | ----------------------- | --------------------------------------- |
+| **oh-my-opencode** | SUL-1.0 (受限) | 复制核心机制代码        | ⚠️ 仅限内部业务/非商业用途,保留版权声明 |
+| **eigent**         | Apache-2.0     | 复制Workforce相关代码   | 保留版权声明,注明来源,包含NOTICE文件    |
+| **ccg-workflow**   | MIT            | 参考路由思想,重写代码   | 保留版权声明,注明来源                   |
+| **moltbot**        | MIT            | 复制Subagent机制代码    | 保留版权声明,注明来源                   |
+| **hello-halo**     | MIT            | 复制BrowserView集成代码 | 保留版权声明,注明来源                   |
 
 **行动项**:
 
-- [ ] 0.1 检查5个项目的LICENSE文件
-- [ ] 0.2 确认MIT/Apache-2.0兼容性
-- [ ] 0.3 在CodeAll的README.md添加"Acknowledgments"章节
+- [x] 0.1 检查5个项目的LICENSE文件
+- [x] 0.2 确认MIT/Apache-2.0兼容性
+- [x] 0.3 在CodeAll的README.md添加"Acknowledgments"章节
 - [ ] 0.4 在复制的源文件头部添加原始版权声明
 
 **CodeAll项目License**: MIT (建议,与常见开源项目兼容)
@@ -647,7 +647,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 4. 基础UI框架 (React + TailwindCSS + 配置面板)
+- [x] 4. 基础UI框架 (React + TailwindCSS + 配置面板)
 
   **What to do**:
   - 安装依赖: `react-router-dom`, `tailwindcss`, `zustand`, `lucide-react`
@@ -701,7 +701,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 5. 日志系统 (Winston结构化日志)
+- [x] 5. 日志系统 (Winston结构化日志)
 
   **What to do**:
   - 安装依赖: `winston`, `winston-daily-rotate-file`
@@ -857,7 +857,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 8. Artifact预览 (代码/文本简单显示)
+- [x] 8. Artifact预览 (代码/文本简单显示)
 
   **What to do**:
   - 创建 `src/renderer/components/artifact/`:
@@ -1276,7 +1276,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 16. MVP2单元测试与集成测试
+- [x] 16. MVP2单元测试与集成测试
 
   **What to do**:
   - 编写单元测试:

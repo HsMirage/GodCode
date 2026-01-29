@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { AnthropicAdapter } from '@/main/services/llm/anthropic.adapter'
 import Anthropic from '@anthropic-ai/sdk'
 
-vi.mock('@anthropic-ai/sdk')
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: class MockAnthropic {
+    messages = {
+      stream: vi.fn()
+    }
+  }
+}))
 
 describe('AnthropicAdapter', () => {
   let adapter: AnthropicAdapter
@@ -29,15 +35,20 @@ describe('AnthropicAdapter', () => {
       }
     }
 
-    vi.spyOn(Anthropic.prototype.messages, 'stream').mockReturnValue(mockStream as any)
+    // @ts-ignore
+    adapter.client.messages.stream.mockReturnValue(mockStream)
 
-    const messages = [{ role: 'user' as const, content: 'Test message' }]
+    const messages: any[] = [
+      { role: 'user', content: 'Test message', id: '1', sessionId: '1', createdAt: new Date() }
+    ]
 
     const chunks: string[] = []
-    for await (const chunk of adapter.streamResponse(messages, {
+    for await (const chunk of adapter.streamMessage(messages as any, {
       model: 'claude-3-5-sonnet-20241022'
     })) {
-      chunks.push(chunk)
+      if (chunk.content) {
+        chunks.push(chunk.content)
+      }
     }
 
     expect(chunks).toEqual(['Hello', ' World'])
@@ -59,15 +70,20 @@ describe('AnthropicAdapter', () => {
       }
     }
 
-    vi.spyOn(Anthropic.prototype.messages, 'stream').mockReturnValue(mockStreamFail as any)
+    // @ts-ignore
+    adapter.client.messages.stream.mockReturnValue(mockStreamFail)
 
-    const messages = [{ role: 'user' as const, content: 'Test' }]
+    const messages: any[] = [
+      { role: 'user', content: 'Test', id: '1', sessionId: '1', createdAt: new Date() }
+    ]
 
     const chunks: string[] = []
-    for await (const chunk of adapter.streamResponse(messages, {
+    for await (const chunk of adapter.streamMessage(messages as any, {
       model: 'claude-3-5-sonnet-20241022'
     })) {
-      chunks.push(chunk)
+      if (chunk.content) {
+        chunks.push(chunk.content)
+      }
     }
 
     expect(attemptCount).toBe(3)

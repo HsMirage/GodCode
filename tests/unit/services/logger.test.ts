@@ -1,16 +1,40 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { LoggerService } from '@/main/services/logger'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn(() => path.join(os.tmpdir(), `test-logs-${Date.now()}`))
+  }
+}))
+
+import { app } from 'electron'
+import { LoggerService } from '@/main/services/logger'
 
 describe('LoggerService', () => {
   let logger: LoggerService
   let testLogDir: string
 
   beforeEach(() => {
+    // @ts-ignore
+    LoggerService.instance = undefined
     testLogDir = path.join(os.tmpdir(), `test-logs-${Date.now()}`)
-    process.env.LOG_DIR = testLogDir
+
+    fs.mkdirSync(path.join(testLogDir, 'logs'), { recursive: true })
+
+    vi.mocked(app.getPath).mockReturnValue(testLogDir)
+
+    vi.mock('winston-daily-rotate-file', () => {
+      return {
+        default: class MockDailyRotateFile {
+          constructor() {}
+          log = vi.fn()
+          on = vi.fn()
+        }
+      }
+    })
+
     logger = LoggerService.getInstance()
   })
 
