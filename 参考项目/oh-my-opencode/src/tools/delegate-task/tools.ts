@@ -287,7 +287,11 @@ Prompts MUST be in English.`
         resolvedParentAgent: parentAgent,
       })
       const parentModel = prevMessage?.model?.providerID && prevMessage?.model?.modelID
-        ? { providerID: prevMessage.model.providerID, modelID: prevMessage.model.modelID }
+        ? { 
+            providerID: prevMessage.model.providerID, 
+            modelID: prevMessage.model.modelID,
+            ...(prevMessage.model.variant ? { variant: prevMessage.model.variant } : {})
+          }
         : undefined
 
       if (args.session_id) {
@@ -567,7 +571,7 @@ To continue this session: session_id="${args.session_id}"`
              modelInfo = { model: actualModel, type, source }
              
              const parsedModel = parseModelString(actualModel)
-             const variantToUse = userCategories?.[args.category]?.variant ?? resolvedVariant
+             const variantToUse = userCategories?.[args.category]?.variant ?? resolvedVariant ?? resolved.config.variant
              categoryModel = parsedModel
                ? (variantToUse ? { ...parsedModel, variant: variantToUse } : parsedModel)
                : undefined
@@ -780,7 +784,7 @@ Create the work plan directly - that's your job as the planning agent.`
         // Uses case-insensitive matching to allow "Oracle", "oracle", "ORACLE" etc.
         try {
           const agentsResult = await client.app.agents()
-          type AgentInfo = { name: string; mode?: "subagent" | "primary" | "all" }
+          type AgentInfo = { name: string; mode?: "subagent" | "primary" | "all"; model?: { providerID: string; modelID: string } }
           const agents = (agentsResult as { data?: AgentInfo[] }).data ?? agentsResult as unknown as AgentInfo[]
 
           const callableAgents = agents.filter((a) => a.mode !== "primary")
@@ -803,8 +807,23 @@ Create the work plan directly - that's your job as the planning agent.`
           }
           // Use the canonical agent name from registration
           agentToUse = matchedAgent.name
+
+          // Extract registered agent's model to pass explicitly to session.prompt.
+          // This ensures the model is always in the correct object format ({providerID, modelID})
+          // regardless of how OpenCode handles string→object conversion for plugin-registered agents.
+          // See: https://github.com/code-yeongyu/oh-my-opencode/issues/1225
+          if (matchedAgent.model) {
+            categoryModel = matchedAgent.model
+          }
         } catch {
           // If we can't fetch agents, proceed anyway - the session.prompt will fail with a clearer error
+        }
+
+        // When using subagent_type directly, inherit parent model so agents don't default
+        // to their hardcoded models (like grok-code) which may not be available
+        if (parentModel) {
+          categoryModel = parentModel
+          modelInfo = { model: `${parentModel.providerID}/${parentModel.modelID}`, type: "inherited" }
         }
       }
 
