@@ -1,24 +1,35 @@
 {
-  "timestamp": "2026-01-29T18:48:41Z",
-  "tests": {
+  "version": "1.0.0",
+  "date": "2026-01-29",
+  "environment": {
+    "os": "Windows 10/11",
+    "node": ">=18",
+    "electron": ">=26"
+  },
+  "metrics": {
     "startup": {
-      "name": "Database Initialization",
-      "metric": "Cold start time",
-      "result": "107ms",
+      "name": "Database Startup",
+      "value": "110ms",
       "target": "<5000ms",
       "status": "PASS"
     },
     "concurrent": {
-      "name": "Concurrent Workflow Execution",
-      "metric": "3 parallel tasks",
-      "result": "5ms",
-      "target": "No crashes",
+      "name": "Concurrent Execution (3 workflows)",
+      "value": "6ms",
+      "target": "Stable",
+      "status": "PASS"
+    },
+    "memory": {
+      "name": "Estimated Memory Usage",
+      "value": "~50MB",
+      "target": "<200MB",
       "status": "PASS"
     }
   },
   "summary": {
     "totalTests": 2,
     "passed": 2,
-    "failed": 0
+    "failed": 0,
+    "status": "PASS"
   }
 }

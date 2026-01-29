@@ -25,3 +25,30 @@
 ---
 
 _Added after Task 25 completion_
+
+# Learnings from Copyright Header Implementation
+
+## License Attribution Pattern
+
+We successfully added copyright headers to source files copied from other open-source projects.
+The pattern used:
+
+1. Identify source project and license
+2. Create standard header block with:
+   - `@license` tag
+   - Original copyright holder
+   - Source URL
+   - License name (SUL-1.0, Apache-2.0, MIT)
+   - Specific license text/summary
+   - Modification notice
+
+## Source Mapping
+
+- `src/main/services/delegate/*` -> oh-my-opencode (SUL-1.0)
+- `src/main/services/workforce/*` -> eigent (Apache-2.0)
+- `src/main/services/ai-browser/*` -> hello-halo (MIT)
+
+## Issues Encountered
+
+- `src/main/services/ai-browser/index.ts` had an existing header which caused a "multiple matches" error during edit. We appended the new header before the existing one by targeting the `/*` start of the file.
+- TypeScript verification passed (ignoring unrelated test file error `tests/integration/full-workflow.test.ts` which was pre-existing).
