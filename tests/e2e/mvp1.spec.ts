@@ -1,10 +1,14 @@
 import { test, expect, _electron as electron } from '@playwright/test'
 import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 test.describe('MVP1 End-to-End Tests', () => {
   test('should launch application successfully', async () => {
     const electronApp = await electron.launch({
-      args: [path.join(__dirname, '../../out/main/index.mjs')]
+      args: [path.join(__dirname, '../../out/main/index.js')]
     })
 
     const window = await electronApp.firstWindow()
@@ -18,7 +22,7 @@ test.describe('MVP1 End-to-End Tests', () => {
 
   test('should navigate to Settings page', async () => {
     const electronApp = await electron.launch({
-      args: [path.join(__dirname, '../../out/main/index.mjs')]
+      args: [path.join(__dirname, '../../out/main/index.js')]
     })
 
     const window = await electronApp.firstWindow()
@@ -38,7 +42,7 @@ test.describe('MVP1 End-to-End Tests', () => {
 
   test('should navigate to Chat page', async () => {
     const electronApp = await electron.launch({
-      args: [path.join(__dirname, '../../out/main/index.mjs')]
+      args: [path.join(__dirname, '../../out/main/index.js')]
     })
 
     const window = await electronApp.firstWindow()
