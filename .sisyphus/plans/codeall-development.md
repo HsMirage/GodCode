@@ -1333,7 +1333,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ### Phase 3: MVP3 - 浏览器集成 + 可视化增强 (5-7天)
 
-- [ ] 17. BrowserView内嵌浏览器 (hello-halo核心机制)
+- [x] 17. BrowserView内嵌浏览器 (hello-halo核心机制)
 
   **What to do**:
   - 从hello-halo复制BrowserView集成代码:
@@ -1383,7 +1383,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 18. AI Browser工具集 (MVP3限定3-6个核心工具)
+- [x] 18. AI Browser工具集 (MVP3限定3-6个核心工具)
 
   **What to do**:
   - 从hello-halo复制AI Browser核心代码:
@@ -1439,7 +1439,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 19. Space工作区系统
+- [x] 19. Space工作区系统
 
   **What to do**:
   - 实现Space管理:
@@ -1487,7 +1487,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 20. Artifact Rail增强 (文件树 + 多类型预览)
+- [x] 20. Artifact Rail增强 (文件树 + 多类型预览)
 
   **What to do**:
   - 增强Artifact Rail:
@@ -1548,7 +1548,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 21. MVP3单元测试与集成测试
+- [x] 21. MVP3单元测试与集成测试
 
   **What to do**:
   - 编写单元测试:
@@ -1598,7 +1598,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ### Phase 4: Final - 完整集成 + 打包 + 文档 (3-5天)
 
-- [ ] 22. 性能优化与稳定性加固
+- [x] 22. 性能优化与稳定性加固
 
   **What to do**:
   - 性能优化:
@@ -1645,7 +1645,7 @@ Phase 4: Final - 完整集成 + 打包 + 文档
 
 ---
 
-- [ ] 23. Windows打包 (electron-builder)
+- [x] 23. Windows打包 (electron-builder)
 
   **What to do**:
   - 安装依赖: `electron-builder`
