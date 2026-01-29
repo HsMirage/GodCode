@@ -1,0 +1,67 @@
+import { safeStorage } from 'electron'
+
+export class SecureStorageService {
+  private static instance: SecureStorageService | null = null
+
+  private constructor() {}
+
+  static getInstance(): SecureStorageService {
+    if (!SecureStorageService.instance) {
+      SecureStorageService.instance = new SecureStorageService()
+    }
+    return SecureStorageService.instance
+  }
+
+  isEncryptionAvailable(): boolean {
+    return safeStorage.isEncryptionAvailable()
+  }
+
+  encrypt(plaintext: string): string {
+    if (!plaintext) {
+      return ''
+    }
+
+    if (!this.isEncryptionAvailable()) {
+      console.warn('[SecureStorage] safeStorage is not available. Returning plaintext.')
+      return plaintext
+    }
+
+    try {
+      const buffer = safeStorage.encryptString(plaintext)
+      return buffer.toString('base64')
+    } catch (error) {
+      console.error('[SecureStorage] Encryption failed:', error)
+      throw new Error('Failed to encrypt data')
+    }
+  }
+
+  decrypt(ciphertext: string): string {
+    if (!ciphertext) {
+      return ''
+    }
+
+    if (!this.isEncryptionAvailable()) {
+      // If encryption is not available, we assume the data is plaintext
+      // This happens in dev mode or if safeStorage is disabled
+      return ciphertext
+    }
+
+    try {
+      const buffer = Buffer.from(ciphertext, 'base64')
+      return safeStorage.decryptString(buffer)
+    } catch (error) {
+      // If decryption fails, it might be plaintext (legacy data or dev mode fallback)
+      console.warn('[SecureStorage] Decryption failed, returning original text:', error)
+      return ciphertext
+    }
+  }
+}
+
+export function maskApiKey(key: string): string {
+  if (!key || key.length < 8) {
+    return '********'
+  }
+  const first3 = key.slice(0, 3)
+  const last4 = key.slice(-4)
+  return `${first3}...${last4}`
+}

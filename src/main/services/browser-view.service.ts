@@ -99,11 +99,16 @@ class BrowserViewManager {
     this.bindEvents(viewId, view)
 
     if (url) {
-      try {
-        await view.webContents.loadURL(url)
-      } catch (error) {
-        state.error = (error as Error).message
+      if (url.startsWith('file://')) {
+        state.error = 'file:// URLs are blocked for security'
         state.isLoading = false
+      } else {
+        try {
+          await view.webContents.loadURL(url)
+        } catch (error) {
+          state.error = (error as Error).message
+          state.isLoading = false
+        }
       }
     }
 
@@ -177,7 +182,17 @@ class BrowserViewManager {
     let url = input.trim()
     if (!url) return false
 
-    if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('file://')) {
+    // Block file:// URLs for security
+    if (url.startsWith('file://')) {
+      this.updateState(viewId, {
+        error: 'file:// URLs are blocked for security',
+        isLoading: false
+      })
+      this.emitStateChange(viewId)
+      return false
+    }
+
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
       if (url.includes('.') && !url.includes(' ') && this.looksLikeDomain(url)) {
         url = 'https://' + url
       } else {
@@ -382,7 +397,11 @@ class BrowserViewManager {
     })
 
     wc.on('will-navigate', (event, url) => {
-      if (!url.startsWith('http://') && !url.startsWith('https://') && !url.startsWith('file://')) {
+      if (url.startsWith('file://')) {
+        event.preventDefault()
+        return
+      }
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
         event.preventDefault()
       }
     })

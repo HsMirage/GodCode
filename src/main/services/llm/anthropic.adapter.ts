@@ -3,7 +3,8 @@ import type {
   Message as AnthropicMessage,
   MessageCreateParams,
   MessageParam,
-  TextBlock
+  TextBlock,
+  ToolResultBlockParam
 } from '@anthropic-ai/sdk/resources/messages'
 import type { LLMAdapter, LLMChunk, LLMConfig, LLMResponse } from './adapter.interface'
 import type { Message } from '@/types/domain'
@@ -49,11 +50,6 @@ const extractContent = (response: AnthropicMessage): string => {
   return textBlocks.map(block => block.text).join('')
 }
 
-const extractUsage = (response: AnthropicMessage): LLMResponse['usage'] => ({
-  prompt_tokens: response.usage?.input_tokens ?? 0,
-  completion_tokens: response.usage?.output_tokens ?? 0
-})
-
 const createTimeoutController = () => {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS)
@@ -71,88 +67,120 @@ export class AnthropicAdapter implements LLMAdapter {
 
   async sendMessage(messages: Message[], config: LLMConfig): Promise<LLMResponse> {
     const system = getSystemPrompt(messages)
-    const anthropicMessages = toAnthropicMessages(messages)
+    let anthropicMessages = toAnthropicMessages(messages)
     const maxTokens = config.maxTokens ?? 1024
+    const maxToolIterations = 10
 
-    const params: MessageCreateParams = {
-      model: this.model,
-      max_tokens: maxTokens,
-      messages: anthropicMessages
-    }
+    let fullContent = ''
+    const totalUsage = { prompt_tokens: 0, completion_tokens: 0 }
 
-    if (system) {
-      params.system = system
-    }
-
-    if (config.temperature !== undefined) {
-      params.temperature = config.temperature
-    }
-
-    if (config.topP !== undefined) {
-      params.top_p = config.topP
-    }
-
-    if (config.stopSequences?.length) {
-      params.stop_sequences = config.stopSequences
-    }
-
-    const tools = allTools.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      input_schema: tool.parameters
-    }))
-
-    params.tools = tools
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
-      const { controller, timeoutId } = createTimeoutController()
-
-      try {
-        const response = await this.client.messages.create(params, {
-          signal: controller.signal
-        })
-
-        const content = extractContent(response)
-
-        const toolUseBlocks = response.content.filter(block => block.type === 'tool_use')
-
-        if (toolUseBlocks.length > 0) {
-          for (const toolBlock of toolUseBlocks) {
-            const tool = allTools.find(t => t.name === toolBlock.name)
-            if (tool) {
-              const viewId = 'default'
-              const webContents = browserViewManager.getWebContents(viewId)
-              const context = { viewId, webContents }
-
-              try {
-                const result = await tool.execute(toolBlock.input, context)
-                logger.info('Tool executed', { tool: toolBlock.name, result })
-              } catch (error) {
-                logger.error('Tool execution failed', { tool: toolBlock.name, error })
-              }
-            }
-          }
-        }
-
-        return {
-          content,
-          usage: extractUsage(response)
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        logger.error('Anthropic sendMessage failed', { attempt, error: message })
-
-        if (attempt === MAX_RETRIES) {
-          throw error
-        }
-
-        await sleep(BASE_DELAY_MS * Math.pow(2, attempt - 1))
-      } finally {
-        clearTimeout(timeoutId)
+    for (let iteration = 0; iteration < maxToolIterations; iteration++) {
+      const params: MessageCreateParams = {
+        model: this.model,
+        max_tokens: maxTokens,
+        messages: anthropicMessages,
+        tools: allTools.map(tool => ({
+          name: tool.name,
+          description: tool.description,
+          input_schema: tool.parameters
+        }))
       }
+
+      if (system) {
+        params.system = system
+      }
+
+      if (config.temperature !== undefined) {
+        params.temperature = config.temperature
+      }
+
+      if (config.topP !== undefined) {
+        params.top_p = config.topP
+      }
+
+      if (config.stopSequences?.length) {
+        params.stop_sequences = config.stopSequences
+      }
+
+      let response: AnthropicMessage | undefined
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
+        const { controller, timeoutId } = createTimeoutController()
+
+        try {
+          response = await this.client.messages.create(params, {
+            signal: controller.signal
+          })
+          break
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          logger.error('Anthropic sendMessage failed', { attempt, error: message })
+
+          if (attempt === MAX_RETRIES) {
+            throw error
+          }
+
+          await sleep(BASE_DELAY_MS * Math.pow(2, attempt - 1))
+        } finally {
+          clearTimeout(timeoutId)
+        }
+      }
+
+      if (!response) {
+        throw new Error('Anthropic sendMessage failed after retries')
+      }
+
+      totalUsage.prompt_tokens += response.usage?.input_tokens ?? 0
+      totalUsage.completion_tokens += response.usage?.output_tokens ?? 0
+
+      const textContent = extractContent(response)
+      fullContent += textContent
+
+      const toolUseBlocks = response.content.filter(block => block.type === 'tool_use')
+
+      if (toolUseBlocks.length === 0 || response.stop_reason !== 'tool_use') {
+        break
+      }
+
+      const toolResults: ToolResultBlockParam[] = []
+      for (const toolBlock of toolUseBlocks) {
+        const tool = allTools.find(t => t.name === toolBlock.name)
+        let result: string
+
+        if (tool) {
+          try {
+            const viewId = 'default'
+            const webContents = browserViewManager.getWebContents(viewId)
+            const context = { viewId, webContents }
+            const execResult = await tool.execute(toolBlock.input, context)
+            result = JSON.stringify(execResult)
+            logger.info('Tool executed', { tool: toolBlock.name, result })
+          } catch (error) {
+            result = JSON.stringify({ error: (error as Error).message })
+            logger.error('Tool execution failed', { tool: toolBlock.name, error })
+          }
+        } else {
+          result = JSON.stringify({ error: `Unknown tool: ${toolBlock.name}` })
+        }
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolBlock.id,
+          content: result
+        })
+      }
+
+      anthropicMessages = [
+        ...anthropicMessages,
+        { role: 'assistant', content: response.content },
+        { role: 'user', content: toolResults }
+      ]
     }
 
-    throw new Error('Anthropic sendMessage failed after retries')
+    return {
+      content: fullContent,
+      usage: totalUsage
+    }
   }
 
   async *streamMessage(messages: Message[], config: LLMConfig): AsyncGenerator<LLMChunk> {

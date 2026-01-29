@@ -5,11 +5,19 @@ import { DatabaseService } from '../../services/database'
 
 export function registerArtifactHandlers(): void {
   // 1. artifact:download
-  ipcMain.handle('artifact:download', async (_, artifactId: string, workDir: string) => {
+  ipcMain.handle('artifact:download', async (_, artifactId: string) => {
     try {
       const db = DatabaseService.getInstance().getClient()
+
       const artifact = await db.artifact.findUnique({
-        where: { id: artifactId }
+        where: { id: artifactId },
+        include: {
+          session: {
+            include: {
+              space: true
+            }
+          }
+        }
       })
 
       if (!artifact) {
@@ -19,6 +27,8 @@ export function registerArtifactHandlers(): void {
       if (!artifact.content) {
         throw new Error(`Artifact has no content: ${artifactId}`)
       }
+
+      const workDir = artifact.session.space.workDir
 
       const downloadsDir = path.join(workDir, '.codeall', 'downloads')
 
