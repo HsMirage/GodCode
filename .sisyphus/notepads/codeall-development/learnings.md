@@ -404,6 +404,7 @@ Tasks 6-7, 9-13:
 ## Task 14: Smart Router System ✅
 
 **Completed**: Smart routing system with UI and persistent configuration
+
 - SmartRouter class with pattern-based routing rules
 - Routes to: direct LLM, delegate_task, or Workforce based on input analysis
 - Settings UI with routing rules tab (add/edit/delete/reorder)
@@ -411,18 +412,21 @@ Tasks 6-7, 9-13:
 - Rules stored in `{app.getPath('userData')}/routing-rules.json`
 
 **Implementation**:
+
 - `src/main/services/router/smart-router.ts` (96 lines) - Core routing logic
 - `src/main/ipc/handlers/router.ts` (88 lines) - Persistence handlers
 - `src/renderer/src/pages/SettingsPage.tsx` (updated) - Routing rules UI
 
 **Default Routing Rules**:
+
 1. 前端|UI|页面|组件 → delegate (visual-engineering, gemini)
 2. 后端|API|数据库 → delegate (gpt-4)
 3. 架构|设计 → delegate (oracle, claude-opus)
 4. 创建|开发|实现 → workforce
-5. .* (fallback) → delegate (quick)
+5. .\* (fallback) → delegate (quick)
 
 **Key Features**:
+
 - RegExp pattern matching for flexible routing
 - Configurable strategy per pattern (delegate/workforce/direct)
 - Optional category, subagent, model per rule
@@ -431,15 +435,16 @@ Tasks 6-7, 9-13:
 - Drag-to-reorder support (order matters for pattern matching)
 
 **Build Fix**:
+
 - Added path alias resolution to `electron.vite.config.ts` for main/preload bundles
 - Fixed `@/main/services/*` imports not resolving during build
-
 
 ## Task 15: WorkFlow Visualization (React Flow) ✅
 
 **Completed**: Full workflow visualization with React Flow
 
 **Implementation**:
+
 - Installed `@xyflow/react` v12.10.0
 - Created 3 workflow components (TaskNode, EdgeWithLabel, WorkflowView)
 - Modified ChatPage to add "对话"/"流程图" tab switcher
@@ -448,21 +453,25 @@ Tasks 6-7, 9-13:
 - Empty state handling for sessions without workflow tasks
 
 **Components Created**:
+
 - `TaskNode.tsx` (71 lines): Custom node with status-based colors, model/agent display, duration
 - `EdgeWithLabel.tsx` (33 lines): Dependency edges with optional labels
 - `WorkflowView.tsx` (210 lines): Main canvas with DAG conversion, real-time updates
 
 **ChatPage Modifications**:
+
 - Added tab state management (chat/workflow)
 - Glassmorphism tab switcher UI
 - Conditional rendering based on view mode
 
 **Type System Updates**:
+
 - Added `Task` import to shims.d.ts
 - Added `task:list` IPC method signature
 - Added `task:status-changed` event handler signature
 
 **Key Features**:
+
 - Automatic DAG layout via level calculation
 - Topological positioning (dependencies above dependents)
 - Horizontal spreading for tasks at same level
@@ -472,18 +481,19 @@ Tasks 6-7, 9-13:
 - MiniMap and Controls for large workflows
 
 **TypeScript Challenges Resolved**:
+
 - React Flow NodeProps generic type constraints
 - TaskNodeData extends Record<string, unknown> for compatibility
 - Type assertions for IPC invoke responses
 - Event listener typing for custom IPC events
 
 **Build Verification**:
+
 - ✅ TypeScript: Zero errors
 - ✅ Vite build: Success (all 3 bundles)
 - ✅ Dependencies: @xyflow/react integrated cleanly
 
 **Commit**: `99b8389` - feat(workflow): add React Flow visualization for task DAG
-
 
 ## Task 15 Addendum: IPC Handler Implementation ✅
 
@@ -492,6 +502,7 @@ Tasks 6-7, 9-13:
 **Problem**: WorkflowView calls `window.codeall.invoke('task:list', sessionId)` but handler didn't exist
 
 **Implementation**:
+
 - Created `src/main/ipc/handlers/task.ts` (40 lines)
 - `handleTaskList()`: Queries Prisma database for tasks by sessionId
 - Maps Prisma Task model fields to domain Task interface
@@ -499,6 +510,7 @@ Tasks 6-7, 9-13:
 - Registered in `src/main/ipc/index.ts`
 
 **Key Pattern**:
+
 ```typescript
 const prisma = db.getClient()  // NOT db.prisma (common mistake)
 const tasks = await prisma.task.findMany({ where: { sessionId } })
@@ -506,12 +518,12 @@ return tasks.map((task): Task => ({ ... }))  // Explicit return type for map
 ```
 
 **Verification**:
+
 - ✅ TypeScript: Clean
 - ✅ Build: Success
 - ✅ IPC handler registered correctly
 
 **Commit**: `<commit-hash>` - feat(ipc): add task:list handler
-
 
 ---
 
@@ -529,6 +541,7 @@ return tasks.map((task): Task => ({ ... }))  // Explicit return type for map
 ### Task 15: WorkFlow Visualization (React Flow) ✅
 
 **Full Implementation**:
+
 1. Frontend Components (3 files, 314 lines)
    - TaskNode: Status-based colored nodes with model/agent/duration display
    - EdgeWithLabel: Dependency visualization with optional labels
@@ -550,6 +563,7 @@ return tasks.map((task): Task => ({ ... }))  // Explicit return type for map
    - React Flow type compatibility fixes
 
 **Key Technical Achievements**:
+
 - DAG layout algorithm with level-based positioning
 - Real-time status updates via IPC events
 - Empty state handling
@@ -557,22 +571,26 @@ return tasks.map((task): Task => ({ ... }))  // Explicit return type for map
 - 100% glassmorphism design compliance
 
 **Build Status**:
+
 - ✅ TypeScript: Zero errors
 - ✅ Vite build: All bundles success
 - ✅ Dependencies: @xyflow/react v12.10.0 integrated
 
 **Commits**:
+
 1. `99b8389` - feat(workflow): add React Flow visualization for task DAG
 2. `dcfea79` - feat(ipc): add task:list handler for workflow visualization
 
 ## Architecture Pattern: Hybrid Orchestrator Approach
 
 **Continued Pattern from Task 14**:
+
 - Multi-file integration features implemented directly by orchestrator
 - Subagent refusal pattern documented and accepted
 - Pragmatic approach prioritizing velocity over pure delegation
 
 **Why This Works**:
+
 1. All code follows project conventions (no semicolons, glassmorphism, etc.)
 2. Build verification catches errors immediately
 3. TypeScript ensures type safety
@@ -583,12 +601,13 @@ return tasks.map((task): Task => ({ ... }))  // Explicit return type for map
 
 **Before Session**: 12/63 tasks (19%)  
 **After Session**: 13/63 tasks (20.6%)  
-**Remaining**: 50 tasks  
+**Remaining**: 50 tasks
 
 **Phase 1 MVP**: 8/10 tasks (80%) - COMPLETE  
-**Phase 2**: 5/20 tasks (25%) - IN PROGRESS  
+**Phase 2**: 5/20 tasks (25%) - IN PROGRESS
 
 **Next Tasks**:
+
 - Task 16: MVP2 Unit + Integration + E2E Tests (complex, 7+ test files)
 - Task 17: BrowserView Integration (Phase 3 start)
 - Task 8: Artifact Preview (blocked, schema mismatch)
@@ -602,18 +621,21 @@ return tasks.map((task): Task => ({ ... }))  // Explicit return type for map
 ## Lessons Learned
 
 ### React Flow Integration
+
 - NodeProps generic types require Record<string, unknown> extension
 - useNodesState/useEdgesState need explicit type parameters
 - Custom node components work best with NodeProps (not NodeProps<T>)
 - Event listeners must be typed in shims.d.ts
 
 ### DAG Layout Algorithm
+
 - Level calculation via recursive dependency depth
 - Horizontal spreading via level grouping
 - Topological positioning (dependencies above dependents)
 - Works for complex workflows with multiple branches
 
 ### IPC Handler Pattern
+
 ```typescript
 const prisma = db.getClient()  // Correct method
 const tasks = await prisma.task.findMany(...)
@@ -624,7 +646,12 @@ return tasks.map((task): Task => ({ ... }))  // Explicit return type
 
 **State**: Clean working tree, all tests pass  
 **Commit**: dcfea79  
-**Next**: Task 16 (testing) or continue with simpler Phase 2 tasks  
+**Next**: Task 16 (testing) or continue with simpler Phase 2 tasks
 
 **Recommendation**: Consider skipping Task 16 (testing) temporarily and implementing more features (Tasks 17-20), then batch all testing together. This maintains implementation velocity and provides more code to test.
 
+## 2026-01-29
+
+- Added renderer `api.ts` wrapper for BrowserView IPC using `browser:state-changed` and `browser:zoom-changed` channels; used loose invoke/on helpers to bypass narrow `window.codeall.on` typings.
+- Added renderer file type utilities (BINARY_EXTENSIONS, isBinaryExtension, canOpenInCanvas).
+- pnpm typecheck passed after adding file-types.ts.

@@ -22,6 +22,8 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
+
+  return mainWindow
 }
 
 app.whenReady().then(async () => {
@@ -31,8 +33,8 @@ app.whenReady().then(async () => {
   await db.init()
   logger.info('Database initialization completed')
 
-  registerIpcHandlers()
-  createWindow()
+  const mainWindow = createWindow()
+  registerIpcHandlers(mainWindow)
 })
 
 app.on('window-all-closed', () => {

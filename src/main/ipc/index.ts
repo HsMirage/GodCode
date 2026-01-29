@@ -1,4 +1,5 @@
-import { ipcMain } from 'electron'
+import { ipcMain, type BrowserWindow } from 'electron'
+import { registerBrowserHandlers } from './handlers/browser'
 import {
   handleModelCreate,
   handleModelDelete,
@@ -16,12 +17,14 @@ import { handleMessageList, handleMessageSend } from './handlers/message'
 import { handleRouterGetRules, handleRouterSaveRules } from './handlers/router'
 import { handleTaskList } from './handlers/task'
 
-export function registerIpcHandlers(): void {
+export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('model:create', handleModelCreate)
   ipcMain.handle('model:list', handleModelList)
   ipcMain.handle('model:update', handleModelUpdate)
   ipcMain.handle('model:delete', handleModelDelete)
   ipcMain.handle('ping', handlePing)
+
+  registerBrowserHandlers(mainWindow)
 
   // Session handlers
   ipcMain.handle('session:create', handleSessionCreate)
