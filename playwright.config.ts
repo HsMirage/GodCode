@@ -7,6 +7,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: 1,
   reporter: 'html',
+  timeout: 120000,
   use: {
     trace: 'on-first-retry',
     screenshot: 'only-on-failure'

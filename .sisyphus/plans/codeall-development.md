@@ -105,7 +105,7 @@
 - [x] MVP2多LLM委派验证: 至少2个模型协同完成任务 _(Claude+GPT+Gemini适配器已实现)_
 - [x] MVP3浏览器验证: AI自动控制浏览器完成固定脚本 _(BrowserView+AI工具已实现)_
 - [x] 所有核心模块单测覆盖率≥70% _(81个测试通过,核心模块全覆盖)_
-- [ ] 至少3条E2E关键路径通过 _(E2E受环境限制阻塞,需安装系统依赖)_
+- [x] 至少3条E2E关键路径通过 _(2026-01-30: 3条MVP1路径通过 - launch/settings/chat导航)_
 - [x] 性能指标达标: 冷启动<5s, 单Run内存<500MB _(启动时间103ms,性能测试通过)_
 - [x] 代码符合项目规范 (ESLint/Prettier/TypeScript strict) _(ESLint 0错误,TypeScript编译通过)_
 - [x] 所有敏感操作有确认机制 _(分级确认机制已实现)_

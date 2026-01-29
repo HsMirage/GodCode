@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import path from 'path'
+import fs from 'fs'
 import { PrismaClient } from '@prisma/client'
 
 interface EmbeddedPostgresInstance {
@@ -28,6 +29,12 @@ export class DatabaseService {
     return DatabaseService.instance
   }
 
+  private isDbInitialized(): boolean {
+    // Check if PG_VERSION file exists - indicates initialized cluster
+    const pgVersionPath = path.join(this.dbPath, 'PG_VERSION')
+    return fs.existsSync(pgVersionPath)
+  }
+
   async init(): Promise<void> {
     if (this.isInitialized) {
       console.log('[Database] Already initialized')
@@ -49,7 +56,14 @@ export class DatabaseService {
         persistent: true
       })
 
-      await embeddedPostgres.initialise()
+      // Only initialize if database doesn't exist yet
+      if (!this.isDbInitialized()) {
+        console.log('[Database] First run - initializing database cluster...')
+        await embeddedPostgres.initialise()
+      } else {
+        console.log('[Database] Database cluster already exists, skipping init')
+      }
+
       await embeddedPostgres.start()
 
       const databaseUrl = `postgresql://codeall:codeall@localhost:54320/postgres`
