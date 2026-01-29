@@ -68,7 +68,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
       levelGroups.get(level)!.push(task)
     })
 
-    tasks.forEach((task, index) => {
+    tasks.forEach((task, _index) => {
       const level = taskLevels.get(task.id) || 0
       const levelTasks = levelGroups.get(level) || []
       const positionInLevel = levelTasks.indexOf(task)

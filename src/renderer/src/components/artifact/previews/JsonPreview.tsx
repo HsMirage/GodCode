@@ -1,4 +1,3 @@
-// @ts-ignore - no types for react-json-view
 import ReactJson from 'react-json-view'
 import React from 'react'
 

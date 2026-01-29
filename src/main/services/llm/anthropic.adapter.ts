@@ -125,7 +125,6 @@ export class AnthropicAdapter implements LLMAdapter {
               const context = { viewId, webContents }
 
               try {
-                // @ts-ignore - input type mismatch between SDK and internal tool definition
                 const result = await tool.execute(toolBlock.input, context)
                 logger.info('Tool executed', { tool: toolBlock.name, result })
               } catch (error) {

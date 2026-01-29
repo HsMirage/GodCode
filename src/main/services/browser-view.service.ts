@@ -293,7 +293,8 @@ class BrowserViewManager {
     }
 
     try {
-      ;(view.webContents as any).destroy()
+      const wc = view.webContents as any
+      wc.destroy()
     } catch (e) {
       // Already destroyed
     }

@@ -70,10 +70,8 @@ export function registerArtifactHandlers(): void {
             content: false
           }
 
-      // @ts-ignore - Prisma select type inference can be tricky with dynamic objects
       const artifacts = await db.artifact.findMany({
         where: { sessionId },
-        // @ts-ignore
         select: select,
         orderBy: { createdAt: 'asc' }
       })

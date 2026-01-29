@@ -59,7 +59,7 @@ app.on('activate', () => {
   }
 })
 
-app.on('will-quit', async event => {
+app.on('will-quit', async _event => {
   logger.info('[Main] Resource cleanup started')
 
   // Clean up BrowserViews

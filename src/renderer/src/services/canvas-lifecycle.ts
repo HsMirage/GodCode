@@ -303,7 +303,9 @@ class CanvasLifecycle {
     if (!title) {
       try {
         displayTitle = `🤖 ${new URL(url).hostname}`
-      } catch {}
+      } catch {
+        // Intentionally empty
+      }
     }
 
     const tabId = generateTabId()
