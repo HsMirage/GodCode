@@ -9,5 +9,5 @@ files:
   - package.json
 win:
   target: nsis
-  icon: resources/icon.ico
+  # icon: resources/icon.ico  # TODO: Add proper .ico file (must be ICO format, not SVG)
 publish: null

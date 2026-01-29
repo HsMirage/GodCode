@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Multi-LLM collaborative programming platform",
   "type": "module",
-  "main": "./out/main/index.mjs",
+  "main": "./out/main/index.js",
   "author": "CodeAll Team",
   "license": "MIT",
   "scripts": {
