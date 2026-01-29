@@ -2,7 +2,7 @@ declare module '../../types/domain' {
   export * from '../../../types/domain'
 }
 
-import type { Session, Message, Model, Task } from '../../types/domain'
+import type { Session, Message, Model, Task, Artifact } from '../../types/domain'
 
 interface RoutingRule {
   pattern: string
@@ -33,6 +33,16 @@ interface CodeAllAPI {
   invoke(channel: 'router:get-rules'): Promise<RoutingRule[]>
   invoke(channel: 'router:save-rules', rules: RoutingRule[]): Promise<void>
   invoke(channel: 'task:list', sessionId: string): Promise<Task[]>
+  invoke(channel: 'artifact:list', sessionId: string): Promise<Artifact[]>
+  invoke(
+    channel: 'artifact:download',
+    artifactId: string,
+    workDir: string
+  ): Promise<{ success: boolean; data?: { filePath: string }; error?: string }>
+  invoke(
+    channel: 'artifact:delete',
+    artifactId: string
+  ): Promise<{ success: boolean; error?: string }>
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
   on(
     channel: 'message:stream-chunk',

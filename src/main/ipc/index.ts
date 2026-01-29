@@ -17,6 +17,7 @@ import { handleMessageList, handleMessageSend } from './handlers/message'
 import { handleRouterGetRules, handleRouterSaveRules } from './handlers/router'
 import { handleTaskList } from './handlers/task'
 import { registerSpaceHandlers } from './handlers/space'
+import { registerArtifactHandlers } from './handlers/artifact'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('model:create', handleModelCreate)
@@ -46,4 +47,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
 
   // Space handlers
   registerSpaceHandlers()
+
+  // Artifact handlers
+  registerArtifactHandlers()
 }
