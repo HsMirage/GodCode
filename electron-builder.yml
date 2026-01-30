@@ -8,6 +8,11 @@ files:
   - prisma/**/*
   - node_modules/**/*
   - package.json
+asarUnpack:
+  - '**/node_modules/@embedded-postgres/**/*'
+  - '**/node_modules/embedded-postgres/**/*'
+  - '**/node_modules/.prisma/client/*.node'
+  - '**/*.node'
 win:
   target:
     - target: nsis
@@ -17,5 +22,8 @@ win:
       arch:
         - x64
   icon: resources/icon.ico
+  signingHashAlgorithms:
+    - sha256
   sign: null # Skip code signing for development builds
+  signDlls: false
 publish: null
