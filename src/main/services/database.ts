@@ -3,8 +3,34 @@ import path from 'path'
 import fs from 'fs'
 import net from 'net'
 import { spawn, ChildProcess } from 'child_process'
+import { killPostgresProcesses } from '@/main/services/process-utils'
+
+// Exported for testing - allows mocking in tests
+// Using an object so that internal calls can be mocked by vitest
+export const dbUtils = {
+  sleepFn: (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// Re-export for backward compatibility with tests
+export const sleepFn = dbUtils.sleepFn
 
 const INIT_TIMEOUT_MS = 120000 // 120 seconds for first-time initialization on slow systems
+
+/**
+ * Determine if an error should NOT be retried.
+ * ENOENT/EACCES or specific stderr messages indicate unrecoverable errors.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function shouldNotRetry(error: any): boolean {
+  // ENOENT/EACCES errors should fail immediately
+  if (error.code === 'ENOENT' || error.code === 'EACCES') return true
+
+  // Check stderr for specific failure patterns
+  const message = error.message || ''
+  if (message.includes('already exists') || message.includes('permission denied')) return true
+
+  return false // Other errors allow retry
+}
 
 /**
  * Get the platform-specific package name for embedded-postgres.
@@ -106,6 +132,60 @@ class PostgresManager {
       throw new Error(`initdb binary not found at ${this.binaries.initdb}`)
     }
 
+    // Retry logic: up to 3 attempts with exponential backoff
+    const maxAttempts = 3
+    let lastError: Error | null = null
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        console.log(`[PostgresManager] Attempt ${attempt}/${maxAttempts}`)
+        await this._doInitDb()
+        return // Success, exit
+      } catch (error) {
+        lastError = error as Error
+        console.error(`[PostgresManager] Attempt ${attempt} failed:`, (error as Error).message)
+
+        // Check if error should not be retried
+        if (shouldNotRetry(error)) {
+          console.error('[PostgresManager] Non-retryable error, giving up')
+          throw error
+        }
+
+        if (attempt < maxAttempts) {
+          // Exponential backoff: 1s after first failure, 3s after second
+          const backoff = attempt === 1 ? 1000 : 3000
+          console.log(`[PostgresManager] Waiting ${backoff}ms before retry...`)
+          await dbUtils.sleepFn(backoff)
+
+          // Clean up zombie processes before retry
+          console.log('[PostgresManager] Cleaning up postgres processes...')
+          await killPostgresProcesses()
+
+          // If this is a first-time init failure (no PG_VERSION), delete the data directory
+          const pgVersionCheck = path.join(this.dbPath, 'PG_VERSION')
+          if (!fs.existsSync(pgVersionCheck)) {
+            // Validate path is safe (under userData)
+            const userData = app.getPath('userData')
+            if (this.dbPath.startsWith(userData)) {
+              try {
+                console.log('[PostgresManager] Removing incomplete data directory...')
+                fs.rmSync(this.dbPath, { recursive: true, force: true })
+              } catch (e) {
+                console.warn('[PostgresManager] Failed to remove data directory:', e)
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // All attempts failed
+    throw new Error(
+      `Database initialization failed after ${maxAttempts} attempts: ${lastError?.message}`
+    )
+  }
+
+  private async _doInitDb(): Promise<void> {
     // Create data directory if it doesn't exist
     if (!fs.existsSync(this.dbPath)) {
       fs.mkdirSync(this.dbPath, { recursive: true })
@@ -167,12 +247,26 @@ class PostgresManager {
 
       proc.stdout?.on('data', data => {
         stdout += data.toString()
-        console.log('[initdb]', data.toString().trim())
+        // Log stdout line by line with prefix
+        data
+          .toString()
+          .split('\n')
+          .filter((l: string) => l.trim())
+          .forEach((line: string) => {
+            console.log('[initdb stdout]', line)
+          })
       })
 
       proc.stderr?.on('data', data => {
         stderr += data.toString()
-        console.error('[initdb error]', data.toString().trim())
+        // Log stderr line by line with prefix
+        data
+          .toString()
+          .split('\n')
+          .filter((l: string) => l.trim())
+          .forEach((line: string) => {
+            console.error('[initdb stderr]', line)
+          })
       })
 
       proc.on('close', code => {
