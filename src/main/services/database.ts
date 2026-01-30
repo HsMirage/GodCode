@@ -4,7 +4,7 @@ import fs from 'fs'
 import net from 'net'
 import { spawn, ChildProcess } from 'child_process'
 
-const INIT_TIMEOUT_MS = 60000 // 60 seconds for first-time initialization
+const INIT_TIMEOUT_MS = 120000 // 120 seconds for first-time initialization on slow systems
 
 /**
  * Get the correct binary paths for embedded-postgres.
@@ -100,14 +100,30 @@ class PostgresManager {
         pwFile,
         '-A',
         'password',
-        '-E',
-        'UTF8'
+        '--encoding=UTF8',
+        '--no-locale',
+        '--text-search-config=pg_catalog.simple'
       ]
 
       console.log('[PostgresManager] Running initdb with args:', args.join(' '))
 
+      // Force POSIX locale to completely avoid Chinese locale issues on Windows
+      // Remove all locale-related env vars and set to POSIX
+      const cleanEnv = {
+        PATH: process.env.PATH,
+        SYSTEMROOT: process.env.SYSTEMROOT,
+        TEMP: process.env.TEMP,
+        TMP: process.env.TMP,
+        LC_ALL: 'POSIX',
+        LC_COLLATE: 'POSIX',
+        LC_CTYPE: 'POSIX',
+        LC_MESSAGES: 'POSIX',
+        LANG: 'POSIX',
+        LANGUAGE: 'en'
+      }
+
       const proc = spawn(this.binaries.initdb, args, {
-        env: { ...process.env, LC_MESSAGES: 'en_US.UTF-8' },
+        env: cleanEnv,
         stdio: ['ignore', 'pipe', 'pipe']
       })
 
@@ -168,8 +184,23 @@ class PostgresManager {
 
       console.log('[PostgresManager] Running pg_ctl with args:', args.join(' '))
 
+      // Use same clean environment as initdb
+      const cleanEnv = {
+        PATH: process.env.PATH,
+        SYSTEMROOT: process.env.SYSTEMROOT,
+        TEMP: process.env.TEMP,
+        TMP: process.env.TMP,
+        PGPASSWORD: this.password,
+        LC_ALL: 'POSIX',
+        LC_COLLATE: 'POSIX',
+        LC_CTYPE: 'POSIX',
+        LC_MESSAGES: 'POSIX',
+        LANG: 'POSIX',
+        LANGUAGE: 'en'
+      }
+
       const proc = spawn(this.binaries.pg_ctl, args, {
-        env: { ...process.env, PGPASSWORD: this.password },
+        env: cleanEnv,
         stdio: ['ignore', 'pipe', 'pipe']
       })
 
