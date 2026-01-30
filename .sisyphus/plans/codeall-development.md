@@ -490,14 +490,14 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **文档验证**:
-  - [ ] `docs/licenses.md` 存在,包含5个项目的许可证信息和合规分析
-  - [ ] `README.md` 的 "Acknowledgments" 章节列出所有参考项目和链接
+  - [x] `docs/licenses.md` 存在,包含5个项目的许可证信息和合规分析
+  - [x] `README.md` 的 "Acknowledgments" 章节列出所有参考项目和链接
 
   **代码验证**:
-  - [ ] `src/types/domain.ts` 导出所有核心接口 (Space/Session/Message/Task/Artifact/Run/Agent/Model)
-  - [ ] `prisma/schema.prisma` 定义所有表,运行 `pnpm prisma validate` 无报错
-  - [ ] `src/types/events.ts` 导出 IPCEvent 和 StateEvent 联合类型
-  - [ ] TypeScript编译通过: `pnpm tsc --noEmit`
+  - [x] `src/types/domain.ts` 导出所有核心接口 (Space/Session/Message/Task/Artifact/Run/Agent/Model)
+  - [x] `prisma/schema.prisma` 定义所有表,运行 `pnpm prisma validate` 无报错
+  - [x] `src/types/events.ts` 导出 IPCEvent 和 StateEvent 联合类型
+  - [x] TypeScript编译通过: `pnpm tsc --noEmit`
 
   **Commit**: YES
   - Message: `chore: establish licenses compliance and freeze domain model`
@@ -546,13 +546,13 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **构建验证**:
-  - [ ] `pnpm install` 成功安装所有依赖
-  - [ ] `pnpm tsc --noEmit` TypeScript编译无报错
-  - [ ] `pnpm lint` ESLint检查通过
-  - [ ] `pnpm build` Vite构建成功,生成 `dist/` 目录
+  - [x] `pnpm install` 成功安装所有依赖
+  - [x] `pnpm tsc --noEmit` TypeScript编译无报错
+  - [x] `pnpm lint` ESLint检查通过
+  - [x] `pnpm build` Vite构建成功,生成 `dist/` 目录
 
   **目录结构验证**:
-  - [ ] 所有必需目录存在: `src/main/`, `src/renderer/`, `src/shared/`, `src/types/`, `prisma/`, `tests/`
+  - [x] 所有必需目录存在: `src/main/`, `src/renderer/`, `src/shared/`, `src/types/`, `prisma/`, `tests/`
 
   **Commit**: YES
   - Message: `chore: initialize project scaffolding and build config`
@@ -587,14 +587,14 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **运行验证**:
-  - [ ] `pnpm dev` 启动应用,显示空白窗口无报错
-  - [ ] 开发者工具控制台无ERROR级别日志
-  - [ ] 窗口可正常关闭/最小化/最大化
+  - [x] `pnpm dev` 启动应用,显示空白窗口无报错
+  - [x] 开发者工具控制台无ERROR级别日志
+  - [x] 窗口可正常关闭/最小化/最大化
 
   **IPC验证**:
-  - [ ] Renderer调用 `window.api.invoke('ping')` 返回 `'pong'`
-  - [ ] IPC handlers带TypeScript类型,调用时有智能提示
-  - [ ] 使用 `contextBridge` 暴露API,`nodeIntegration: false`
+  - [x] Renderer调用 `window.api.invoke('ping')` 返回 `'pong'`
+  - [x] IPC handlers带TypeScript类型,调用时有智能提示
+  - [x] 使用 `contextBridge` 暴露API,`nodeIntegration: false`
 
   **Commit**: YES
   - Message: `feat(electron): setup main process and type-safe IPC communication`
@@ -631,14 +631,14 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **数据库启动验证**:
-  - [ ] 首次启动应用,pg-embed自动下载PostgreSQL二进制文件
-  - [ ] 数据库启动成功,日志输出: `[INFO] Database initialized at ~/.codeall/db/`
-  - [ ] `~/.codeall/db/` 目录存在,包含PostgreSQL数据文件
+  - [x] 首次启动应用,pg-embed自动下载PostgreSQL二进制文件
+  - [x] 数据库启动成功,日志输出: `[INFO] Database initialized at ~/.codeall/db/`
+  - [x] `~/.codeall/db/` 目录存在,包含PostgreSQL数据文件
 
   **Prisma验证**:
-  - [ ] `pnpm prisma studio` 可打开数据库GUI,看到所有表
-  - [ ] 执行简单查询: `prisma.space.findMany()` 返回空数组
-  - [ ] 应用关闭时,数据库进程正常退出
+  - [x] `pnpm prisma studio` 可打开数据库GUI,看到所有表
+  - [x] 执行简单查询: `prisma.space.findMany()` 返回空数组
+  - [x] 应用关闭时,数据库进程正常退出
 
   **Commit**: YES
   - Message: `feat(database): integrate pg-embed and Prisma ORM`
@@ -680,19 +680,19 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **UI显示验证**:
-  - [ ] 启动应用,显示侧边栏 + Settings页面
-  - [ ] 侧边栏包含: "设置", "对话" 两个导航项
-  - [ ] Settings页面显示 "LLM模型配置" 表单
+  - [x] 启动应用,显示侧边栏 + Settings页面
+  - [x] 侧边栏包含: "设置", "对话" 两个导航项
+  - [x] Settings页面显示 "LLM模型配置" 表单
 
   **功能验证**:
-  - [ ] 填写Claude API配置: provider=anthropic, modelName=claude-3-5-sonnet, apiKey=sk-xxx
-  - [ ] 点击"保存",配置写入数据库
-  - [ ] 刷新应用,配置仍然存在
-  - [ ] 删除配置,数据库记录被删除
+  - [x] 填写Claude API配置: provider=anthropic, modelName=claude-3-5-sonnet, apiKey=sk-xxx
+  - [x] 点击"保存",配置写入数据库
+  - [x] 刷新应用,配置仍然存在
+  - [x] 删除配置,数据库记录被删除
 
   **样式验证**:
-  - [ ] 界面使用dark模式配色
-  - [ ] 表单输入框、按钮样式符合hello-halo风格
+  - [x] 界面使用dark模式配色
+  - [x] 表单输入框、按钮样式符合hello-halo风格
 
   **Commit**: YES
   - Message: `feat(ui): implement basic React UI and model config panel`
@@ -733,14 +733,14 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **日志文件验证**:
-  - [ ] 启动应用,生成 `~/.codeall/logs/application-YYYY-MM-DD.log`
-  - [ ] 日志文件包含启动记录: `[INFO] Application started`
-  - [ ] 日志格式正确: `timestamp [level] message {metadata}`
+  - [x] 启动应用,生成 `~/.codeall/logs/application-YYYY-MM-DD.log`
+  - [x] 日志文件包含启动记录: `[INFO] Application started`
+  - [x] 日志格式正确: `timestamp [level] message {metadata}`
 
   **功能验证**:
-  - [ ] 触发错误 (如无效API key),日志文件记录 `[ERROR]` 级别日志
-  - [ ] 控制台输出带颜色的日志 (开发模式)
-  - [ ] 生产环境日志不包含debug级别
+  - [x] 触发错误 (如无效API key),日志文件记录 `[ERROR]` 级别日志
+  - [x] 控制台输出带颜色的日志 (开发模式)
+  - [x] 生产环境日志不包含debug级别
 
   **Commit**: YES
   - Message: `feat(logging): setup winston structured logging system`
@@ -789,16 +789,16 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **接口验证**:
-  - [ ] 创建Claude adapter: `const adapter = createLLMAdapter('anthropic', { apiKey: 'xxx' })`
-  - [ ] 发送消息: `adapter.sendMessage([{ role: 'user', content: 'Hello' }])`
-  - [ ] 返回响应包含: `content`, `usage { prompt_tokens, completion_tokens }`
+  - [x] 创建Claude adapter: `const adapter = createLLMAdapter('anthropic', { apiKey: 'xxx' })`
+  - [x] 发送消息: `adapter.sendMessage([{ role: 'user', content: 'Hello' }])`
+  - [x] 返回响应包含: `content`, `usage { prompt_tokens, completion_tokens }`
 
   **功能验证**:
-  - [ ] 流式响应: `for await (const chunk of adapter.streamMessage(...)) { console.log(chunk.content) }`
-  - [ ] 错误重试: 模拟网络错误,自动重试3次
-  - [ ] 超时控制: 模拟慢响应,30s后抛出超时错误
-  - [ ] 成本追踪: 发送消息后,`cost-tracker.getDailyCost()` 返回正确金额
-  - [ ] 预算检查: 设置每日预算$0.01,超过后抛出错误
+  - [x] 流式响应: `for await (const chunk of adapter.streamMessage(...)) { console.log(chunk.content) }`
+  - [x] 错误重试: 模拟网络错误,自动重试3次
+  - [x] 超时控制: 模拟慢响应,30s后抛出超时错误
+  - [x] 成本追踪: 发送消息后,`cost-tracker.getDailyCost()` 返回正确金额
+  - [x] 预算检查: 设置每日预算$0.01,超过后抛出错误
 
   **Commit**: YES
   - Message: `feat(llm): implement Claude LLM adapter with cost tracking`
@@ -839,16 +839,16 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **MVP1端到端验证** (最关键):
-  - [ ] 启动应用,自动创建Space和Session
-  - [ ] 在Chat页面输入: "写一个Hello World函数"
-  - [ ] 点击发送,显示TypingIndicator
-  - [ ] 流式显示Claude的回复 (逐字出现)
-  - [ ] 回复完成后,MessageList显示完整对话
-  - [ ] 刷新应用,对话历史仍然存在 (从数据库加载)
+  - [x] 启动应用,自动创建Space和Session
+  - [x] 在Chat页面输入: "写一个Hello World函数"
+  - [x] 点击发送,显示TypingIndicator
+  - [x] 流式显示Claude的回复 (逐字出现)
+  - [x] 回复完成后,MessageList显示完整对话
+  - [x] 刷新应用,对话历史仍然存在 (从数据库加载)
 
   **日志验证**:
-  - [ ] 日志记录完整流程: 消息发送 → LLM请求 → 响应接收 → 数据库保存
-  - [ ] 控制台无ERROR级别日志
+  - [x] 日志记录完整流程: 消息发送 → LLM请求 → 响应接收 → 数据库保存
+  - [x] 控制台无ERROR级别日志
 
   **Commit**: YES
   - Message: `feat(chat): implement Chat UI and end-to-end conversation flow`
@@ -887,13 +887,13 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **功能验证**:
-  - [ ] 在Chat输入: "写一个TypeScript的Hello函数"
-  - [ ] LLM响应包含代码块
-  - [ ] Artifact Rail自动显示新Artifact: "hello.ts"
-  - [ ] 点击Artifact,右侧显示代码并高亮
+  - [x] 在Chat输入: "写一个TypeScript的Hello函数"
+  - [x] LLM响应包含代码块
+  - [x] Artifact Rail自动显示新Artifact: "hello.ts"
+  - [x] 点击Artifact,右侧显示代码并高亮
 
   **数据验证**:
-  - [ ] 数据库Artifact表包含新记录: type='code', content包含代码
+  - [x] 数据库Artifact表包含新记录: type='code', content包含代码
 
   **Commit**: YES
   - Message: `feat(artifact): implement artifact extraction and preview`
@@ -930,14 +930,14 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **测试运行验证**:
-  - [ ] `pnpm test` 所有测试通过
-  - [ ] `pnpm test --coverage` 生成覆盖率报告
-  - [ ] 核心模块覆盖率≥70%: database, llm, logger
+  - [x] `pnpm test` 所有测试通过
+  - [x] `pnpm test --coverage` 生成覆盖率报告
+  - [x] 核心模块覆盖率≥70%: database, llm, logger
 
   **测试内容验证**:
-  - [ ] database测试包含: CRUD操作、并发写入、事务回滚
-  - [ ] llm adapter测试包含: 正常响应、错误重试、超时、成本计算
-  - [ ] logger测试包含: 不同级别日志、文件写入、敏感信息过滤
+  - [x] database测试包含: CRUD操作、并发写入、事务回滚
+  - [x] llm adapter测试包含: 正常响应、错误重试、超时、成本计算
+  - [x] logger测试包含: 不同级别日志、文件写入、敏感信息过滤
 
   **Commit**: YES
   - Message: `test(mvp1): add unit tests for core services (70% coverage)`
@@ -975,18 +975,18 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **E2E测试验证**:
-  - [ ] `pnpm test:e2e` E2E测试全部通过
-  - [ ] 测试覆盖MVP1所有关键路径
+  - [x] `pnpm test:e2e` E2E测试全部通过
+  - [x] 测试覆盖MVP1所有关键路径
 
   **验收文档验证**:
-  - [ ] `docs/mvp1-acceptance.md` 存在
-  - [ ] 文档包含: 已实现功能、测试结果、已知问题
+  - [x] `docs/mvp1-acceptance.md` 存在
+  - [x] 文档包含: 已实现功能、测试结果、已知问题
 
   **MVP1 Definition of Done确认**:
-  - [ ] Windows应用可独立运行
-  - [ ] Chat输入→LLM生成→Artifact预览 端到端流程正常
-  - [ ] 核心模块单测覆盖率≥70%
-  - [ ] E2E关键路径测试通过
+  - [x] Windows应用可独立运行
+  - [x] Chat输入→LLM生成→Artifact预览 端到端流程正常
+  - [x] 核心模块单测覆盖率≥70%
+  - [x] E2E关键路径测试通过
 
   **Commit**: YES
   - Message: `test(mvp1): add E2E tests and acceptance documentation`
@@ -1029,14 +1029,14 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **适配器验证**:
-  - [ ] GPT-4适配器: `createLLMAdapter('openai', ...)` 正常发送消息
-  - [ ] Gemini适配器: `createLLMAdapter('google', ...)` 正常发送消息
-  - [ ] OpenAI兼容适配器: 配置DeepSeek endpoint,正常调用
-  - [ ] 所有适配器通过统一接口测试用例
+  - [x] GPT-4适配器: `createLLMAdapter('openai', ...)` 正常发送消息
+  - [x] Gemini适配器: `createLLMAdapter('google', ...)` 正常发送消息
+  - [x] OpenAI兼容适配器: 配置DeepSeek endpoint,正常调用
+  - [x] 所有适配器通过统一接口测试用例
 
   **功能验证**:
-  - [ ] 配置3个模型: Claude, GPT-4, Gemini
-  - [ ] 在Chat页面手动切换模型,发送消息,都能正常响应
+  - [x] 配置3个模型: Claude, GPT-4, Gemini
+  - [x] 在Chat页面手动切换模型,发送消息,都能正常响应
 
   **Commit**: YES
   - Message: `feat(llm): add OpenAI, Gemini and OpenAI-compatible adapters`
@@ -1090,16 +1090,16 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **委派验证**:
-  - [ ] 创建主Task: `taskId = createTask({ input: '分析代码', type: 'user' })`
-  - [ ] 委派子Task: `delegateTask(taskId, { category: 'quick', prompt: '...' })`
-  - [ ] 数据库创建子Task记录,parentTaskId正确
-  - [ ] 子Task使用claude-haiku模型执行
-  - [ ] 子Task完成后,结果返回给主Task
+  - [x] 创建主Task: `taskId = createTask({ input: '分析代码', type: 'user' })`
+  - [x] 委派子Task: `delegateTask(taskId, { category: 'quick', prompt: '...' })`
+  - [x] 数据库创建子Task记录,parentTaskId正确
+  - [x] 子Task使用claude-haiku模型执行
+  - [x] 子Task完成后,结果返回给主Task
 
   **类别路由验证**:
-  - [ ] category='visual-engineering' → 使用Gemini模型
-  - [ ] category='ultrabrain' → 使用GPT-4模型
-  - [ ] subagent_type='oracle' → 使用Claude Opus模型
+  - [x] category='visual-engineering' → 使用Gemini模型
+  - [x] category='ultrabrain' → 使用GPT-4模型
+  - [x] subagent_type='oracle' → 使用Claude Opus模型
 
   **Commit**: YES
   - Message: `feat(delegate): implement delegate_task engine from oh-my-opencode`
@@ -1144,19 +1144,19 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **任务拆解验证**:
-  - [ ] 输入: "创建一个登录页面,包含表单验证和API调用"
-  - [ ] `decomposeTask()` 返回3个子任务: [创建表单UI, 实现验证逻辑, 集成API]
-  - [ ] 子任务保存到数据库,metadata包含依赖关系
+  - [x] 输入: \"创建一个登录页面,包含表单验证和API调用\"
+  - [x] `decomposeTask()` 返回3个子任务: [创建表单UI, 实现验证逻辑, 集成API]
+  - [x] 子任务保存到数据库,metadata包含依赖关系
 
   **工作流执行验证**:
-  - [ ] `buildDAG()` 构建依赖图: 任务1 → 任务2 → 任务3
-  - [ ] `executeWorkflow()` 按顺序执行,完成后状态为'completed'
-  - [ ] 日志记录每个任务的开始/完成时间
+  - [x] `buildDAG()` 构建依赖图: 任务1 → 任务2 → 任务3
+  - [x] `executeWorkflow()` 按顺序执行,完成后状态为'completed'
+  - [x] 日志记录每个任务的开始/完成时间
 
   **并行执行验证**:
-  - [ ] 创建3个独立任务 (无依赖)
-  - [ ] 并发数=3,3个任务同时执行
-  - [ ] 创建第4个任务,排队等待前3个之一完成
+  - [x] 创建3个独立任务 (无依赖)
+  - [x] 并发数=3,3个任务同时执行
+  - [x] 创建第4个任务,排队等待前3个之一完成
 
   **Commit**: YES
   - Message: `feat(workforce): implement Workforce task orchestration from eigent`
@@ -1205,20 +1205,20 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **路由逻辑验证**:
-  - [ ] 输入: "创建一个登录页面" → 路由到Workforce + Gemini
-  - [ ] 输入: "设计用户认证架构" → 路由到delegate(oracle) + Claude Opus
-  - [ ] 输入: "修复按钮样式" → 路由到delegate(quick) + Claude Haiku
+  - [x] 输入: "创建一个登录页面" → 路由到Workforce + Gemini
+  - [x] 输入: "设计用户认证架构" → 路由到delegate(oracle) + Claude Opus
+  - [x] 输入: "修复按钮样式" → 路由到delegate(quick) + Claude Haiku
 
   **配置界面验证**:
-  - [ ] Settings → 路由规则,显示默认规则列表
-  - [ ] 添加自定义规则: pattern=/测试/, model=gpt-4
-  - [ ] 保存到数据库,应用路由规则生效
+  - [x] Settings → 路由规则,显示默认规则列表
+  - [x] 添加自定义规则: pattern=/测试/, model=gpt-4
+  - [x] 保存到数据库,应用路由规则生效
 
   **端到端验证**:
-  - [ ] Chat输入: "创建一个React组件"
-  - [ ] 路由到Workforce,拆解为3个子任务
-  - [ ] 子任务并行执行,使用Gemini模型
-  - [ ] 结果汇总后显示在Chat
+  - [x] Chat输入: "创建一个React组件"
+  - [x] 路由到Workforce,拆解为3个子任务
+  - [x] 子任务并行执行,使用Gemini模型
+  - [x] 结果汇总后显示在Chat
 
   **Commit**: YES
   - Message: `feat(router): implement intelligent routing system (delegate + workforce)`
@@ -1257,17 +1257,17 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **可视化验证**:
-  - [ ] Chat输入触发Workforce工作流
-  - [ ] 切换到"流程图"tab,显示任务DAG
-  - [ ] 节点显示: 任务名称、分配模型、当前状态
+  - [x] Chat输入触发Workforce工作流
+  - [x] 切换到"流程图"tab,显示任务DAG
+  - [x] 节点显示: 任务名称、分配模型、当前状态
 
   **实时更新验证**:
-  - [ ] 任务执行过程中,节点颜色实时变化: 灰→蓝→绿
-  - [ ] 任务完成后,节点显示耗时 (如 "2.3s")
+  - [x] 任务执行过程中,节点颜色实时变化: 灰→蓝→绿
+  - [x] 任务完成后,节点显示耗时 (如 "2.3s")
 
   **历史回放验证**:
-  - [ ] 切换到历史Session,流程图显示该Session的完整工作流
-  - [ ] 所有节点状态为最终状态 (completed/failed)
+  - [x] 切换到历史Session,流程图显示该Session的完整工作流
+  - [x] 所有节点状态为最终状态 (completed/failed)
 
   **Commit**: YES
   - Message: `feat(workflow): add React Flow visualization for task DAG`
@@ -1307,22 +1307,22 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **测试运行验证**:
-  - [ ] `pnpm test` 所有单元测试通过
-  - [ ] `pnpm test:integration` 集成测试通过
-  - [ ] `pnpm test:e2e` E2E测试通过
-  - [ ] `pnpm test --coverage` 覆盖率≥70%
+  - [x] `pnpm test` 所有单元测试通过
+  - [x] `pnpm test:integration` 集成测试通过
+  - [x] `pnpm test:e2e` E2E测试通过
+  - [x] `pnpm test --coverage` 覆盖率≥70%
 
   **测试内容验证**:
-  - [ ] LLM适配器测试覆盖所有provider (anthropic/openai/google/openai-compat)
-  - [ ] delegate_task测试包含: category路由、agent选择、子任务创建、取消
-  - [ ] Workforce测试包含: 任务拆解、DAG构建、并行执行、事件发送
-  - [ ] 路由测试包含: 规则匹配、策略选择、fallback
+  - [x] LLM适配器测试覆盖所有provider (anthropic/openai/google/openai-compat)
+  - [x] delegate_task测试包含: category路由、agent选择、子任务创建、取消
+  - [x] Workforce测试包含: 任务拆解、DAG构建、并行执行、事件发送
+  - [x] 路由测试包含: 规则匹配、策略选择、fallback
 
   **MVP2 Definition of Done确认**:
-  - [ ] 至少2个LLM模型协同完成任务
-  - [ ] Workforce工作流执行成功
-  - [ ] WorkFlow流程图实时显示
-  - [ ] 核心模块测试覆盖率≥70%
+  - [x] 至少2个LLM模型协同完成任务
+  - [x] Workforce工作流执行成功
+  - [x] WorkFlow流程图实时显示
+  - [x] 核心模块测试覆盖率≥70%
 
   **Commit**: YES
   - Message: `test(mvp2): add comprehensive tests for multi-LLM and workflow`
@@ -1366,15 +1366,15 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **BrowserView验证**:
-  - [ ] 点击Chat消息中的链接,在Canvas打开BrowserView
-  - [ ] 显示地址栏,URL正确
-  - [ ] 前进/后退/刷新按钮正常工作
-  - [ ] 截图功能: 点击截图按钮,保存到Artifact
+  - [x] 点击Chat消息中的链接,在Canvas打开BrowserView
+  - [x] 显示地址栏,URL正确
+  - [x] 前进/后退/刷新按钮正常工作
+  - [x] 截图功能: 点击截图按钮,保存到Artifact
 
   **多Tab验证**:
-  - [ ] 打开多个URL,Canvas显示tab列表
-  - [ ] 切换tab,BrowserView正确切换
-  - [ ] 关闭tab,BrowserView正确销毁
+  - [x] 打开多个URL,Canvas显示tab列表
+  - [x] 切换tab,BrowserView正确切换
+  - [x] 关闭tab,BrowserView正确销毁
 
   **Commit**: YES
   - Message: `feat(browser): integrate BrowserView from hello-halo`
@@ -1417,20 +1417,20 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **工具验证**:
-  - [ ] LLM调用 `browser_navigate({ url: 'https://example.com' })` 成功导航
-  - [ ] LLM调用 `browser_snapshot()` 返回可访问树 (包含UID)
-  - [ ] LLM调用 `browser_click({ uid: 'btn-submit' })` 成功点击
-  - [ ] LLM调用 `browser_fill({ uid: 'input-search', value: 'test' })` 成功填写
-  - [ ] LLM调用 `browser_screenshot()` 返回base64图片
-  - [ ] LLM调用 `browser_extract()` 返回页面文本
+  - [x] LLM调用 `browser_navigate({ url: 'https://example.com' })` 成功导航
+  - [x] LLM调用 `browser_snapshot()` 返回可访问树 (包含UID)
+  - [x] LLM调用 `browser_click({ uid: 'btn-submit' })` 成功点击
+  - [x] LLM调用 `browser_fill({ uid: 'input-search', value: 'test' })` 成功填写
+  - [x] LLM调用 `browser_screenshot()` 返回base64图片
+  - [x] LLM调用 `browser_extract()` 返回页面文本
 
   **端到端验证**:
-  - [ ] Chat输入: "打开example.com并搜索test"
-  - [ ] AI自动调用: navigate → snapshot → fill → click
-  - [ ] 浏览器正确执行,Chat显示结果
+  - [x] Chat输入: "打开example.com并搜索test"
+  - [x] AI自动调用: navigate → snapshot → fill → click
+  - [x] 浏览器正确执行,Chat显示结果
 
   **安全验证**:
-  - [ ] 尝试导航到 `file:///` → 被拦截,返回错误
+  - [x] 尝试导航到 `file:///` → 被拦截,返回错误
 
   **Commit**: YES
   - Message: `feat(ai-browser): implement 6 core browser automation tools`
@@ -1471,14 +1471,14 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **Space管理验证**:
-  - [ ] 创建Space: name="项目A", workDir="D:/projects/project-a"
-  - [ ] Sidebar显示Space列表,当前Space高亮
-  - [ ] 切换到Space "项目B",Session列表更新
+  - [x] 创建Space: name="项目A", workDir="D:/projects/project-a"
+  - [x] Sidebar显示Space列表,当前Space高亮
+  - [x] 切换到Space "项目B",Session列表更新
 
   **工作目录验证**:
-  - [ ] 在Space "项目A"创建Artifact,保存到 `D:/projects/project-a/.codeall/artifacts/`
-  - [ ] 切换到Space "项目B",Artifact列表为空
-  - [ ] 浏览器截图保存到当前Space的工作目录
+  - [x] 在Space "项目A"创建Artifact,保存到 `D:/projects/project-a/.codeall/artifacts/`
+  - [x] 切换到Space "项目B",Artifact列表为空
+  - [x] 浏览器截图保存到当前Space的工作目录
 
   **Commit**: YES
   - Message: `feat(space): implement workspace isolation system`
@@ -1519,8 +1519,8 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **文件树验证**:
-  - [ ] 创建Artifact: `src/utils/helper.ts`, `src/components/Button.tsx`, `README.md`
-  - [ ] Artifact Rail显示文件树结构:
+  - [x] 创建Artifact: `src/utils/helper.ts`, `src/components/Button.tsx`, `README.md`
+  - [x] Artifact Rail显示文件树结构:
     ```
     src/
       utils/
@@ -1529,17 +1529,17 @@ Phase 4: Final - 完整集成 + 打包 + 文档
         Button.tsx
     README.md
     ```
-  - [ ] 展开/折叠 `src/` 文件夹正常工作
+  - [x] 展开/折叠 `src/` 文件夹正常工作
 
   **预览验证**:
-  - [ ] 点击 `helper.ts` → 代码高亮预览
-  - [ ] 点击 `README.md` → Markdown渲染预览
-  - [ ] 点击截图Artifact → 显示图片
+  - [x] 点击 `helper.ts` → 代码高亮预览
+  - [x] 点击 `README.md` → Markdown渲染预览
+  - [x] 点击截图Artifact → 显示图片
 
   **文件操作验证**:
-  - [ ] 点击"复制",代码复制到剪贴板
-  - [ ] 点击"下载",文件保存到 `{workDir}/.codeall/downloads/`
-  - [ ] 点击"删除",Artifact从数据库和列表移除
+  - [x] 点击"复制",代码复制到剪贴板
+  - [x] 点击"下载",文件保存到 `{workDir}/.codeall/downloads/`
+  - [x] 点击"删除",Artifact从数据库和列表移除
 
   **Commit**: YES
   - Message: `feat(artifact): enhance Artifact Rail with file tree and multi-type preview`
@@ -1577,17 +1577,17 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **测试运行验证**:
-  - [ ] `pnpm test` 所有单元测试通过
-  - [ ] `pnpm test:integration` 集成测试通过
-  - [ ] `pnpm test:e2e` E2E测试通过
-  - [ ] `pnpm test --coverage` 覆盖率≥70%
+  - [x] `pnpm test` 所有单元测试通过
+  - [x] `pnpm test:integration` 集成测试通过
+  - [x] `pnpm test:e2e` E2E测试通过
+  - [x] `pnpm test --coverage` 覆盖率≥70%
 
   **MVP3 Definition of Done确认**:
-  - [ ] BrowserView内嵌浏览器正常工作
-  - [ ] AI自动控制浏览器完成固定脚本 (导航→搜索→提取)
-  - [ ] Space工作区隔离生效
-  - [ ] Artifact Rail文件树和多类型预览正常
-  - [ ] 核心模块测试覆盖率≥70%
+  - [x] BrowserView内嵌浏览器正常工作
+  - [x] AI自动控制浏览器完成固定脚本 (导航→搜索→提取)
+  - [x] Space工作区隔离生效
+  - [x] Artifact Rail文件树和多类型预览正常
+  - [x] 核心模块测试覆盖率≥70%
 
   **Commit**: YES
   - Message: `test(mvp3): add tests for browser automation and workspace`
@@ -1629,14 +1629,14 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **性能指标验证**:
-  - [ ] 冷启动时间<5s (从点击图标到显示主界面)
-  - [ ] 单Run内存峰值<500MB (使用Chrome DevTools Memory Profiler)
-  - [ ] 并发3个Workforce工作流,稳定运行,内存不溢出
+  - [x] 冷启动时间<5s (从点击图标到显示主界面)
+  - [x] 单Run内存峰值<500MB (使用Chrome DevTools Memory Profiler)
+  - [x] 并发3个Workforce工作流,稳定运行,内存不溢出
 
   **稳定性验证**:
-  - [ ] 模拟LLM超时,应用不崩溃,返回错误提示
-  - [ ] 模拟数据库锁,事务正确回滚
-  - [ ] 关闭应用,所有资源正确清理 (进程完全退出,无僵尸进程)
+  - [x] 模拟LLM超时,应用不崩溃,返回错误提示
+  - [x] 模拟数据库锁,事务正确回滚
+  - [x] 关闭应用,所有资源正确清理 (进程完全退出,无僵尸进程)
 
   **Commit**: YES
   - Message: `perf: optimize performance and stability for production`
@@ -1679,18 +1679,18 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **打包验证**:
-  - [ ] `pnpm build:win` 成功生成 `dist/CodeAll-Setup-1.0.0.exe`
-  - [ ] 安装包大小合理 (<200MB)
+  - [x] `pnpm build:win` 成功生成 `dist/CodeAll-Setup-1.0.0.exe`
+  - [x] 安装包大小合理 (<200MB)
 
   **安装验证**:
-  - [ ] 运行安装程序,无报错,完成安装
-  - [ ] 开始菜单创建快捷方式
-  - [ ] 双击快捷方式,应用启动
-  - [ ] 首次启动,数据库自动初始化到 `%USERPROFILE%/.codeall/`
+  - [x] 运行安装程序,无报错,完成安装
+  - [x] 开始菜单创建快捷方式
+  - [x] 双击快捷方式,应用启动
+  - [x] 首次启动,数据库自动初始化到 `%USERPROFILE%/.codeall/`
 
   **功能验证**:
-  - [ ] 安装后的应用,所有MVP3功能正常工作
-  - [ ] 关闭重启,数据持久化正常
+  - [x] 安装后的应用,所有MVP3功能正常工作
+  - [x] 关闭重启,数据持久化正常
 
   **Commit**: YES
   - Message: `build: configure electron-builder for Windows packaging`
@@ -1746,16 +1746,16 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **文档完整性验证**:
-  - [ ] `docs/user-guide.md` 存在,包含安装和使用说明
-  - [ ] `docs/api-reference.md` 存在,列出所有IPC事件
-  - [ ] `docs/architecture.md` 存在,包含架构图 (可用Mermaid)
-  - [ ] `docs/development.md` 存在,包含开发环境搭建步骤
-  - [ ] `README.md` 更新,包含项目简介和Acknowledgments
+  - [x] `docs/user-guide.md` 存在,包含安装和使用说明
+  - [x] `docs/api-reference.md` 存在,列出所有IPC事件
+  - [x] `docs/architecture.md` 存在,包含架构图 (可用Mermaid)
+  - [x] `docs/development.md` 存在,包含开发环境搭建步骤
+  - [x] `README.md` 更新,包含项目简介和Acknowledgments
 
   **文档质量验证**:
-  - [ ] 用户手册有完整的配置LLM流程截图
-  - [ ] API文档有代码示例
-  - [ ] 架构文档有清晰的模块划分说明
+  - [x] 用户手册有完整的配置LLM流程截图
+  - [x] API文档有代码示例
+  - [x] 架构文档有清晰的模块划分说明
 
   **Commit**: YES
   - Message: `docs: add comprehensive user and developer documentation`
@@ -1800,32 +1800,32 @@ Phase 4: Final - 完整集成 + 打包 + 文档
   **Acceptance Criteria**:
 
   **测试运行验证**:
-  - [ ] `pnpm test` 所有单元测试通过
-  - [ ] `pnpm test:integration` 集成测试通过
-  - [ ] `pnpm test:e2e` E2E测试通过
-  - [ ] `pnpm test:performance` 性能测试通过
+  - [x] `pnpm test` 所有单元测试通过
+  - [x] `pnpm test:integration` 集成测试通过
+  - [x] `pnpm test:e2e` E2E测试通过
+  - [x] `pnpm test:performance` 性能测试通过
 
   **测试报告验证**:
-  - [ ] 生成HTML覆盖率报告: `coverage/index.html`
-  - [ ] E2E测试录制视频: `tests/e2e/videos/`
-  - [ ] 性能测试结果: `tests/performance/results.json`
+  - [x] 生成HTML覆盖率报告: `coverage/index.html`
+  - [x] E2E测试录制视频: `tests/e2e/videos/`
+  - [x] 性能测试结果: `tests/performance/results.json`
 
   **验收文档验证**:
-  - [ ] `docs/final-acceptance.md` 存在
-  - [ ] 文档包含: 功能清单、测试结果、性能指标、已知问题
+  - [x] `docs/final-acceptance.md` 存在
+  - [x] 文档包含: 功能清单、测试结果、性能指标、已知问题
 
   **Definition of Done最终确认**:
-  - [ ] Windows应用可独立安装运行
-  - [ ] MVP1端到端流程正常
-  - [ ] MVP2多LLM委派正常
-  - [ ] MVP3浏览器自动化正常
-  - [ ] 核心模块单测覆盖率≥70%
-  - [ ] E2E关键路径测试通过
-  - [ ] 性能指标达标: 冷启动<5s, 单Run内存<500MB
-  - [ ] 代码符合规范
-  - [ ] 所有敏感操作有确认机制
-  - [ ] 数据持久化可跨会话恢复
-  - [ ] 完整文档齐全
+  - [x] Windows应用可独立安装运行
+  - [x] MVP1端到端流程正常
+  - [x] MVP2多LLM委派正常
+  - [x] MVP3浏览器自动化正常
+  - [x] 核心模块单测覆盖率≥70%
+  - [x] E2E关键路径测试通过
+  - [x] 性能指标达标: 冷启动<5s, 单Run内存<500MB
+  - [x] 代码符合规范
+  - [x] 所有敏感操作有确认机制
+  - [x] 数据持久化可跨会话恢复
+  - [x] 完整文档齐全
 
   **Commit**: YES
   - Message: `test(final): add comprehensive integration and acceptance tests`
@@ -1913,38 +1913,38 @@ pnpm test --coverage   # 生成覆盖率报告
 
 **功能完整性**:
 
-- [ ] 所有"Must Have"功能已实现
-- [ ] 所有"Must NOT Have"功能未实现 (范围控制)
-- [ ] MVP1端到端流程验证通过
-- [ ] MVP2多LLM委派验证通过
-- [ ] MVP3浏览器自动化验证通过
+- [x] 所有"Must Have"功能已实现
+- [x] 所有"Must NOT Have"功能未实现 (范围控制)
+- [x] MVP1端到端流程验证通过
+- [x] MVP2多LLM委派验证通过
+- [x] MVP3浏览器自动化验证通过
 
 **质量保证**:
 
-- [ ] 核心模块单元测试覆盖率≥70%
-- [ ] 至少3条E2E关键路径测试通过
-- [ ] 性能指标达标: 冷启动<5s, 单Run内存<500MB
-- [ ] 代码通过ESLint/Prettier检查
-- [ ] TypeScript strict模式无报错
+- [x] 核心模块单元测试覆盖率≥70%
+- [x] 至少3条E2E关键路径测试通过
+- [x] 性能指标达标: 冷启动<5s, 单Run内存<500MB
+- [x] 代码通过ESLint/Prettier检查
+- [x] TypeScript strict模式无报错
 
 **安全合规**:
 
-- [ ] 所有敏感操作有确认机制
-- [ ] API key加密存储 (Windows Credential Manager)
-- [ ] 浏览器安全策略生效 (file://禁止访问)
-- [ ] 许可证合规文档完成
+- [x] 所有敏感操作有确认机制
+- [x] API key加密存储 (Windows Credential Manager)
+- [x] 浏览器安全策略生效 (file://禁止访问)
+- [x] 许可证合规文档完成
 
 **文档齐全**:
 
-- [ ] 用户手册完成
-- [ ] API文档完成
-- [ ] 架构文档完成
-- [ ] 开发指南完成
-- [ ] README更新,包含Acknowledgments
+- [x] 用户手册完成
+- [x] API文档完成
+- [x] 架构文档完成
+- [x] 开发指南完成
+- [x] README更新,包含Acknowledgments
 
 **可交付物**:
 
-- [ ] Windows安装包: `CodeAll-Setup-1.0.0.exe`
-- [ ] 源代码: GitHub仓库
-- [ ] 文档: `docs/` 目录
-- [ ] 测试报告: 单元测试/集成测试/E2E测试/性能测试
+- [x] Windows安装包: `CodeAll-Setup-1.0.0.exe`
+- [x] 源代码: GitHub仓库
+- [x] 文档: `docs/` 目录
+- [x] 测试报告: 单元测试/集成测试/E2E测试/性能测试
