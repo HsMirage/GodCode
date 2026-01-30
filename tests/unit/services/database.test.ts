@@ -1,21 +1,74 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import path from 'path'
 import os from 'os'
+import fs from 'fs'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn(() => path.join(os.tmpdir(), `test-db-${Date.now()}`))
+    getPath: vi.fn((name: string) => {
+      if (name === 'temp') return os.tmpdir()
+      return path.join(os.tmpdir(), `test-db-${Date.now()}`)
+    }),
+    isPackaged: false
   }
 }))
 
-vi.mock('embedded-postgres', () => ({
-  default: class MockEmbeddedPostgres {
-    constructor() {}
-    initialise = vi.fn().mockResolvedValue(undefined)
-    start = vi.fn().mockResolvedValue(undefined)
-    stop = vi.fn().mockResolvedValue(undefined)
+vi.mock('child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('child_process')>()
+  const spawnMock = vi.fn(() => ({
+    stdout: {
+      on: vi.fn((event: string, cb: (data: Buffer) => void) => {
+        if (event === 'data') {
+          setTimeout(() => {
+            cb(Buffer.from('server started'))
+            cb(Buffer.from('database cluster initialized'))
+          }, 10)
+        }
+      })
+    },
+    stderr: {
+      on: vi.fn()
+    },
+    on: vi.fn((event: string, cb: (code: number) => void) => {
+      if (event === 'close') {
+        setTimeout(() => cb(0), 20)
+      }
+    })
+  }))
+  return {
+    ...actual,
+    spawn: spawnMock,
+    default: {
+      ...actual,
+      spawn: spawnMock
+    }
   }
-}))
+})
+
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs')
+  return {
+    ...actual,
+    existsSync: vi.fn((p: string) => {
+      if (p.indexOf('bin') !== -1 || p.indexOf('native') !== -1) return true
+      if (p.indexOf('PG_VERSION') !== -1) return false
+      return actual.existsSync(p)
+    }),
+    writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    unlinkSync: vi.fn(),
+    readFileSync: vi.fn((p: string, encoding: any) => {
+      if (p.indexOf('db-credentials.json') !== -1) {
+        return JSON.stringify({
+          user: 'test-user',
+          password: 'test-password',
+          port: 54321
+        })
+      }
+      return actual.readFileSync(p, encoding)
+    })
+  }
+})
 
 vi.mock('@prisma/client', () => ({
   PrismaClient: class MockPrismaClient {

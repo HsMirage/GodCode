@@ -1,4 +1,6 @@
 import { describe, test, expect, vi, afterEach } from 'vitest'
+import path from 'path'
+import os from 'os'
 import { DatabaseService } from '../../src/main/services/database'
 
 // Mock Electron
@@ -8,25 +10,68 @@ vi.mock('electron', () => {
       getPath: vi.fn(name => {
         if (name === 'userData') return '/tmp/codeall-perf-startup'
         return '/tmp'
-      })
+      }),
+      isPackaged: false
     }
   }
 })
 
-// Mock Embedded Postgres
-vi.mock('embedded-postgres', () => {
+// Mock child_process for PostgresManager
+vi.mock('child_process', async importOriginal => {
+  const actual = await importOriginal<typeof import('child_process')>()
+  const spawnMock = vi.fn(() => ({
+    stdout: {
+      on: vi.fn((event: string, cb: (data: Buffer) => void) => {
+        if (event === 'data') {
+          setTimeout(() => {
+            cb(Buffer.from('server started'))
+            cb(Buffer.from('database cluster initialized'))
+          }, 10)
+        }
+      })
+    },
+    stderr: {
+      on: vi.fn()
+    },
+    on: vi.fn((event: string, cb: (code: number) => void) => {
+      if (event === 'close') {
+        setTimeout(() => cb(0), 20)
+      }
+    })
+  }))
   return {
-    default: class MockEmbeddedPostgres {
-      initialise() {
-        return Promise.resolve()
-      }
-      start() {
-        return new Promise(resolve => setTimeout(resolve, 100)) // Simulate slight delay
-      }
-      stop() {
-        return Promise.resolve()
-      }
+    ...actual,
+    spawn: spawnMock,
+    default: {
+      ...actual,
+      spawn: spawnMock
     }
+  }
+})
+
+// Mock fs for PostgresManager
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs')
+  return {
+    ...actual,
+    existsSync: vi.fn((p: string) => {
+      if (p.indexOf('bin') !== -1 || p.indexOf('native') !== -1) return true
+      if (p.indexOf('PG_VERSION') !== -1) return false
+      return actual.existsSync(p)
+    }),
+    writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    unlinkSync: vi.fn(),
+    readFileSync: vi.fn((p: string, encoding: any) => {
+      if (p.indexOf('db-credentials.json') !== -1) {
+        return JSON.stringify({
+          user: 'test-user',
+          password: 'test-password',
+          port: 54321
+        })
+      }
+      return actual.readFileSync(p, encoding)
+    })
   }
 })
 
@@ -46,14 +91,16 @@ vi.mock('@prisma/client', () => {
 
 describe('Performance: Startup Time', () => {
   afterEach(async () => {
-    // Reset singleton instance to ensure clean state for other tests if needed
-    // However, DatabaseService is a singleton and doesn't expose a reset method directly.
-    // For this specific test, we might just shutdown if possible.
+    // Reset singleton instance to ensure clean state
+    // @ts-ignore
+    DatabaseService.instance = undefined
     const db = DatabaseService.getInstance()
     await db.shutdown()
   })
 
   test('database init completes in <5s', async () => {
+    // @ts-ignore
+    DatabaseService.instance = undefined
     const db = DatabaseService.getInstance()
 
     const start = Date.now()

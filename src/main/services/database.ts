@@ -7,10 +7,29 @@ import { spawn, ChildProcess } from 'child_process'
 const INIT_TIMEOUT_MS = 120000 // 120 seconds for first-time initialization on slow systems
 
 /**
+ * Get the platform-specific package name for embedded-postgres.
+ */
+function getPlatformPackage(): { packageName: string; ext: string } {
+  const platform = process.platform
+  const arch = process.arch
+
+  if (platform === 'win32') {
+    return { packageName: 'windows-x64', ext: '.exe' }
+  } else if (platform === 'darwin') {
+    return { packageName: arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64', ext: '' }
+  } else {
+    // Linux
+    return { packageName: arch === 'arm64' ? 'linux-arm64' : 'linux-x64', ext: '' }
+  }
+}
+
+/**
  * Get the correct binary paths for embedded-postgres.
  * In packaged app, binaries are in app.asar.unpacked.
  */
 function getBinaryPaths(): { pg_ctl: string; initdb: string; postgres: string } {
+  const { packageName, ext } = getPlatformPackage()
+
   if (app.isPackaged) {
     // In packaged app, binaries are in app.asar.unpacked
     const resourcesPath = process.resourcesPath
@@ -19,15 +38,15 @@ function getBinaryPaths(): { pg_ctl: string; initdb: string; postgres: string } 
       'app.asar.unpacked',
       'node_modules',
       '@embedded-postgres',
-      'windows-x64',
+      packageName,
       'native',
       'bin'
     )
 
     return {
-      pg_ctl: path.join(unpackedPath, 'pg_ctl.exe'),
-      initdb: path.join(unpackedPath, 'initdb.exe'),
-      postgres: path.join(unpackedPath, 'postgres.exe')
+      pg_ctl: path.join(unpackedPath, `pg_ctl${ext}`),
+      initdb: path.join(unpackedPath, `initdb${ext}`),
+      postgres: path.join(unpackedPath, `postgres${ext}`)
     }
   } else {
     // In development, use node_modules path
@@ -38,15 +57,15 @@ function getBinaryPaths(): { pg_ctl: string; initdb: string; postgres: string } 
       '..',
       'node_modules',
       '@embedded-postgres',
-      'windows-x64',
+      packageName,
       'native',
       'bin'
     )
 
     return {
-      pg_ctl: path.join(nodeModulesPath, 'pg_ctl.exe'),
-      initdb: path.join(nodeModulesPath, 'initdb.exe'),
-      postgres: path.join(nodeModulesPath, 'postgres.exe')
+      pg_ctl: path.join(nodeModulesPath, `pg_ctl${ext}`),
+      initdb: path.join(nodeModulesPath, `initdb${ext}`),
+      postgres: path.join(nodeModulesPath, `postgres${ext}`)
     }
   }
 }
@@ -81,6 +100,12 @@ class PostgresManager {
     console.log('[PostgresManager] Initializing database cluster...')
     console.log('[PostgresManager] initdb path:', this.binaries.initdb)
 
+    // Verify binary exists
+    if (!fs.existsSync(this.binaries.initdb)) {
+      console.error('[PostgresManager] initdb binary NOT found at:', this.binaries.initdb)
+      throw new Error(`initdb binary not found at ${this.binaries.initdb}`)
+    }
+
     // Create data directory if it doesn't exist
     if (!fs.existsSync(this.dbPath)) {
       fs.mkdirSync(this.dbPath, { recursive: true })
@@ -106,13 +131,24 @@ class PostgresManager {
 
       console.log('[PostgresManager] Running initdb with args:', args.join(' '))
 
+      const binPath = path.dirname(this.binaries.initdb)
+      const nativePath = path.dirname(binPath)
+      const libDir = path.join(nativePath, 'lib')
+      const shareDir = path.join(nativePath, 'share')
+
+      console.log('[PostgresManager] binPath:', binPath)
+      console.log('[PostgresManager] PGLIBDIR:', libDir)
+      console.log('[PostgresManager] PGSHAREDIR:', shareDir)
+
       // Force POSIX locale to completely avoid Chinese locale issues on Windows
       // Remove all locale-related env vars and set to POSIX
       const cleanEnv = {
-        PATH: process.env.PATH,
+        PATH: `${binPath};${process.env.PATH}`,
         SYSTEMROOT: process.env.SYSTEMROOT,
         TEMP: process.env.TEMP,
         TMP: process.env.TMP,
+        PGLIBDIR: libDir,
+        PGSHAREDIR: shareDir,
         LC_ALL: 'POSIX',
         LC_COLLATE: 'POSIX',
         LC_CTYPE: 'POSIX',
@@ -170,6 +206,12 @@ class PostgresManager {
     console.log('[PostgresManager] Starting PostgreSQL...')
     console.log('[PostgresManager] pg_ctl path:', this.binaries.pg_ctl)
 
+    // Verify binary exists
+    if (!fs.existsSync(this.binaries.pg_ctl)) {
+      console.error('[PostgresManager] pg_ctl binary NOT found at:', this.binaries.pg_ctl)
+      throw new Error(`pg_ctl binary not found at ${this.binaries.pg_ctl}`)
+    }
+
     return new Promise((resolve, reject) => {
       const args = [
         '-D',
@@ -183,12 +225,19 @@ class PostgresManager {
 
       console.log('[PostgresManager] Running pg_ctl with args:', args.join(' '))
 
+      const binPath = path.dirname(this.binaries.pg_ctl)
+      const nativePath = path.dirname(binPath)
+      const libDir = path.join(nativePath, 'lib')
+      const shareDir = path.join(nativePath, 'share')
+
       // Use same clean environment as initdb
       const cleanEnv = {
-        PATH: process.env.PATH,
+        PATH: `${binPath};${process.env.PATH}`,
         SYSTEMROOT: process.env.SYSTEMROOT,
         TEMP: process.env.TEMP,
         TMP: process.env.TMP,
+        PGLIBDIR: libDir,
+        PGSHAREDIR: shareDir,
         PGPASSWORD: this.password,
         LC_ALL: 'POSIX',
         LC_COLLATE: 'POSIX',
@@ -349,7 +398,7 @@ export class DatabaseService {
 
     const initPromise = this._doInit()
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Database initialization timeout (30s)')), INIT_TIMEOUT_MS)
+      setTimeout(() => reject(new Error('Database initialization timeout (120s)')), INIT_TIMEOUT_MS)
     })
 
     try {
