@@ -4,6 +4,7 @@ export interface LLMConfig {
   model?: string
   temperature?: number
   maxTokens?: number
+  maxOutputTokens?: number
   topP?: number
   stopSequences?: string[]
 }
