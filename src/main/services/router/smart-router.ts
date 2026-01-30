@@ -1,5 +1,18 @@
-import { DelegateEngine } from '../delegate'
-import { WorkforceEngine } from '../workforce'
+import { DelegateEngine, type DelegateTaskResult } from '../delegate'
+import { WorkforceEngine, type WorkflowResult } from '../workforce'
+
+export interface RouteContext {
+  prompt?: string
+  parentTaskId?: string
+}
+
+export interface DirectRouteResult {
+  success: true
+  output: string
+  strategy: 'direct'
+}
+
+export type RouteResult = DelegateTaskResult | WorkflowResult | DirectRouteResult
 
 export interface RoutingRule {
   pattern: RegExp
@@ -59,7 +72,7 @@ export class SmartRouter {
     return 'direct'
   }
 
-  async route(input: string, context?: any): Promise<any> {
+  async route(input: string, context?: RouteContext): Promise<RouteResult> {
     const rule = this.findRule(input)
     const strategy = rule.strategy
 

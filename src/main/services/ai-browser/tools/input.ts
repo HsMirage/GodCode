@@ -21,7 +21,7 @@ export const clickTool: BrowserTool = {
     required: ['uid']
   },
   execute: async (params, context) => {
-    const { uid } = params as ClickParams
+    const { uid } = params as unknown as ClickParams
     const { webContents } = context
 
     if (!webContents) {
@@ -68,7 +68,7 @@ export const fillTool: BrowserTool = {
     required: ['uid', 'value']
   },
   execute: async (params, context) => {
-    const { uid, value } = params as FillParams
+    const { uid, value } = params as unknown as FillParams
     const { webContents } = context
 
     if (!webContents) {

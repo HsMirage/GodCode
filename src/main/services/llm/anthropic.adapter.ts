@@ -152,7 +152,8 @@ export class AnthropicAdapter implements LLMAdapter {
             const viewId = 'default'
             const webContents = browserViewManager.getWebContents(viewId)
             const context = { viewId, webContents }
-            const execResult = await tool.execute(toolBlock.input, context)
+            const toolInput = toolBlock.input as Record<string, unknown>
+            const execResult = await tool.execute(toolInput, context)
             result = JSON.stringify(execResult)
             logger.info('Tool executed', { tool: toolBlock.name, result })
           } catch (error) {

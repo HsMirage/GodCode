@@ -1,5 +1,5 @@
 import { IpcMainInvokeEvent } from 'electron'
-import { Model as PrismaModel } from '@prisma/client'
+import { Model as PrismaModel, Prisma } from '@prisma/client'
 import { DatabaseService } from '../../services/database'
 import { Model as DomainModel } from '../../../types/domain'
 import { SecureStorageService, maskApiKey } from '../../services/secure-storage.service'
@@ -67,7 +67,7 @@ export async function handleModelUpdate(
   const secureStorage = SecureStorageService.getInstance()
   const { id, data } = input
 
-  const updateData: any = {
+  const updateData: Prisma.ModelUpdateInput = {
     ...data,
     config: data.config ?? undefined
   }

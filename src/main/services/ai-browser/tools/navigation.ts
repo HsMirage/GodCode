@@ -24,7 +24,7 @@ export const navigateTool: BrowserTool = {
   },
   execute: async (params, context) => {
     try {
-      const { url: rawUrl } = params as NavigateParams
+      const { url: rawUrl } = params as unknown as NavigateParams
       const { viewId } = context
 
       let url = rawUrl

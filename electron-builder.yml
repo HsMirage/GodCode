@@ -2,12 +2,20 @@ appId: com.codeall.app
 productName: CodeAll
 directories:
   output: dist
+  buildResources: build
 files:
   - out/**/*
   - prisma/**/*
   - node_modules/**/*
   - package.json
 win:
-  target: nsis
-  # icon: resources/icon.ico  # TODO: Add proper .ico file (must be ICO format, not SVG)
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: dir
+      arch:
+        - x64
+  icon: resources/icon.ico
+  sign: null # Skip code signing for development builds
 publish: null

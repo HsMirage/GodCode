@@ -96,7 +96,7 @@ export class DelegateEngine {
 
       const adapter = createLLMAdapter(modelConfig.provider, {
         apiKey: model.apiKey || '',
-        baseURL: (model.config as any)?.baseURL
+        baseURL: model.baseURL ?? undefined
       })
 
       const messages: Message[] = [

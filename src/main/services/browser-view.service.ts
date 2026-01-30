@@ -308,10 +308,11 @@ class BrowserViewManager {
     }
 
     try {
-      const wc = view.webContents as any
-      wc.destroy()
-    } catch (e) {
-      // Already destroyed
+      if (!view.webContents.isDestroyed()) {
+        view.webContents.closeDevTools()
+      }
+    } catch {
+      // View already destroyed
     }
 
     this.views.delete(viewId)

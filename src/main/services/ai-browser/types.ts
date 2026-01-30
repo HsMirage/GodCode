@@ -11,15 +11,22 @@
  * Modified by CodeAll project.
  */
 
+export interface JsonSchemaProperty {
+  type: string
+  description?: string
+  enum?: string[]
+  default?: unknown
+}
+
 export interface BrowserTool {
   name: string
   description: string
   parameters: {
     type: 'object'
-    properties: Record<string, any>
+    properties: Record<string, JsonSchemaProperty>
     required?: string[]
   }
-  execute: (params: any, context: BrowserToolContext) => Promise<ToolResult>
+  execute: (params: Record<string, unknown>, context: BrowserToolContext) => Promise<ToolResult>
 }
 
 export interface BrowserToolContext {
@@ -29,7 +36,7 @@ export interface BrowserToolContext {
 
 export interface ToolResult {
   success: boolean
-  data?: any
+  data?: unknown
   error?: string
 }
 

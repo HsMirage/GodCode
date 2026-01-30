@@ -1,4 +1,8 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import {
+  GoogleGenerativeAI,
+  type GenerateContentResult,
+  type GenerateContentStreamResult
+} from '@google/generative-ai'
 import type { LLMAdapter, LLMChunk, LLMConfig, LLMResponse } from './adapter.interface'
 import type { Message } from '@/types/domain'
 import { logger } from '@/shared/logger'
@@ -52,8 +56,10 @@ export class GeminiAdapter implements LLMAdapter {
 
         const result = (await Promise.race([
           chat.sendMessage(userPrompt),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), TIMEOUT_MS))
-        ])) as any
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout')), TIMEOUT_MS)
+          )
+        ])) as GenerateContentResult
 
         const content = result.response.text()
         const usage = {
@@ -89,8 +95,10 @@ export class GeminiAdapter implements LLMAdapter {
 
         const result = (await Promise.race([
           chat.sendMessageStream(userPrompt),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), TIMEOUT_MS))
-        ])) as any
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Timeout')), TIMEOUT_MS)
+          )
+        ])) as GenerateContentStreamResult
 
         for await (const chunk of result.stream) {
           const content = chunk.text()

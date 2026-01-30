@@ -12,6 +12,8 @@ vi.mock('electron', () => {
         on: vi.fn(),
         setWindowOpenHandler: vi.fn(),
         destroy: vi.fn(),
+        closeDevTools: vi.fn(),
+        isDestroyed: vi.fn().mockReturnValue(false),
         canGoBack: vi.fn().mockReturnValue(false),
         canGoForward: vi.fn().mockReturnValue(false),
         goBack: vi.fn(),
@@ -94,7 +96,7 @@ describe('BrowserViewManager', () => {
 
     expect(wc).toBeDefined()
     expect(mainWindowMock.removeBrowserView).toHaveBeenCalled()
-    expect((wc as any).destroy).toHaveBeenCalled()
+    expect((wc as { closeDevTools: () => void }).closeDevTools).toHaveBeenCalled()
   })
 
   it('should show the browser view', async () => {

@@ -86,8 +86,9 @@ describe('AI Browser Integration', () => {
     const snapshotResult = await snapshotTool.execute({}, { viewId: VIEW_ID, webContents: view })
     expect(snapshotResult.success).toBe(true)
     if (snapshotResult.success) {
-      expect(snapshotResult.data.count).toBe(2)
-      expect(snapshotResult.data.tree[0].uid).toBe('uid-0')
+      const data = snapshotResult.data as { count: number; tree: { uid: string }[] }
+      expect(data.count).toBe(2)
+      expect(data.tree[0].uid).toBe('uid-0')
     }
 
     // 3. Click Element
@@ -99,7 +100,8 @@ describe('AI Browser Integration', () => {
     )
     expect(clickResult.success).toBe(true)
     if (clickResult.success) {
-      expect(clickResult.data.uid).toBe('uid-0')
+      const data = clickResult.data as { uid: string }
+      expect(data.uid).toBe('uid-0')
     }
 
     // 4. Extract Content
@@ -111,8 +113,9 @@ describe('AI Browser Integration', () => {
     const extractResult = await extractTool.execute({}, { viewId: VIEW_ID, webContents: view })
     expect(extractResult.success).toBe(true)
     if (extractResult.success) {
-      expect(extractResult.data.text).toBe('Test Page Content')
-      expect(extractResult.data.links).toHaveLength(1)
+      const data = extractResult.data as { text: string; links: unknown[] }
+      expect(data.text).toBe('Test Page Content')
+      expect(data.links).toHaveLength(1)
     }
 
     // 5. Screenshot
@@ -125,7 +128,8 @@ describe('AI Browser Integration', () => {
     )
     expect(screenshotResult.success).toBe(true)
     if (screenshotResult.success) {
-      expect(screenshotResult.data.image).toContain('data:image/png;base64')
+      const data = screenshotResult.data as { image: string }
+      expect(data.image).toContain('data:image/png;base64')
     }
   })
 

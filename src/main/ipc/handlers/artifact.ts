@@ -1,10 +1,30 @@
-import { ipcMain } from 'electron'
+import { ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { DatabaseService } from '../../services/database'
 
 export function registerArtifactHandlers(): void {
-  // 1. artifact:download
+  ipcMain.handle('file:read', async (_, filePath: string) => {
+    try {
+      if (!fs.existsSync(filePath)) {
+        return { success: false, error: 'File not found' }
+      }
+      const content = fs.readFileSync(filePath, 'utf-8')
+      return { success: true, content }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  ipcMain.handle('shell:open-path', async (_, filePath: string) => {
+    try {
+      await shell.openPath(filePath)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
   ipcMain.handle('artifact:download', async (_, artifactId: string) => {
     try {
       const db = DatabaseService.getInstance().getClient()

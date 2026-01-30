@@ -237,14 +237,13 @@ class CanvasLifecycle {
       const response = await api.readArtifactContent(path)
       if (!this.tabs.has(tabId)) return
 
-      const res = response as any
-      if (res.success !== false) {
-        const content = res.data?.content || res.content || res
-        tab.content = typeof content === 'string' ? content : JSON.stringify(content)
+      if (response.success !== false) {
+        const content = response.content || ''
+        tab.content = content
         tab.isLoading = false
         tab.error = undefined
       } else {
-        throw new Error(res.error || 'Failed to read file')
+        throw new Error(response.error || 'Failed to read file')
       }
     } catch (error) {
       const tab = this.tabs.get(tabId)
@@ -453,7 +452,7 @@ class CanvasLifecycle {
 
     const viewId = `browser-${tabId}`
     try {
-      const result = (await api.createBrowserView(viewId, url)) as any
+      const result = await api.createBrowserView(viewId, url)
       if (!this.tabs.has(tabId)) {
         await api.destroyBrowserView(viewId)
         return

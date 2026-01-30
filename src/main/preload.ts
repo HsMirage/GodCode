@@ -34,6 +34,8 @@ const ALLOWED_CHANNELS = [
   'artifact:list',
   'artifact:download',
   'artifact:delete',
+  'file:read',
+  'shell:open-path',
   'browser:create',
   'browser:destroy',
   'browser:show',
@@ -52,15 +54,20 @@ const ALLOWED_CHANNELS = [
   'browser:zoom-changed'
 ] as const
 
+type AllowedChannel = (typeof ALLOWED_CHANNELS)[number]
+
+const isAllowedChannel = (channel: string): channel is AllowedChannel =>
+  (ALLOWED_CHANNELS as readonly string[]).includes(channel)
+
 const codeallAPI: CodeAllAPIType = {
   invoke: (channel: string, ...args: unknown[]) => {
-    if (!ALLOWED_CHANNELS.includes(channel as any)) {
+    if (!isAllowedChannel(channel)) {
       return Promise.reject(new Error(`IPC channel not allowed: ${channel}`))
     }
     return ipcRenderer.invoke(channel, ...args)
   },
   on: (channel: string, callback: (...args: unknown[]) => void) => {
-    if (!ALLOWED_CHANNELS.includes(channel as any)) {
+    if (!isAllowedChannel(channel)) {
       throw new Error(`IPC channel not allowed: ${channel}`)
     }
     const subscription = (_event: unknown, ...args: unknown[]) => callback(...args)
