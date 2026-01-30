@@ -104,7 +104,7 @@ export function ChatPage() {
               : 'flex-1'
         }`}
       >
-        <header className="flex items-center justify-between">
+        <header className="flex items-center justify-between mb-2">
           <div>
             <h1 className="text-xl font-semibold">{viewMode === 'chat' ? '对话' : '流程图'}</h1>
             <p className="mt-1 text-sm text-slate-400">

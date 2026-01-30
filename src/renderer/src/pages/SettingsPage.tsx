@@ -338,7 +338,9 @@ export function SettingsPage() {
                       dragIndex === index ? 'ring-2 ring-slate-600/70' : ''
                     ].join(' ')}
                   >
-                    <div className="text-slate-500">↕</div>
+                    <div className="text-slate-500 cursor-grab hover:text-slate-300 transition-colors duration-200">
+                      ↕
+                    </div>
                     <div className="font-mono text-xs text-slate-100">
                       /{rule.pattern.source}/{rule.pattern.flags}
                     </div>
@@ -480,7 +482,7 @@ export function SettingsPage() {
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="submit"
-                  className="rounded-xl border border-slate-700/70 bg-slate-900/70 px-5 py-2 text-sm font-semibold text-white transition hover:border-slate-500/80 hover:bg-slate-900"
+                  className="rounded-xl border border-sky-500/30 bg-sky-500/20 px-5 py-2 text-sm font-semibold text-sky-300 transition-all duration-200 hover:border-sky-500/50 hover:bg-sky-500/30 shadow-[0_0_12px_rgba(14,165,233,0.15)]"
                 >
                   {editingIndex === null ? '添加规则' : '保存修改'}
                 </button>
