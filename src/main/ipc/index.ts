@@ -14,8 +14,19 @@ import {
   handleSessionList
 } from './handlers/session'
 import { handleMessageList, handleMessageSend } from './handlers/message'
+import {
+  handleProviderCacheGetAvailableModels,
+  handleProviderCacheGetStats,
+  handleProviderCacheIsConnected,
+  handleProviderCacheSetStatus
+} from './handlers/provider-cache'
 import { handleRouterGetRules, handleRouterSaveRules } from './handlers/router'
 import { handleTaskList } from './handlers/task'
+import {
+  handleTaskContinuationAbort,
+  handleTaskContinuationGetStatus,
+  handleTaskContinuationSetTodos
+} from './handlers/task-continuation'
 import { registerSpaceHandlers } from './handlers/space'
 import { registerArtifactHandlers } from './handlers/artifact'
 
@@ -38,12 +49,23 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('message:send', handleMessageSend)
   ipcMain.handle('message:list', handleMessageList)
 
+  // Provider cache handlers
+  ipcMain.handle('provider-cache:get-stats', handleProviderCacheGetStats)
+  ipcMain.handle('provider-cache:is-connected', handleProviderCacheIsConnected)
+  ipcMain.handle('provider-cache:get-available-models', handleProviderCacheGetAvailableModels)
+  ipcMain.handle('provider-cache:set-status', handleProviderCacheSetStatus)
+
   // Router handlers
   ipcMain.handle('router:get-rules', handleRouterGetRules)
   ipcMain.handle('router:save-rules', handleRouterSaveRules)
 
   // Task handlers
   ipcMain.handle('task:list', handleTaskList)
+
+  // Task continuation handlers
+  ipcMain.handle('task-continuation:get-status', handleTaskContinuationGetStatus)
+  ipcMain.handle('task-continuation:abort', handleTaskContinuationAbort)
+  ipcMain.handle('task-continuation:set-todos', handleTaskContinuationSetTodos)
 
   // Space handlers
   registerSpaceHandlers()

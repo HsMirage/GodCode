@@ -1,5 +1,12 @@
 import { DelegateEngine, type DelegateTaskResult } from '../delegate'
 import { WorkforceEngine, type WorkflowResult } from '../workforce'
+import {
+  resolveModelWithFallback,
+  DEFAULT_FALLBACK_CHAINS,
+  type ModelResolutionResult,
+  type FallbackEntry
+} from '../llm/model-resolver'
+import { providerCacheService } from '../provider-cache.service'
 
 export interface RouteContext {
   prompt?: string
@@ -77,12 +84,14 @@ export class SmartRouter {
     const strategy = rule.strategy
 
     if (strategy === 'delegate') {
+      const resolved = this.resolveModel(rule.category, rule.model)
       return await this.delegateEngine.delegateTask({
         description: input,
         prompt: context?.prompt ?? input,
         category: rule.category,
         subagent_type: rule.subagent,
-        parentTaskId: context?.parentTaskId
+        parentTaskId: context?.parentTaskId,
+        model: resolved?.model
       })
     }
 
@@ -104,5 +113,31 @@ export class SmartRouter {
         strategy: 'direct'
       }
     )
+  }
+
+  private resolveModel(category?: string, userModel?: string): ModelResolutionResult | null {
+    const availableModels = providerCacheService.getAvailableModels()
+
+    const toFallbackChain = (
+      chain: readonly { readonly model: string; readonly providers: readonly string[] }[]
+    ): FallbackEntry[] => chain.map(e => ({ model: e.model, providers: [...e.providers] }))
+
+    let fallbackChain: FallbackEntry[] = toFallbackChain(DEFAULT_FALLBACK_CHAINS.coding)
+
+    if (category === 'visual-engineering') {
+      fallbackChain = toFallbackChain(DEFAULT_FALLBACK_CHAINS.visual)
+    } else if (category === 'quick') {
+      fallbackChain = toFallbackChain(DEFAULT_FALLBACK_CHAINS.quick)
+    } else if (category === 'ultrabrain' || category === 'artistry') {
+      fallbackChain = toFallbackChain(DEFAULT_FALLBACK_CHAINS.orchestrator)
+    } else if (category === 'unspecified-low' || category === 'unspecified-high') {
+      fallbackChain = toFallbackChain(DEFAULT_FALLBACK_CHAINS.coding)
+    }
+
+    return resolveModelWithFallback({
+      userModel,
+      fallbackChain,
+      availableModels
+    })
   }
 }

@@ -14,6 +14,7 @@
 import { DatabaseService } from '@/main/services/database'
 import { LoggerService } from '@/main/services/logger'
 import { createLLMAdapter } from '@/main/services/llm/factory'
+import { truncateToTokenLimit } from '@/main/services/llm/dynamic-truncator'
 import type { Message } from '@/types/domain'
 import { categories } from './categories'
 import { agents } from './agents'
@@ -24,6 +25,7 @@ export interface DelegateTaskInput {
   category?: string
   subagent_type?: string
   parentTaskId?: string
+  model?: string
 }
 
 export interface DelegateTaskResult {
@@ -37,11 +39,24 @@ export class DelegateEngine {
   private logger = LoggerService.getInstance().getLogger()
 
   async delegateTask(input: DelegateTaskInput): Promise<DelegateTaskResult> {
-    const { description, prompt, category, subagent_type, parentTaskId } = input
+    const {
+      description,
+      prompt,
+      category,
+      subagent_type,
+      parentTaskId,
+      model: overrideModel
+    } = input
 
     let modelConfig: { model: string; temperature: number; provider: string }
 
-    if (category) {
+    if (overrideModel) {
+      modelConfig = {
+        model: overrideModel,
+        temperature: 0.5,
+        provider: this.getProviderFromModel(overrideModel)
+      }
+    } else if (category) {
       const config = categories[category]
       if (!config) {
         throw new Error(`Unknown category: ${category}`)
@@ -123,11 +138,13 @@ export class DelegateEngine {
         temperature: modelConfig.temperature
       })
 
+      const truncatedOutput = truncateToTokenLimit(response.content, 50000).result
+
       await this.prisma.task.update({
         where: { id: task.id },
         data: {
           status: 'completed',
-          output: response.content,
+          output: truncatedOutput,
           completedAt: new Date()
         }
       })
@@ -136,7 +153,7 @@ export class DelegateEngine {
 
       return {
         taskId: task.id,
-        output: response.content,
+        output: truncatedOutput,
         success: true
       }
     } catch (error) {

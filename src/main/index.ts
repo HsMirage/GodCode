@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import path from 'path'
 import { registerIpcHandlers } from './ipc'
 import { DatabaseService } from './services/database'
+import { processCleanupService } from './services/process-cleanup.service'
 import { logger } from '../shared/logger'
 
 process.on('uncaughtException', error => {
@@ -62,7 +63,13 @@ app.on('activate', () => {
 app.on('will-quit', async _event => {
   logger.info('[Main] Resource cleanup started')
 
-  // Clean up BrowserViews
+  try {
+    await processCleanupService.cleanupAll()
+    logger.info('[Main] Process cleanup complete')
+  } catch (error) {
+    logger.error('[Main] Failed to cleanup processes:', error)
+  }
+
   try {
     const { browserViewManager } = await import('./services/browser-view.service')
     browserViewManager.destroyAll()
@@ -71,7 +78,6 @@ app.on('will-quit', async _event => {
     logger.error('[Main] Failed to destroy BrowserViews:', error)
   }
 
-  // Clean up Database
   try {
     const db = DatabaseService.getInstance()
     await db.shutdown()
