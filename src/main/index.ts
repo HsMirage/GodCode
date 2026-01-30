@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import path from 'path'
 import { registerIpcHandlers } from './ipc'
 import { DatabaseService } from './services/database'
@@ -14,6 +14,86 @@ process.on('unhandledRejection', reason => {
   console.error('[Main] Unhandled Rejection:', reason)
   logger.error('[Main] Unhandled Rejection:', reason)
 })
+
+const gotTheLock = app.requestSingleInstanceLock()
+
+if (!gotTheLock) {
+  app.quit()
+} else {
+  let mainWindow: BrowserWindow | null = null
+
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.focus()
+    }
+  })
+
+  app.whenReady().then(async () => {
+    logger.info('Application starting')
+
+    mainWindow = createWindow()
+    registerIpcHandlers(mainWindow)
+
+    try {
+      const db = DatabaseService.getInstance()
+      logger.info('Database initialization started')
+      await db.init()
+      logger.info('Database initialization completed')
+    } catch (error) {
+      logger.error('Database initialization failed:', error)
+      dialog.showErrorBox(
+        '数据库初始化失败',
+        `CodeAll 无法初始化数据库。部分功能可能不可用。\n\n错误: ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+  })
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit()
+    }
+  })
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      mainWindow = createWindow()
+    }
+  })
+
+  app.on('will-quit', async _event => {
+    logger.info('[Main] Resource cleanup started')
+
+    try {
+      await processCleanupService.cleanupAll()
+      logger.info('[Main] Process cleanup complete')
+    } catch (error) {
+      logger.error('[Main] Failed to cleanup processes:', error)
+    }
+
+    try {
+      const { browserViewManager } = await import('./services/browser-view.service')
+      browserViewManager.destroyAll()
+      logger.info('[Main] BrowserViews destroyed')
+    } catch (error) {
+      logger.error('[Main] Failed to destroy BrowserViews:', error)
+    }
+
+    try {
+      const db = DatabaseService.getInstance()
+      await db.shutdown()
+      logger.info('[Main] Database shutdown complete')
+    } catch (error) {
+      logger.error('[Main] Failed to shutdown database:', error)
+    }
+
+    logger.info('[Main] Resource cleanup complete')
+  })
+
+  app.on('quit', () => {
+    logger.info('Application quit')
+  })
+}
 
 function createWindow() {
   logger.info('Creating main window')
@@ -36,59 +116,3 @@ function createWindow() {
 
   return mainWindow
 }
-
-app.whenReady().then(async () => {
-  logger.info('Application starting')
-  const db = DatabaseService.getInstance()
-  logger.info('Database initialization started')
-  await db.init()
-  logger.info('Database initialization completed')
-
-  const mainWindow = createWindow()
-  registerIpcHandlers(mainWindow)
-})
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit()
-  }
-})
-
-app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow()
-  }
-})
-
-app.on('will-quit', async _event => {
-  logger.info('[Main] Resource cleanup started')
-
-  try {
-    await processCleanupService.cleanupAll()
-    logger.info('[Main] Process cleanup complete')
-  } catch (error) {
-    logger.error('[Main] Failed to cleanup processes:', error)
-  }
-
-  try {
-    const { browserViewManager } = await import('./services/browser-view.service')
-    browserViewManager.destroyAll()
-    logger.info('[Main] BrowserViews destroyed')
-  } catch (error) {
-    logger.error('[Main] Failed to destroy BrowserViews:', error)
-  }
-
-  try {
-    const db = DatabaseService.getInstance()
-    await db.shutdown()
-    logger.info('[Main] Database shutdown complete')
-  } catch (error) {
-    logger.error('[Main] Failed to shutdown database:', error)
-  }
-
-  logger.info('[Main] Resource cleanup complete')
-})
-
-app.on('quit', () => {
-  logger.info('Application quit')
-})
