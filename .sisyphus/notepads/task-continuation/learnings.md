@@ -1,0 +1,3 @@
+- Created IPC handlers for Task Continuation service
+- Followed existing IPC handler patterns
+- Registered handlers in src/main/ipc/index.ts
