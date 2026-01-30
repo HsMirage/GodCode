@@ -2,8 +2,225 @@ import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import net from 'net'
+import { spawn, ChildProcess } from 'child_process'
 
-const INIT_TIMEOUT_MS = 30000 // 30 seconds
+const INIT_TIMEOUT_MS = 60000 // 60 seconds for first-time initialization
+
+/**
+ * Get the correct binary paths for embedded-postgres.
+ * In packaged app, binaries are in app.asar.unpacked.
+ */
+function getBinaryPaths(): { pg_ctl: string; initdb: string; postgres: string } {
+  if (app.isPackaged) {
+    // In packaged app, binaries are in app.asar.unpacked
+    const resourcesPath = process.resourcesPath
+    const unpackedPath = path.join(
+      resourcesPath,
+      'app.asar.unpacked',
+      'node_modules',
+      '@embedded-postgres',
+      'windows-x64',
+      'native',
+      'bin'
+    )
+
+    return {
+      pg_ctl: path.join(unpackedPath, 'pg_ctl.exe'),
+      initdb: path.join(unpackedPath, 'initdb.exe'),
+      postgres: path.join(unpackedPath, 'postgres.exe')
+    }
+  } else {
+    // In development, use node_modules path
+    const nodeModulesPath = path.join(
+      __dirname,
+      '..',
+      '..',
+      '..',
+      'node_modules',
+      '@embedded-postgres',
+      'windows-x64',
+      'native',
+      'bin'
+    )
+
+    return {
+      pg_ctl: path.join(nodeModulesPath, 'pg_ctl.exe'),
+      initdb: path.join(nodeModulesPath, 'initdb.exe'),
+      postgres: path.join(nodeModulesPath, 'postgres.exe')
+    }
+  }
+}
+
+/**
+ * Custom PostgreSQL manager that works in both development and packaged environments.
+ * This bypasses embedded-postgres library's path resolution issues in Electron.
+ */
+class PostgresManager {
+  private process: ChildProcess | null = null
+  private dbPath: string
+  private port: number
+  private user: string
+  private password: string
+  private binaries: ReturnType<typeof getBinaryPaths>
+
+  constructor(options: { databaseDir: string; port: number; user: string; password: string }) {
+    this.dbPath = options.databaseDir
+    this.port = options.port
+    this.user = options.user
+    this.password = options.password
+    this.binaries = getBinaryPaths()
+  }
+
+  async initialise(): Promise<void> {
+    const pgVersionPath = path.join(this.dbPath, 'PG_VERSION')
+    if (fs.existsSync(pgVersionPath)) {
+      console.log('[PostgresManager] Database already initialized')
+      return
+    }
+
+    console.log('[PostgresManager] Initializing database cluster...')
+    console.log('[PostgresManager] initdb path:', this.binaries.initdb)
+
+    // Create data directory if it doesn't exist
+    if (!fs.existsSync(this.dbPath)) {
+      fs.mkdirSync(this.dbPath, { recursive: true })
+    }
+
+    // Create password file for initdb
+    const pwFile = path.join(app.getPath('temp'), `pg_pw_${Date.now()}.txt`)
+    fs.writeFileSync(pwFile, this.password)
+
+    return new Promise((resolve, reject) => {
+      const args = [
+        '-D',
+        this.dbPath,
+        '-U',
+        this.user,
+        '--pwfile',
+        pwFile,
+        '-A',
+        'password',
+        '-E',
+        'UTF8'
+      ]
+
+      console.log('[PostgresManager] Running initdb with args:', args.join(' '))
+
+      const proc = spawn(this.binaries.initdb, args, {
+        env: { ...process.env, LC_MESSAGES: 'en_US.UTF-8' },
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+
+      let stdout = ''
+      let stderr = ''
+
+      proc.stdout?.on('data', data => {
+        stdout += data.toString()
+        console.log('[initdb]', data.toString().trim())
+      })
+
+      proc.stderr?.on('data', data => {
+        stderr += data.toString()
+        console.error('[initdb error]', data.toString().trim())
+      })
+
+      proc.on('close', code => {
+        // Clean up password file
+        try {
+          fs.unlinkSync(pwFile)
+        } catch {
+          /* ignore */
+        }
+
+        if (code === 0) {
+          console.log('[PostgresManager] Database cluster initialized successfully')
+          resolve()
+        } else {
+          reject(new Error(`initdb failed with code ${code}: ${stderr}`))
+        }
+      })
+
+      proc.on('error', err => {
+        try {
+          fs.unlinkSync(pwFile)
+        } catch {
+          /* ignore */
+        }
+        reject(err)
+      })
+    })
+  }
+
+  async start(): Promise<void> {
+    console.log('[PostgresManager] Starting PostgreSQL...')
+    console.log('[PostgresManager] pg_ctl path:', this.binaries.pg_ctl)
+
+    return new Promise((resolve, reject) => {
+      const args = [
+        '-D',
+        this.dbPath,
+        '-l',
+        path.join(this.dbPath, 'postgres.log'),
+        '-o',
+        `-p ${this.port}`,
+        'start'
+      ]
+
+      console.log('[PostgresManager] Running pg_ctl with args:', args.join(' '))
+
+      const proc = spawn(this.binaries.pg_ctl, args, {
+        env: { ...process.env, PGPASSWORD: this.password },
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+
+      let stdout = ''
+      let stderr = ''
+
+      proc.stdout?.on('data', data => {
+        stdout += data.toString()
+        console.log('[pg_ctl]', data.toString().trim())
+      })
+
+      proc.stderr?.on('data', data => {
+        stderr += data.toString()
+        console.error('[pg_ctl error]', data.toString().trim())
+      })
+
+      proc.on('close', code => {
+        if (code === 0 || stdout.includes('server started') || stdout.includes('server starting')) {
+          console.log('[PostgresManager] PostgreSQL started successfully')
+          // Wait a bit for the server to be ready
+          setTimeout(() => resolve(), 2000)
+        } else {
+          reject(new Error(`pg_ctl start failed with code ${code}: ${stderr}`))
+        }
+      })
+
+      proc.on('error', reject)
+    })
+  }
+
+  async stop(): Promise<void> {
+    console.log('[PostgresManager] Stopping PostgreSQL...')
+
+    return new Promise((resolve, reject) => {
+      const args = ['-D', this.dbPath, 'stop', '-m', 'fast']
+
+      const proc = spawn(this.binaries.pg_ctl, args, {
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
+
+      proc.on('close', code => {
+        if (code === 0) {
+          console.log('[PostgresManager] PostgreSQL stopped successfully')
+        }
+        resolve()
+      })
+
+      proc.on('error', () => resolve())
+    })
+  }
+}
 
 interface EmbeddedPostgresInstance {
   initialise(): Promise<void>
@@ -117,31 +334,33 @@ export class DatabaseService {
   private async _doInit(): Promise<void> {
     console.log('[Database] Phase 1: Loading credentials...')
     console.log('[Database] Database directory:', this.dbPath)
+    console.log('[Database] App is packaged:', app.isPackaged)
 
     const credentialsPath = path.join(app.getPath('userData'), 'db-credentials.json')
     const credentials = await loadOrCreateCredentials(credentialsPath, this.dbPath)
 
-    console.log('[Database] Phase 2: Importing embedded-postgres...')
-    const EmbeddedPostgres = await import('embedded-postgres')
-    const EmbeddedPostgresClass = EmbeddedPostgres.default
+    console.log('[Database] Phase 2: Creating PostgreSQL manager...')
 
-    embeddedPostgres = new EmbeddedPostgresClass({
+    // Use our custom PostgresManager that handles packaged app paths correctly
+    const postgresManager = new PostgresManager({
       databaseDir: this.dbPath,
       user: credentials.user,
       password: credentials.password,
-      port: credentials.port,
-      persistent: true
+      port: credentials.port
     })
+
+    // Store for shutdown
+    embeddedPostgres = postgresManager
 
     if (!this.isDbInitialized()) {
       console.log('[Database] Phase 3: First run - initializing database cluster...')
-      await embeddedPostgres.initialise()
+      await postgresManager.initialise()
     } else {
       console.log('[Database] Phase 3: Database cluster already exists, skipping init')
     }
 
     console.log('[Database] Phase 4: Starting PostgreSQL...')
-    await embeddedPostgres.start()
+    await postgresManager.start()
 
     const databaseUrl = `postgresql://${credentials.user}:${credentials.password}@localhost:${credentials.port}/postgres`
     process.env.DATABASE_URL = databaseUrl
