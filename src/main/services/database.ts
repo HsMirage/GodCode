@@ -100,9 +100,8 @@ class PostgresManager {
         pwFile,
         '-A',
         'password',
-        '--encoding=UTF8',
-        '--no-locale',
-        '--text-search-config=pg_catalog.simple'
+        '--encoding=SQL_ASCII',
+        '--no-locale'
       ]
 
       console.log('[PostgresManager] Running initdb with args:', args.join(' '))
