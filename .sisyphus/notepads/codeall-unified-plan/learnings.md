@@ -479,3 +479,19 @@ PathValidator.normalizePath(inputPath): string
 - ✅ `pnpm test tests/integration/orchestration.test.ts` - 18/18 passed
 - ✅ `pnpm typecheck` - clean (0 errors)
 - ✅ All orchestration logic verified without real LLM calls
+
+## [2026-01-31] Integration Tests - Browser Tools
+
+### Testing Patterns Discovered
+- **Mocking Electron**: Essential for tests involving `LoggerService` which initializes paths at module level (even if not used).
+- **ToolExecutor + Logger**: Mocking `LoggerService` directly didn't work initially due to import order/hoisting. Mocking the underlying dependency (`electron`) solved it because `LoggerService` relies on `app.getPath`.
+- **Vitest Hoisting**: `vi.hoisted` is critical when you need to use mock variables inside `vi.mock` factory functions.
+- **BrowserViewManager Mocking**: Successful mocking of `create`, `navigate`, `getWebContents`, `getState` allows full simulation of browser tool logic without a real browser.
+
+### Challenges Encountered
+- **Import Order**: `ToolExecutor` initializing `LoggerService` immediately caused issues with mocking. Solved by mocking `electron` before imports.
+- **Mocking Tool Execution**: `ToolExecutionResult` does not have a `data` property, it puts tool data into `metadata` and JSON-stringified `output`. Tests needed to check `metadata` or parse `output`.
+
+### Verification Results
+- ✅ All 17 tests passed
+- ✅ TypeScript clean
