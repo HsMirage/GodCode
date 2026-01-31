@@ -8,11 +8,39 @@ files:
   - prisma/**/*
   - node_modules/**/*
   - package.json
+  # Exclude Prisma engines from ASAR (they go to extraResources)
+  - '!**/node_modules/@prisma/engines/introspection-engine*'
+  - '!**/node_modules/@prisma/engines/schema-engine*'
+  - '!**/node_modules/@prisma/engines/prisma-fmt*'
+  - '!**/node_modules/@prisma/engines/query_engine-*'
+  - '!**/node_modules/@prisma/engines/libquery_engine*'
+  - '!**/node_modules/prisma/query_engine*'
+  - '!**/node_modules/prisma/libquery_engine*'
+
+extraResources:
+  # Place Prisma engine binaries OUTSIDE the ASAR archive
+  - from: 'node_modules/.prisma/client'
+    to: 'prisma-client'
+    filter:
+      - '**/*.node'
+      - '**/*.dll.node'
+      - 'schema.prisma'
+      - 'index.js'
+      - 'package.json'
+  - from: 'node_modules/@prisma/engines'
+    to: 'prisma-engines'
+    filter:
+      - 'query_engine*'
+      - 'libquery_engine*'
+      - 'schema-engine*'
+
 asarUnpack:
   - '**/node_modules/@embedded-postgres/**/*'
   - '**/node_modules/embedded-postgres/**/*'
-  - '**/node_modules/.prisma/client/*.node'
+  - '**/node_modules/.prisma/**/*'
+  - '**/node_modules/@prisma/**/*'
   - '**/*.node'
+  - '**/*.dll.node'
 win:
   target:
     - target: nsis
