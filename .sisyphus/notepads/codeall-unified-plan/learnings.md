@@ -445,3 +445,37 @@ PathValidator.normalizePath(inputPath): string
 
 - **LSP False Positives**: The environment reported LSP errors for `@prisma/client` imports, but the tests passed successfully. This suggests the types might not be generated or linked correctly in the editor environment, but runtime/test-time resolution works fine.
 - **Mock State Sharing**: Ensuring the same mock instances were used by both the test code (for expectations) and the implementation code (for execution) required careful setup with `vi.hoisted`.
+
+## [2026-01-31] Integration Tests - Orchestration Engines
+
+### Files Created
+- `tests/integration/orchestration.test.ts` - 392 lines, 18 tests
+
+### Test Coverage
+- **DelegateEngine**: 9 tests
+  - Category-based delegation (visual-engineering, quick, ultrabrain)
+  - Direct agent selection (oracle, librarian, explore)
+  - Session continuity (session_id reuse)
+  - Error handling (missing category, invalid agent)
+  - Skill loading mechanism
+- **WorkforceEngine**: 9 tests
+  - Goal decomposition into subtasks
+  - DAG building from dependencies
+  - Parallel vs sequential execution detection
+  - Task state transitions
+  - Fallback logic on LLM failures
+
+### Testing Patterns Discovered
+1. **Mock complex database transactions**: Used `vi.mocked()` with `$transaction` callback pattern
+2. **Type annotations in vi.hoisted()**: Explicit `any` types needed to avoid implicit any errors
+3. **Mock implementations must match signatures**: Added `(args: any)` annotations to mock functions
+
+### Challenges Encountered
+- TypeScript strict mode requires explicit type annotations even in test mocks
+- Prisma transaction mocking requires understanding the callback pattern
+- LLM response mocking for task decomposition requires realistic JSON structures
+
+### Verification Results
+- ✅ `pnpm test tests/integration/orchestration.test.ts` - 18/18 passed
+- ✅ `pnpm typecheck` - clean (0 errors)
+- ✅ All orchestration logic verified without real LLM calls
