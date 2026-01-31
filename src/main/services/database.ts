@@ -538,6 +538,35 @@ export class DatabaseService {
     const databaseUrl = `postgresql://${credentials.user}:${credentials.password}@localhost:${credentials.port}/postgres`
     process.env.DATABASE_URL = databaseUrl
 
+    // Set Prisma query engine path for packaged app
+    if (app.isPackaged) {
+      const enginePath = path.join(
+        process.resourcesPath,
+        'prisma-client',
+        'query_engine-windows.dll.node'
+      )
+      console.log('[Database] Setting PRISMA_QUERY_ENGINE_LIBRARY:', enginePath)
+
+      // Verify engine exists
+      if (!fs.existsSync(enginePath)) {
+        console.error('[Database] Prisma query engine NOT found at:', enginePath)
+        // Try alternative path
+        const altPath = path.join(
+          process.resourcesPath,
+          'prisma-engines',
+          'query_engine-windows.dll.node'
+        )
+        if (fs.existsSync(altPath)) {
+          console.log('[Database] Using alternative engine path:', altPath)
+          process.env.PRISMA_QUERY_ENGINE_LIBRARY = altPath
+        } else {
+          throw new Error(`Prisma query engine not found at ${enginePath} or ${altPath}`)
+        }
+      } else {
+        process.env.PRISMA_QUERY_ENGINE_LIBRARY = enginePath
+      }
+    }
+
     console.log('[Database] Phase 5: Connecting Prisma...')
     // Dynamic import for ESM/CommonJS compatibility
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
