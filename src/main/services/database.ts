@@ -76,11 +76,10 @@ function getBinaryPaths(): { pg_ctl: string; initdb: string; postgres: string } 
     }
   } else {
     // In development, use node_modules path
+    // After electron-vite bundling, __dirname is out/main, so we need 2 levels up to reach project root
+    const projectRoot = path.join(__dirname, '..', '..')
     const nodeModulesPath = path.join(
-      __dirname,
-      '..',
-      '..',
-      '..',
+      projectRoot,
       'node_modules',
       '@embedded-postgres',
       packageName,
