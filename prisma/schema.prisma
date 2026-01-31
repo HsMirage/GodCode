@@ -7,6 +7,7 @@ datasource db {
 // Prisma Client配置
 generator client {
   provider = "prisma-client-js"
+  binaryTargets = ["native", "windows"]
 }
 
 // Space表
