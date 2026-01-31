@@ -305,6 +305,17 @@ class PostgresManager {
       throw new Error(`pg_ctl binary not found at ${this.binaries.pg_ctl}`)
     }
 
+    // Clean up stale log file to prevent permission issues
+    const logPath = path.join(this.dbPath, 'postgres.log')
+    if (fs.existsSync(logPath)) {
+      try {
+        fs.unlinkSync(logPath)
+        console.log('[PostgresManager] Removed stale postgres.log')
+      } catch (e) {
+        console.warn('[PostgresManager] Could not remove log file:', (e as Error).message)
+      }
+    }
+
     return new Promise((resolve, reject) => {
       const args = [
         '-D',
@@ -532,6 +543,11 @@ export class DatabaseService {
     }
 
     console.log('[Database] Phase 4: Starting PostgreSQL...')
+
+    // Clean up any zombie postgres processes before starting
+    console.log('[Database] Cleaning up zombie processes...')
+    await killPostgresProcesses()
+
     await postgresManager.start()
 
     const databaseUrl = `postgresql://${credentials.user}:${credentials.password}@localhost:${credentials.port}/postgres`
