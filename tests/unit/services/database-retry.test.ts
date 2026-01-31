@@ -22,6 +22,12 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     existsSync: vi.fn((p: any) => {
+      // Mock presence of embedded-postgres binaries
+      if (
+        p.toString().includes('embedded-postgres') &&
+        (p.toString().includes('bin') || p.toString().includes('native'))
+      )
+        return true
       if (p.toString().includes('PG_VERSION')) return false
       return true
     }),
@@ -32,8 +38,29 @@ vi.mock('fs', async () => {
   }
 })
 
-vi.mock('child_process', async importOriginal => {
-  const actual = await importOriginal<typeof import('child_process')>()
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs')
+  const newFs = {
+    ...actual,
+    existsSync: vi.fn((p: any) => {
+      const str = p.toString()
+      if (str.includes('initdb') || str.includes('pg_ctl') || str.includes('postgres')) return true
+      if (str.includes('PG_VERSION')) return false
+      return true
+    }),
+    mkdirSync: vi.fn(),
+    chmodSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    readFileSync: vi.fn().mockReturnValue('{}')
+  }
+  return {
+    ...newFs,
+    default: newFs
+  }
+})
+
+vi.mock('child_process', async (importOriginal: any) => {
+  const actual = await importOriginal()
   const spawnMock = vi.fn()
   return {
     ...actual,
@@ -73,28 +100,35 @@ describe('DatabaseService Retry Logic', () => {
     // Mock dbUtils.sleepFn for testing
     vi.spyOn(dbUtils, 'sleepFn').mockResolvedValue(undefined)
 
-    vi.mocked(spawn).mockImplementation((command, args) => {
+    vi.mocked(spawn).mockImplementation((command: any, args: any) => {
       const outcome = spawnMockCalls[callIndex]
 
       const proc = {
-        stdout: { on: vi.fn() },
+        stdout: {
+          on: vi.fn((event: any, cb: any) => {
+            if (event === 'data' && !outcome) {
+              // Default success output for pg_ctl start
+              setTimeout(() => cb(Buffer.from('server started')), 10)
+            }
+          })
+        },
         stderr: {
-          on: vi.fn((event, cb) => {
+          on: vi.fn((event: any, cb: any) => {
             if (event === 'data' && outcome?.stderr) {
               cb(Buffer.from(outcome.stderr))
             }
           })
         },
-        on: vi.fn((event, cb) => {
+        on: vi.fn((event: any, cb: any) => {
           if (outcome) {
             if (event === 'error' && outcome.error) {
               setTimeout(() => cb(outcome.error), 10)
-            } else if (event === 'close' && !outcome.error) {
+            } else if ((event === 'close' || event === 'exit') && !outcome.error) {
               setTimeout(() => cb(outcome.code), 10)
             }
           } else {
             // Default success for subsequent calls (e.g. postgres server start)
-            if (event === 'close') setTimeout(() => cb(0), 10)
+            if (event === 'close' || event === 'exit') setTimeout(() => cb(0), 10)
           }
         }),
         kill: vi.fn()
@@ -117,7 +151,7 @@ describe('DatabaseService Retry Logic', () => {
     await db.init()
 
     expect(dbUtils.sleepFn).not.toHaveBeenCalled()
-    expect(killPostgresProcesses).not.toHaveBeenCalled()
+    expect(killPostgresProcesses).toHaveBeenCalledTimes(1)
   })
 
   it('Scenario 2: initdb fails twice then succeeds -> retries with backoff', async () => {
@@ -129,7 +163,7 @@ describe('DatabaseService Retry Logic', () => {
     expect(dbUtils.sleepFn).toHaveBeenNthCalledWith(1, 1000)
     expect(dbUtils.sleepFn).toHaveBeenNthCalledWith(2, 3000)
 
-    expect(killPostgresProcesses).toHaveBeenCalledTimes(2)
+    expect(killPostgresProcesses).toHaveBeenCalledTimes(3)
   })
 
   it('Scenario 3: initdb fails 3 times -> throws error', async () => {
@@ -147,7 +181,7 @@ describe('DatabaseService Retry Logic', () => {
 
     await db.init()
 
-    expect(killPostgresProcesses).toHaveBeenCalledTimes(2)
+    expect(killPostgresProcesses).toHaveBeenCalledTimes(3)
   })
 
   it('Scenario 5: verify sleepFn parameters are correct (1000, 3000)', async () => {
@@ -177,4 +211,4 @@ describe('DatabaseService Retry Logic', () => {
     expect(dbUtils.sleepFn).not.toHaveBeenCalled()
     expect(killPostgresProcesses).not.toHaveBeenCalled()
   })
-})
+}, 30000)

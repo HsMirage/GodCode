@@ -13,8 +13,8 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('child_process', async importOriginal => {
-  const actual = await importOriginal<typeof import('child_process')>()
+vi.mock('child_process', async (importOriginal: any) => {
+  const actual = await importOriginal()
   const spawnMock = vi.fn(() => ({
     stdout: {
       on: vi.fn((event: string, cb: (data: Buffer) => void) => {
@@ -47,11 +47,13 @@ vi.mock('child_process', async importOriginal => {
 
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs')
-  return {
+  const newFs = {
     ...actual,
+
     existsSync: vi.fn((p: string) => {
-      if (p.indexOf('bin') !== -1 || p.indexOf('native') !== -1) return true
-      if (p.indexOf('PG_VERSION') !== -1) return false
+      const str = p.toString()
+      if (str.includes('initdb') || str.includes('pg_ctl') || str.includes('postgres')) return true
+      if (str.includes('PG_VERSION')) return false
       return actual.existsSync(p)
     }),
     writeFileSync: vi.fn(),
@@ -68,6 +70,11 @@ vi.mock('fs', async () => {
       return actual.readFileSync(p, encoding)
     })
   }
+
+  return {
+    ...newFs,
+    default: newFs
+  }
 })
 
 vi.mock('@prisma/client', () => ({
@@ -75,7 +82,7 @@ vi.mock('@prisma/client', () => ({
     $connect = vi.fn().mockResolvedValue(undefined)
     $disconnect = vi.fn().mockResolvedValue(undefined)
     model = {
-      create: vi.fn().mockImplementation(args =>
+      create: vi.fn().mockImplementation((args: any) =>
         Promise.resolve({
           id: '1',
           ...args.data
