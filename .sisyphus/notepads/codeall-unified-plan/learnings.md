@@ -398,21 +398,50 @@ PathValidator.normalizePath(inputPath): string
 ## [2026-01-31] Integration Tests Summary - Additional Work
 
 ### Files Created
+
 - `tests/integration/llm-adapters.test.ts` - 315 lines, 13 tests covering all 4 LLM adapters
 
 ### Test Coverage
+
 - **AnthropicAdapter**: 4 tests (non-streaming, streaming, retry logic, rate limits)
 - **OpenAIAdapter**: 3 tests (non-streaming, streaming, error handling)
 - **GeminiAdapter**: 3 tests (non-streaming, streaming, timeout handling)
 - **OpenAICompatAdapter**: 3 tests (initialization, baseURL validation, custom endpoint)
 
 ### Key Learnings
+
 1. **vi.hoisted() is essential** for sharing mock functions between test file scope and vi.mock() factories
 2. **Mock chaining matters**: Gemini SDK requires mocking `getGenerativeModel().startChat().sendMessage()`
 3. **Async generator pattern** (`async function*`) is perfect for mocking streaming responses
 4. **All tests pass**: 13/13 ✅
 
 ### Verification Results
+
 - ✅ `pnpm test tests/integration/llm-adapters.test.ts` - 13 passed
 - ✅ `pnpm typecheck` - clean
 - ✅ Zero TypeScript errors
+
+## [2026-01-31] Integration Tests - Orchestration Engines
+
+### Testing Patterns Discovered
+
+- **vi.hoisted() for complex mocking**: Essential when mocking modules that are used by other mocked modules (e.g., prisma used inside services). It allows defining the mock implementations before they are hoisted by Vitest.
+- **Factory Mocking**: Used `vi.mock('@/main/services/llm/factory', ...)` to inject the hoisted `llmAdapter` mock, ensuring that when `DelegateEngine` calls `createLLMAdapter`, it gets our controllable mock.
+- **Singleton Mocking**: Mocked `DatabaseService.getInstance().getClient()` to return the hoisted `prisma` mock object. This pattern is crucial for testing singletons.
+
+### Mock Strategies
+
+- **LLM Task Decomposition**: Mocked `llmAdapter.sendMessage` to return JSON strings for `WorkforceEngine`'s decomposition logic.
+  ```typescript
+  mocks.llmAdapter.sendMessage.mockResolvedValueOnce({
+    content: JSON.stringify({ subtasks: [...] }),
+    usage: { ... }
+  })
+  ```
+- **Sequential Mock Responses**: Used chaining `.mockResolvedValueOnce()` to simulate a sequence of LLM interactions (Decomposition -> Task 1 -> Task 2) for the `executeWorkflow` test.
+- **Error Fallbacks**: Verified that `WorkforceEngine` correctly falls back to a single task if the LLM returns invalid JSON.
+
+### Challenges Encountered
+
+- **LSP False Positives**: The environment reported LSP errors for `@prisma/client` imports, but the tests passed successfully. This suggests the types might not be generated or linked correctly in the editor environment, but runtime/test-time resolution works fine.
+- **Mock State Sharing**: Ensuring the same mock instances were used by both the test code (for expectations) and the implementation code (for execution) required careful setup with `vi.hoisted`.
