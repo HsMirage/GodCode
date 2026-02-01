@@ -430,11 +430,11 @@ class WorkforceEngine {
 
 ### 6.2 消息与产物可视化
 
-- [ ] **Task 6.2.1**: 实现消息卡片组件
-- [ ] **Task 6.2.2**: 实现 Artifact 文件树组件
-- [ ] **Task 6.2.3**: 实现代码预览组件 (Monaco Editor)
-- [ ] **Task 6.2.4**: 实现 Markdown 预览组件
-- [ ] **Task 6.2.5**: 实现图片/HTML 预览组件
+- [x] **Task 6.2.1**: 实现消息卡片组件
+- [x] **Task 6.2.2**: 实现 Artifact 文件树组件
+- [x] **Task 6.2.3**: 实现代码预览组件 (Monaco Editor)
+- [x] **Task 6.2.4**: 实现 Markdown 预览组件
+- [x] **Task 6.2.5**: 实现图片/HTML 预览组件
 
 ### 6.3 浏览器 UI 外壳
 
