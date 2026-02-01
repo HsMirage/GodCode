@@ -1,54 +1,94 @@
-## Implementation Findings
+# NSIS Configuration Learning
 
-- Implemented `MessageCard` with distinct styles for user (indigo) and assistant (slate) messages.
-- Used `date-fns` for "time ago" formatting (e.g., "5 minutes ago").
-- Implemented `FileTree` with recursive rendering and appropriate icons using `lucide-react`.
-- Integrated Monaco Editor for code artifacts with read-only mode and VS Dark theme.
-- Integrated `react-markdown` with GFM support and syntax highlighting for Markdown artifacts.
-- Created `MediaPreview` to handle images and HTML content safely.
-- Updated `ChatPage` to use the new `MessageList` component and properly map IPC data to the UI model.
+The NSIS configuration in `electron-builder.yml` must be placed at the root level, but `electron-builder` might be strict about YAML formatting or caching.
 
-## Issues & Resolutions
+It seems `electron-builder` on Linux (WSL) cannot build Windows NSIS installers (.exe) because it requires Wine, which failed with `ERR_ELECTRON_BUILDER_CANNOT_EXECUTE`.
 
-- **Issue**: Type mismatch between backend `Message` and frontend component props.
-  - **Resolution**: Created a unified `Message` interface in `MessageCard.tsx` and mapped data in `ChatPage.tsx`.
-- **Issue**: Monaco Editor loader configuration.
-  - **Resolution**: Configured CDN path for Monaco resources to avoid build issues.
-- **Issue**: Accessibility warnings in `FileTree`.
-  - **Resolution**: Added keyboard handlers and proper ARIA roles to file tree nodes.
-- **Issue**: Mock data placeholders.
-  - **Resolution**: Added comments (and then removed them per hook rules) indicating where global store integration is needed.
+However, the configuration in `electron-builder.yml` is syntactically correct:
 
-## [2026-02-01] Phase 6.2 Complete: Message & Artifact Visualization
+```yaml
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: CodeAll
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+```
 
-### Implementation Summary
+The error `wine is required` confirms that the configuration was picked up (because it tried to build nsis target), but the environment lacks the necessary tools to finalize the artifact.
 
-- Implemented `MessageCard` with user/assistant role separation and timestamps
-- Built `FileTree` component with recursive folder structure and icons
-- Integrated Monaco Editor for `CodePreview` with syntax highlighting
-- Added `MarkdownPreview` using react-markdown and GFM plugins
-- Created `MediaPreview` for images and safe HTML rendering
-- Updated `ChatPage` to use new components and handle message streaming
-- Wired up `ContentCanvas` to switch previews based on artifact type
-- Connected `ArtifactRail` to file tree component
+# Dependency Management Learning
 
-### Verification Results
+We encountered significant issues with pnpm lockfiles and permissions in WSL.
+Switching to `npm install --no-package-lock --legacy-peer-deps --force` was required to bypass strict peer dependency checks and file permission errors, especially with `tailwindcss` and `sonner`.
+This allowed the build to proceed to the packaging stage, confirming the application code builds correctly even if the final Windows installer packaging fails on Linux.
 
-- ✅ Components render correctly with mock data
-- ✅ Message streaming works with auto-scroll
-- ✅ Code artifacts display in Monaco editor
-- ✅ Build passes (electron-vite)
-- ✅ Typecheck passes (tsc)
+## [2026-02-01 21:50] Windows Build Complete - Installer Limitation
 
-### Technical Decisions
+### Build Success
+- ✅ Electron app successfully built: `dist/win-unpacked/CodeAll.exe` (169MB)
+- ✅ Total unpacked size: 713MB (includes Electron, Chromium, all dependencies)
+- ✅ All assets, resources, and Prisma binaries correctly packaged
 
-- **Monaco CDN**: Used jsdelivr CDN for Monaco editor resources to simplify build config
-- **Date Formatting**: Adopted `date-fns` for relative timestamps
-- **State Management**: Used local state for now, prepared integration points for global store
-- **Accessibility**: Added keyboard support to file tree navigation
+### NSIS Installer Limitation
+- ❌ NSIS installer (.exe) creation failed on WSL/Linux
+- **Reason**: electron-builder requires Wine to create Windows installers on Linux
+- **Error**: `wine is required, please see https://electron.build/multi-platform-build#linux`
 
-### Next Steps
+### Solutions
+1. **For WSL/Linux users**: Install Wine and run `pnpm build:win` again
+2. **Recommended**: Build on native Windows machine (no Wine required)
+3. **Alternative**: Use CI/CD with Windows runner (GitHub Actions, AppVeyor)
 
-- Implement real artifact storage integration
-- Connect file tree to actual file system
-- Add user settings for theme customization
+### Task 10.1.3 Status
+- **Manual Testing**: Requires running `CodeAll.exe` on Windows machine
+- **Current State**: Unpacked build ready, installer pending Wine setup or Windows build environment
+
+### Configuration Verification
+- ✅ NSIS configuration in `electron-builder.yml` is correct
+- ✅ App metadata (appId, productName, copyright) configured
+- ✅ Icon path configured (build/icon.ico)
+- ⚠️ Icon size is 48x48 (recommended 256x256+)
+
+## [2026-02-01 22:10] electron-updater ESM Import Fix
+
+### Issue
+User reported crash on packaged Windows app:
+```
+SyntaxError: Named export 'autoUpdater' not found. The requested module 'electron-updater' is a CommonJS module
+```
+
+### Root Cause
+`electron-updater` is a CommonJS module, but code used ESM named import:
+```typescript
+import { autoUpdater } from 'electron-updater'  // ❌ Fails in packaged app
+```
+
+### Solution
+Changed to CommonJS-compatible default import pattern:
+```typescript
+import pkg from 'electron-updater'
+const { autoUpdater } = pkg
+```
+
+### Files Modified
+- `src/main/index.ts` (lines 3-4)
+
+### Pattern
+This is the SAME pattern used for Prisma fix in Phase 0:
+- When Electron packages CommonJS modules, named ESM imports break
+- Always use default import + destructuring for CommonJS dependencies
+- Applies to: `@prisma/client`, `electron-updater`, and similar CJS modules
+
+### Verification
+```bash
+✅ pnpm typecheck - No errors
+✅ pnpm build - Success
+✅ grep verification - No other electron-updater imports
+```
+
+### Recommendation
+Check ALL dependencies before packaging:
+1. Identify CommonJS modules (look for `exports.autoUpdater =` in node_modules)
+2. Use default import pattern preemptively
+3. Test packaged app, not just dev mode

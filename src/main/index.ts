@@ -1,5 +1,7 @@
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import path from 'path'
+import pkg from 'electron-updater'
+const { autoUpdater } = pkg
 import { registerIpcHandlers } from './ipc'
 import { DatabaseService } from './services/database'
 import { processCleanupService } from './services/process-cleanup.service'
@@ -34,6 +36,7 @@ if (!gotTheLock) {
 
     mainWindow = createWindow()
     registerIpcHandlers(mainWindow)
+    if (mainWindow) initAutoUpdater(mainWindow)
 
     try {
       const db = DatabaseService.getInstance()
@@ -144,4 +147,51 @@ function createWindow() {
   }
 
   return mainWindow
+}
+
+function initAutoUpdater(win: BrowserWindow) {
+  autoUpdater.autoDownload = false
+  autoUpdater.setFeedURL({
+    provider: 'generic',
+    url: 'https://example.com/updates'
+  })
+
+  // IPC Handlers
+  ipcMain.handle('updater:check-for-updates', () => autoUpdater.checkForUpdates())
+  ipcMain.handle('updater:download-update', () => autoUpdater.downloadUpdate())
+  ipcMain.handle('updater:quit-and-install', () => autoUpdater.quitAndInstall())
+
+  autoUpdater.on('checking-for-update', () => {
+    logger.info('[Updater] Checking for update...')
+    win.webContents.send('updater:checking-for-update')
+  })
+
+  autoUpdater.on('update-available', info => {
+    logger.info('[Updater] Update available:', info)
+    win.webContents.send('updater:update-available', info)
+  })
+
+  autoUpdater.on('update-not-available', info => {
+    logger.info('[Updater] Update not available:', info)
+    win.webContents.send('updater:update-not-available', info)
+  })
+
+  autoUpdater.on('error', err => {
+    logger.error('[Updater] Error in auto-updater:', err)
+    win.webContents.send('updater:error', err.message)
+  })
+
+  autoUpdater.on('download-progress', progressObj => {
+    logger.info(`[Updater] Download speed: ${progressObj.bytesPerSecond} - ${progressObj.percent}%`)
+    win.webContents.send('updater:download-progress', progressObj)
+  })
+
+  autoUpdater.on('update-downloaded', info => {
+    logger.info('[Updater] Update downloaded:', info)
+    win.webContents.send('updater:update-downloaded', info)
+  })
+
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdates()
+  }
 }
