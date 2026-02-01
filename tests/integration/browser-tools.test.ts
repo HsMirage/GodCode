@@ -89,9 +89,12 @@ describe('Browser Tools Integration', () => {
     mocks.browserViewManager.getWebContents.mockReturnValue(mocks.webContents)
     mocks.webContents.capturePage.mockResolvedValue(mocks.nativeImage)
     mocks.nativeImage.toDataURL.mockReturnValue('data:image/png;base64,mocked-image')
+    // Add toPNG and toJPEG mocks - cast to any to add properties
+    ;(mocks.nativeImage as any).toPNG = vi.fn().mockReturnValue(Buffer.from('mocked-png'))
+    ;(mocks.nativeImage as any).toJPEG = vi.fn().mockReturnValue(Buffer.from('mocked-jpeg'))
 
     // Default to view exists for most tests
-    mocks.browserViewManager.getState.mockReturnValue({ id: viewId })
+    mocks.browserViewManager.getState.mockReturnValue({ id: viewId, isLoading: false })
 
     // Reset permission policy
     vi.spyOn(defaultPolicy, 'isAllowed').mockReturnValue(true)
@@ -104,6 +107,10 @@ describe('Browser Tools Integration', () => {
   describe('ToolExecutor Integration', () => {
     it('should execute browser_navigate through ToolExecutor', async () => {
       mocks.browserViewManager.navigate.mockResolvedValue(undefined)
+      // Mock getState to return loading then loaded
+      mocks.browserViewManager.getState
+        .mockReturnValueOnce({ id: viewId, isLoading: true })
+        .mockReturnValue({ id: viewId, isLoading: false })
 
       const result = await toolExecutor.execute(
         'browser_navigate',
@@ -142,8 +149,12 @@ describe('Browser Tools Integration', () => {
 
   describe('Session Management', () => {
     it('should auto-create view on first navigate if not exists', async () => {
-      // View does not exist
-      mocks.browserViewManager.getState.mockReturnValue(null)
+      // View does not exist initially, then exists and loads
+      mocks.browserViewManager.getState
+        .mockReturnValueOnce(null) // Check if exists
+        .mockReturnValueOnce({ id: viewId, isLoading: true }) // Inside navigate loop
+        .mockReturnValue({ id: viewId, isLoading: false }) // Loop finish
+
       mocks.browserViewManager.create.mockResolvedValue(undefined)
       mocks.browserViewManager.navigate.mockResolvedValue(undefined)
 
@@ -160,7 +171,7 @@ describe('Browser Tools Integration', () => {
 
     it('should reuse view for same session', async () => {
       // View exists
-      mocks.browserViewManager.getState.mockReturnValue({ id: viewId })
+      mocks.browserViewManager.getState.mockReturnValue({ id: viewId, isLoading: false })
 
       await toolExecutor.execute('browser_navigate', { url: 'https://example.com' }, mockContext)
 
@@ -212,6 +223,9 @@ describe('Browser Tools Integration', () => {
   describe('Individual Tools', () => {
     describe('browser_navigate', () => {
       it('should validate URL and enforce protocol', async () => {
+        // Mock loading state for navigation
+        mocks.browserViewManager.getState.mockReturnValue({ id: viewId, isLoading: false })
+
         await toolExecutor.execute('browser_navigate', { url: 'example.com' }, mockContext)
         expect(mocks.browserViewManager.navigate).toHaveBeenCalledWith(
           viewId,
@@ -299,7 +313,8 @@ describe('Browser Tools Integration', () => {
       const result = await toolExecutor.execute('browser_navigate', {}, mockContext)
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('Missing required parameter')
+      // Expect specific error message from tool implementation
+      expect(result.error).toContain('URL is required for navigation')
       expect(mocks.browserViewManager.navigate).not.toHaveBeenCalled()
     })
 

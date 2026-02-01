@@ -5,12 +5,18 @@ import { browserViewManager } from '@/main/services/browser-view.service'
 // Mock dependencies
 vi.mock('@/main/services/browser-view.service', () => ({
   browserViewManager: {
-    navigate: vi.fn().mockResolvedValue(undefined)
+    navigate: vi.fn().mockResolvedValue(undefined),
+    getState: vi.fn().mockReturnValue({ isLoading: false, url: 'https://example.com' })
   }
 }))
 
 describe('AI Browser Tools', () => {
-  const [navigateTool, clickTool, fillTool, snapshotTool, screenshotTool, extractTool] = allTools
+  const navigateTool = allTools.find(t => t.name === 'browser_navigate')!
+  const clickTool = allTools.find(t => t.name === 'browser_click')!
+  const fillTool = allTools.find(t => t.name === 'browser_fill')!
+  const snapshotTool = allTools.find(t => t.name === 'browser_snapshot')!
+  const screenshotTool = allTools.find(t => t.name === 'browser_screenshot')!
+  const extractTool = allTools.find(t => t.name === 'browser_extract')!
 
   let mockWebContents: any
   let context: any
@@ -55,6 +61,16 @@ describe('AI Browser Tools', () => {
     })
 
     it('should accept http URLs', async () => {
+      // Mock getState to return http url
+      vi.mocked(browserViewManager.getState).mockReturnValue({
+        id: 'test-view-id',
+        isLoading: false,
+        url: 'http://insecure.com',
+        title: 'Insecure Site',
+        canGoBack: false,
+        canGoForward: false,
+        zoomLevel: 1.0
+      })
       const result = await navigateTool.execute({ url: 'http://insecure.com' }, context)
 
       expect(browserViewManager.navigate).toHaveBeenCalledWith(
@@ -84,7 +100,9 @@ describe('AI Browser Tools', () => {
 
   describe('browser_click', () => {
     it('should fail if webContents is missing', async () => {
-      const result = await clickTool.execute({ uid: 'uid-123' }, { viewId: 'id' } as any)
+      // Create context without webContents
+      const badContext = { viewId: 'id' }
+      const result = await clickTool.execute({ uid: 'uid-123' }, badContext as any)
       expect(result.success).toBe(false)
       expect(result.error).toContain('No active WebContents')
     })
@@ -101,7 +119,8 @@ describe('AI Browser Tools', () => {
       expect(script).toContain('click()')
 
       expect(result.success).toBe(true)
-      expect(result.data).toEqual({ uid: 'uid-123' })
+      // The implementation returns specific messages depending on dblClick
+      expect(result.data).toMatchObject({ uid: 'uid-123' })
     })
 
     it('should fail if element not found in DOM', async () => {
@@ -110,6 +129,7 @@ describe('AI Browser Tools', () => {
       const result = await clickTool.execute({ uid: 'uid-ghost' }, context)
 
       expect(result.success).toBe(false)
+      // Implementation returns "Element not found with UID: ..."
       expect(result.error).toContain('Element not found')
     })
 
@@ -125,9 +145,8 @@ describe('AI Browser Tools', () => {
 
   describe('browser_fill', () => {
     it('should fail if webContents is missing', async () => {
-      const result = await fillTool.execute({ uid: 'uid-1', value: 'hello' }, {
-        viewId: 'id'
-      } as any)
+      const badContext = { viewId: 'id' }
+      const result = await fillTool.execute({ uid: 'uid-1', value: 'hello' }, badContext as any)
       expect(result.success).toBe(false)
     })
 
@@ -139,7 +158,8 @@ describe('AI Browser Tools', () => {
       const script = mockWebContents.executeJavaScript.mock.calls[0][0]
       expect(script).toContain('uid-input')
       expect(script).toContain('"secret"') // JSON stringified
-      expect(script).toContain('value =')
+      // The implementation uses logic to check for select/combobox or regular input
+      expect(script).toContain('el.value =')
 
       expect(result.success).toBe(true)
       expect(result.data).toEqual({ uid: 'uid-input', value: 'secret' })
@@ -151,6 +171,7 @@ describe('AI Browser Tools', () => {
       const result = await fillTool.execute({ uid: 'uid-missing', value: 'val' }, context)
 
       expect(result.success).toBe(false)
+      // Implementation returns "Input element not found with UID: ..."
       expect(result.error).toContain('Input element not found')
     })
   })
@@ -159,7 +180,9 @@ describe('AI Browser Tools', () => {
     it('should return accessibility tree with UIDs', async () => {
       const mockTree = {
         tree: [{ uid: 'uid-0', role: 'button', name: 'Submit' }],
-        count: 1
+        count: 1,
+        url: 'https://example.com',
+        title: 'Example'
       }
       mockWebContents.executeJavaScript.mockResolvedValue(mockTree)
 
@@ -183,7 +206,9 @@ describe('AI Browser Tools', () => {
   describe('browser_screenshot', () => {
     it('should capture page and return base64', async () => {
       const mockImage = {
-        toDataURL: vi.fn().mockReturnValue('data:image/png;base64,ABC')
+        toDataURL: vi.fn().mockReturnValue('data:image/png;base64,ABC'),
+        toPNG: vi.fn().mockReturnValue(Buffer.from('ABC')),
+        toJPEG: vi.fn()
       }
       mockWebContents.capturePage.mockResolvedValue(mockImage)
 

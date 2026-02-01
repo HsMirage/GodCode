@@ -119,7 +119,10 @@ describe('AI Browser Integration', () => {
     }
 
     // 5. Screenshot
-    const mockImage = { toDataURL: () => 'data:image/png;base64,fake-image-data' }
+    const mockImage = {
+      toDataURL: () => 'data:image/png;base64,fake-image-data',
+      toPNG: () => Buffer.from('fake-png-data')
+    }
     vi.spyOn(view, 'capturePage').mockResolvedValueOnce(mockImage as any)
 
     const screenshotResult = await screenshotTool.execute(
