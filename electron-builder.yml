@@ -7,6 +7,8 @@ files:
   - out/**/*
   - prisma/**/*
   - node_modules/**/*
+  # Explicitly include dot-directories (minimatch/glob may skip them by default)
+  - node_modules/.prisma/**/*
   - package.json
   # Exclude Prisma engines from ASAR (they go to extraResources)
   - '!**/node_modules/@prisma/engines/introspection-engine*'
@@ -19,6 +21,12 @@ files:
 
 extraResources:
   # Place Prisma engine binaries OUTSIDE the ASAR archive
+  # Also copy the generated Prisma client folder to app.asar.unpacked so
+  # `require('.prisma/client/default')` can resolve in packaged apps.
+  - from: 'node_modules/.prisma'
+    to: 'app.asar.unpacked/node_modules/.prisma'
+    filter:
+      - '**/*'
   - from: 'node_modules/.prisma/client'
     to: 'prisma-client'
     filter:
@@ -49,9 +57,18 @@ win:
     - target: dir
       arch:
         - x64
-  icon: resources/icon.ico
+  icon: build/icon.ico
   signingHashAlgorithms:
     - sha256
   sign: null # Skip code signing for development builds
   signDlls: false
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: CodeAll
+  perMachine: true
+  deleteAppDataOnUninstall: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
 publish: null

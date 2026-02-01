@@ -14,6 +14,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:performance": "vitest run tests/performance/",
     "test:e2e": "playwright test",
     "build:win": "pnpm run build && electron-builder --win --x64",
     "build:mac": "pnpm run build && electron-builder --mac",
@@ -24,10 +25,12 @@
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^3.0.0",
     "@embedded-postgres/linux-x64": "18.1.0-beta.16",
+    "@embedded-postgres/windows-x64": "18.1.0-beta.16",
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^6.19.2",
     "@xyflow/react": "^12.10.0",
-    "clsx": "^2.1.0",
+    "chokidar": "^5.0.0",
+    "clsx": "^2.1.1",
     "electron-updater": "^6.6.2",
     "embedded-postgres": "18.1.0-beta.16",
     "lucide-react": "^0.563.0",
@@ -37,7 +40,10 @@
     "react-dom": "^18.2.0",
     "react-json-view": "^1.21.3",
     "react-markdown": "^10.1.0",
+    "react-resizable-panels": "^4.5.7",
     "react-router-dom": "^7.13.0",
+    "simple-git": "^3.30.0",
+    "tailwind-merge": "^3.4.0",
     "uuid": "^13.0.0",
     "winston": "^3.11.0",
     "winston-daily-rotate-file": "^5.0.0",
@@ -50,6 +56,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/chokidar": "^2.1.7",
     "@types/node": "^20.10.0",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
@@ -76,5 +83,15 @@
     "vite": "^5.0.0",
     "vitest": "^1.6.1"
   },
-  "packageManager": "pnpm@10.11.0"
+  "packageManager": "pnpm@10.11.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@embedded-postgres/windows-x64",
+      "@prisma/client",
+      "@prisma/engines",
+      "electron",
+      "esbuild",
+      "prisma"
+    ]
+  }
 }
