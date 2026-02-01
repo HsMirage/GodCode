@@ -1,3 +1,4 @@
+import * as React from 'react'
 import { useEffect, useState } from 'react'
 import { MessageList } from '../components/chat/MessageList'
 import { MessageInput } from '../components/chat/MessageInput'
@@ -7,6 +8,7 @@ import { ContentCanvas } from '../components/layout/ContentCanvas'
 import { ArtifactRail } from '../components/layout/ArtifactRail'
 import { useCanvasLifecycle } from '../hooks/useCanvasLifecycle'
 import { Message } from '../components/chat/MessageCard'
+import { SessionResumeIndicator } from '../components/session/SessionResumeIndicator'
 
 type ViewMode = 'chat' | 'workflow'
 
@@ -163,6 +165,11 @@ export function ChatPage() {
 
         {viewMode === 'chat' ? (
           <>
+            {sessionId && (
+              <div className="mb-2">
+                <SessionResumeIndicator sessionId={sessionId} />
+              </div>
+            )}
             <div className="flex-1 overflow-hidden">
               <MessageList messages={displayMessages} />
             </div>
