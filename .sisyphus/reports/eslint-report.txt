@@ -1,0 +1,4 @@
+
+> codeall@1.0.0 lint D:\网站\CodeAll
+> eslint src --ext .ts,.tsx
+

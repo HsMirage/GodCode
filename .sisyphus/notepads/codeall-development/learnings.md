@@ -52,3 +52,32 @@ The pattern used:
 
 - `src/main/services/ai-browser/index.ts` had an existing header which caused a "multiple matches" error during edit. We appended the new header before the existing one by targeting the `/*` start of the file.
 - TypeScript verification passed (ignoring unrelated test file error `tests/integration/full-workflow.test.ts` which was pre-existing).
+
+# E2E Test Implementation (Task 10.3.3)
+
+## Test Structure
+
+Created 4 new E2E test files with 24 tests covering main user workflows:
+
+- `tests/e2e/app-launch.spec.ts` (4 tests): App launch, sidebar, branding, content area
+- `tests/e2e/space-management.spec.ts` (6 tests): Space list, create dialog, form validation
+- `tests/e2e/session-workflow.spec.ts` (7 tests): Chat UI, message input, view modes, artifacts panel
+- `tests/e2e/settings.spec.ts` (7 tests): Settings navigation, tabs, routing rules
+
+## Patterns Used
+
+1. **Reusable Fixture**: `tests/e2e/fixtures/electron.ts` provides `test` and `expect` with Electron app pre-launched
+2. **Helper Functions**: `navigateTo()`, `waitForAppReady()`, `takeScreenshot()` for DRY test code
+3. **Chinese UI Selectors**: Used actual UI text (`对话`, `设置`, `流程图`) for reliable selectors
+
+## Electron Testing Challenges
+
+- WSL/Linux environments may lack system libraries (libnss3, libatk, libgtk-3)
+- Empty object pattern in Playwright fixtures requires biome-ignore lint suppression
+- App initialization needs 2s delay before asserting on dynamic content
+
+## Screenshot Configuration
+
+- `screenshot: 'only-on-failure'` in playwright.config.ts
+- Screenshots saved to `test-results/screenshots/` on failure
+- Video recording enabled for failure debugging (`video: 'retain-on-failure'`)
