@@ -285,6 +285,18 @@ class BrowserViewManager {
     return true
   }
 
+  toggleDevTools(viewId: string): boolean {
+    const view = this.views.get(viewId)
+    if (!view) return false
+
+    if (view.webContents.isDevToolsOpened()) {
+      view.webContents.closeDevTools()
+    } else {
+      view.webContents.openDevTools({ mode: 'detach' })
+    }
+    return true
+  }
+
   getState(viewId: string): BrowserViewState | null {
     return this.states.get(viewId) || null
   }

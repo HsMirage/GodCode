@@ -43,6 +43,57 @@ interface CodeAllAPI {
     channel: 'artifact:delete',
     artifactId: string
   ): Promise<{ success: boolean; error?: string }>
+
+  // Browser Channels
+  invoke(
+    channel: 'browser:create',
+    data: { viewId: string; url?: string }
+  ): Promise<{ success: boolean; data?: any; error?: string }>
+  invoke(
+    channel: 'browser:destroy',
+    data: { viewId: string }
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'browser:show',
+    data: { viewId: string; bounds: { x: number; y: number; width: number; height: number } }
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'browser:hide',
+    data: { viewId: string }
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'browser:resize',
+    data: { viewId: string; bounds: { x: number; y: number; width: number; height: number } }
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'browser:navigate',
+    data: { viewId: string; url: string }
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'browser:go-back',
+    data: { viewId: string }
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'browser:go-forward',
+    data: { viewId: string }
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'browser:reload',
+    data: { viewId: string }
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'browser:stop',
+    data: { viewId: string }
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'browser:capture',
+    data: { viewId: string }
+  ): Promise<{ success: boolean; data?: string; error?: string }>
+  invoke(
+    channel: 'browser:toggle-devtools',
+    data: { viewId: string }
+  ): Promise<{ success: boolean; error?: string }>
+
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
   on(
     channel: 'message:stream-chunk',

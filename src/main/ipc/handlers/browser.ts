@@ -173,6 +173,16 @@ export function registerBrowserHandlers(mainWindow: BrowserWindow | null) {
     }
   )
 
+  ipcMain.handle('browser:toggle-devtools', async (_event, { viewId }: { viewId: string }) => {
+    try {
+      const result = browserViewManager.toggleDevTools(viewId)
+      return { success: result }
+    } catch (error) {
+      console.error('[Browser IPC] ToggleDevTools failed:', error)
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
   ipcMain.handle('browser:show-context-menu', async (_event, options: BrowserMenuOptions) => {
     const { viewId, zoomLevel } = options
 
