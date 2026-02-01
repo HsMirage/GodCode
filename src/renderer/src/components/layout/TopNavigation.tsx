@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Plus, Box } from 'lucide-react'
+import { Plus, Box, Settings } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { useDataStore } from '../../store/data.store'
 import { cn } from '../../utils'
 
@@ -7,6 +8,7 @@ export function TopNavigation() {
   const { spaces, currentSpaceId, setCurrentSpace, fetchSpaces, createSpace } = useDataStore()
   const [isCreating, setIsCreating] = useState(false)
   const [newSpaceName, setNewSpaceName] = useState('')
+  const navigate = useNavigate()
 
   useEffect(() => {
     fetchSpaces()
@@ -27,7 +29,17 @@ export function TopNavigation() {
 
   return (
     <div className="h-12 bg-slate-950 border-b border-slate-800 flex items-center px-4 gap-4 select-none">
-      <div className="flex items-center gap-2 text-slate-100 font-semibold mr-4">
+      <div
+        className="flex items-center gap-2 text-slate-100 font-semibold mr-4 cursor-pointer hover:opacity-80 transition-opacity"
+        onClick={() => navigate('/')}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            navigate('/')
+          }
+        }}
+        role="button"
+        tabIndex={0}
+      >
         <Box className="w-5 h-5 text-indigo-500" />
         <span>CodeAll</span>
       </div>
@@ -73,6 +85,14 @@ export function TopNavigation() {
       </div>
 
       <div className="flex items-center gap-2 ml-auto">
+        <button
+          type="button"
+          onClick={() => navigate('/settings')}
+          className="p-1.5 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+          title="Settings"
+        >
+          <Settings className="w-4 h-4" />
+        </button>
         <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400">
           U
         </div>
