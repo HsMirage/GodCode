@@ -1,5 +1,14 @@
 import type { AgentConfig } from "@opencode-ai/sdk"
+import type { AgentMode, AgentPromptMetadata } from "./types"
 import { isGptModel } from "./types"
+
+const MODE: AgentMode = "primary"
+export const SISYPHUS_PROMPT_METADATA: AgentPromptMetadata = {
+  category: "utility",
+  cost: "EXPENSIVE",
+  promptAlias: "Sisyphus",
+  triggers: [],
+}
 import type { AvailableAgent, AvailableTool, AvailableSkill, AvailableCategory } from "./dynamic-agent-prompt-builder"
 import {
   buildKeyTriggersSection,
@@ -434,7 +443,7 @@ export function createSisyphusAgent(
   const base = {
     description:
       "Powerful AI orchestrator. Plans obsessively with todos, assesses search complexity before exploration, delegates strategically via category+skills combinations. Uses explore for internal code (parallel-friendly), librarian for external docs. (Sisyphus - OhMyOpenCode)",
-    mode: "primary" as const,
+    mode: MODE,
     model,
     maxTokens: 64000,
     prompt,
@@ -448,3 +457,4 @@ export function createSisyphusAgent(
 
   return { ...base, thinking: { type: "enabled", budgetTokens: 32000 } }
 }
+createSisyphusAgent.mode = MODE

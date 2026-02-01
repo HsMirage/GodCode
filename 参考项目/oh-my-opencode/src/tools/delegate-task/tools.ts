@@ -12,10 +12,9 @@ import { discoverSkills } from "../../features/opencode-skill-loader"
 import { getTaskToastManager } from "../../features/task-toast-manager"
 import type { ModelFallbackInfo } from "../../features/task-toast-manager/types"
 import { subagentSessions, getSessionAgent } from "../../features/claude-code-session-state"
-import { log, getAgentToolRestrictions, resolveModel, getOpenCodeConfigPaths, findByNameCaseInsensitive, equalsIgnoreCase } from "../../shared"
-import { fetchAvailableModels } from "../../shared/model-availability"
+import { log, getAgentToolRestrictions, resolveModel, resolveModelPipeline, getOpenCodeConfigPaths, promptWithModelSuggestionRetry } from "../../shared"
+import { fetchAvailableModels, isModelAvailable } from "../../shared/model-availability"
 import { readConnectedProvidersCache } from "../../shared/connected-providers-cache"
-import { resolveModelWithFallback } from "../../shared/model-resolver"
 import { CATEGORY_MODEL_REQUIREMENTS } from "../../shared/model-requirements"
 
 type OpencodeClient = PluginInput["client"]
@@ -117,9 +116,20 @@ export function resolveCategoryConfig(
     userCategories?: CategoriesConfig
     inheritedModel?: string
     systemDefaultModel?: string
+    availableModels?: Set<string>
   }
 ): { config: CategoryConfig; promptAppend: string; model: string | undefined } | null {
-  const { userCategories, inheritedModel, systemDefaultModel } = options
+  const { userCategories, inheritedModel, systemDefaultModel, availableModels } = options
+
+  // Check if category requires a specific model
+  const categoryReq = CATEGORY_MODEL_REQUIREMENTS[categoryName]
+  if (categoryReq?.requiresModel && availableModels) {
+    if (!isModelAvailable(categoryReq.requiresModel, availableModels)) {
+      log(`[resolveCategoryConfig] Category ${categoryName} requires ${categoryReq.requiresModel} but not available`)
+      return null
+    }
+  }
+
   const defaultConfig = DEFAULT_CATEGORIES[categoryName]
   const userConfig = userCategories?.[categoryName]
   const defaultPromptAppend = CATEGORY_PROMPT_APPENDS[categoryName] ?? ""
@@ -522,11 +532,12 @@ To continue this session: session_id="${args.session_id}"`
             connectedProviders: connectedProviders ?? undefined
           })
 
-         const resolved = resolveCategoryConfig(args.category, {
-           userCategories,
-           inheritedModel,
-           systemDefaultModel,
-         })
+          const resolved = resolveCategoryConfig(args.category, {
+            userCategories,
+            inheritedModel,
+            systemDefaultModel,
+            availableModels,
+          })
          if (!resolved) {
            return `Unknown category: "${args.category}". Available: ${Object.keys({ ...DEFAULT_CATEGORIES, ...userCategories }).join(", ")}`
          }
@@ -540,35 +551,42 @@ To continue this session: session_id="${args.session_id}"`
              modelInfo = { model: actualModel, type: "system-default", source: "system-default" }
            }
           } else {
-          const resolution = resolveModelWithFallback({
-              userModel: userCategories?.[args.category]?.model ?? resolved.model ?? sisyphusJuniorModel,
+          const resolution = resolveModelPipeline({
+            intent: {
+              userModel: userCategories?.[args.category]?.model,
+              categoryDefaultModel: resolved.model ?? sisyphusJuniorModel,
+            },
+            constraints: { availableModels },
+            policy: {
               fallbackChain: requirement.fallbackChain,
-              availableModels,
               systemDefaultModel,
-            })
+            },
+          })
 
-           if (resolution) {
-             const { model: resolvedModel, source, variant: resolvedVariant } = resolution
+            if (resolution) {
+              const { model: resolvedModel, provenance, variant: resolvedVariant } = resolution
              actualModel = resolvedModel
 
              if (!parseModelString(actualModel)) {
                return `Invalid model format "${actualModel}". Expected "provider/model" format (e.g., "anthropic/claude-sonnet-4-5").`
              }
 
-             let type: "user-defined" | "inherited" | "category-default" | "system-default"
-             switch (source) {
-                case "override":
-                  type = "user-defined"
-                  break
-                case "provider-fallback":
-                  type = "category-default"
-                  break
-                case "system-default":
-                  type = "system-default"
-                  break
-             }
+              let type: "user-defined" | "inherited" | "category-default" | "system-default"
+              const source = provenance
+              switch (provenance) {
+                 case "override":
+                   type = "user-defined"
+                   break
+                 case "category-default":
+                 case "provider-fallback":
+                   type = "category-default"
+                   break
+                 case "system-default":
+                   type = "system-default"
+                   break
+              }
 
-             modelInfo = { model: actualModel, type, source }
+              modelInfo = { model: actualModel, type, source }
              
              const parsedModel = parseModelString(actualModel)
              const variantToUse = userCategories?.[args.category]?.variant ?? resolvedVariant ?? resolved.config.variant
@@ -766,7 +784,7 @@ To continue this session: session_id="${sessionID}"`
         }
         const agentName = args.subagent_type.trim()
 
-        if (equalsIgnoreCase(agentName, SISYPHUS_JUNIOR_AGENT)) {
+        if (agentName.toLowerCase() === SISYPHUS_JUNIOR_AGENT.toLowerCase()) {
           return `Cannot use subagent_type="${SISYPHUS_JUNIOR_AGENT}" directly. Use category parameter instead (e.g., ${categoryExamples}).
 
 Sisyphus-Junior is spawned automatically when you specify a category. Pick the appropriate category for your task domain.`
@@ -789,12 +807,13 @@ Create the work plan directly - that's your job as the planning agent.`
 
           const callableAgents = agents.filter((a) => a.mode !== "primary")
 
-          const matchedAgent = findByNameCaseInsensitive(callableAgents, agentToUse)
+          const matchedAgent = callableAgents.find(
+            (agent) => agent.name.toLowerCase() === agentToUse.toLowerCase()
+          )
           if (!matchedAgent) {
-            const isPrimaryAgent = findByNameCaseInsensitive(
-              agents.filter((a) => a.mode === "primary"),
-              agentToUse
-            )
+            const isPrimaryAgent = agents
+              .filter((a) => a.mode === "primary")
+              .find((agent) => agent.name.toLowerCase() === agentToUse.toLowerCase())
             if (isPrimaryAgent) {
               return `Cannot call primary agent "${isPrimaryAgent.name}" via delegate_task. Primary agents are top-level orchestrators.`
             }
@@ -819,12 +838,6 @@ Create the work plan directly - that's your job as the planning agent.`
           // If we can't fetch agents, proceed anyway - the session.prompt will fail with a clearer error
         }
 
-        // When using subagent_type directly, inherit parent model so agents don't default
-        // to their hardcoded models (like grok-code) which may not be available
-        if (parentModel) {
-          categoryModel = parentModel
-          modelInfo = { model: `${parentModel.providerID}/${parentModel.modelID}`, type: "inherited" }
-        }
       }
 
       const systemContent = buildSystemContent({ skillContent, categoryPromptAppend, agentName: agentToUse })
@@ -953,7 +966,7 @@ To continue this session: session_id="${task.sessionID}"`
 
         try {
           const allowDelegateTask = isPlanAgent(agentToUse)
-          await client.session.prompt({
+          await promptWithModelSuggestionRetry(client, {
             path: { id: sessionID },
             body: {
               agent: agentToUse,

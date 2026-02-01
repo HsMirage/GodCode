@@ -25,11 +25,10 @@ import { loadMcpConfigs } from "../features/claude-code-mcp-loader";
 import { loadAllPluginComponents } from "../features/claude-code-plugin-loader";
 import { createBuiltinMcps } from "../mcp";
 import type { OhMyOpenCodeConfig } from "../config";
-import { log, fetchAvailableModels, readConnectedProvidersCache } from "../shared";
+import { log, fetchAvailableModels, readConnectedProvidersCache, resolveModelPipeline } from "../shared";
 import { getOpenCodeConfigPaths } from "../shared/opencode-config-dir";
 import { migrateAgentConfig } from "../shared/permission-compat";
 import { AGENT_NAME_MAP } from "../shared/migration";
-import { resolveModelWithFallback } from "../shared/model-resolver";
 import { AGENT_MODEL_REQUIREMENTS } from "../shared/model-requirements";
 import { PROMETHEUS_SYSTEM_PROMPT, PROMETHEUS_PERMISSION } from "../agents/prometheus-prompt";
 import { DEFAULT_CATEGORIES } from "../tools/delegate-task/constants";
@@ -249,16 +248,26 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
 
         const prometheusRequirement = AGENT_MODEL_REQUIREMENTS["prometheus"];
         const connectedProviders = readConnectedProvidersCache();
-        const availableModels = ctx.client
-          ? await fetchAvailableModels(ctx.client, { connectedProviders: connectedProviders ?? undefined })
-          : new Set<string>();
+        // IMPORTANT: Do NOT pass ctx.client to fetchAvailableModels during plugin initialization.
+        // Calling client API (e.g., client.provider.list()) from config handler causes deadlock:
+        // - Plugin init waits for server response
+        // - Server waits for plugin init to complete before handling requests
+        // Use cache-only mode instead. If cache is unavailable, fallback chain uses first model.
+        // See: https://github.com/code-yeongyu/oh-my-opencode/issues/1301
+        const availableModels = await fetchAvailableModels(undefined, {
+          connectedProviders: connectedProviders ?? undefined,
+        });
 
-        const modelResolution = resolveModelWithFallback({
-          uiSelectedModel: currentModel,
-          userModel: prometheusOverride?.model ?? categoryConfig?.model,
-          fallbackChain: prometheusRequirement?.fallbackChain,
-          availableModels,
-          systemDefaultModel: undefined,
+        const modelResolution = resolveModelPipeline({
+          intent: {
+            uiSelectedModel: currentModel,
+            userModel: prometheusOverride?.model ?? categoryConfig?.model,
+          },
+          constraints: { availableModels },
+          policy: {
+            fallbackChain: prometheusRequirement?.fallbackChain,
+            systemDefaultModel: undefined,
+          },
         });
         const resolvedModel = modelResolution?.model;
         const resolvedVariant = modelResolution?.variant;

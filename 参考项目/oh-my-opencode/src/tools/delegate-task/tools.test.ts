@@ -51,6 +51,16 @@ describe("sisyphus-task", () => {
       expect(category.model).toBe("openai/gpt-5.2-codex")
       expect(category.variant).toBe("xhigh")
     })
+
+    test("deep category has model and variant config", () => {
+      // #given
+      const category = DEFAULT_CATEGORIES["deep"]
+
+      // #when / #then
+      expect(category).toBeDefined()
+      expect(category.model).toBe("openai/gpt-5.2-codex")
+      expect(category.variant).toBe("medium")
+    })
   })
 
   describe("CATEGORY_PROMPT_APPENDS", () => {
@@ -63,13 +73,22 @@ describe("sisyphus-task", () => {
       expect(promptAppend).toContain("Design-first")
     })
 
-    test("ultrabrain category has strategic prompt", () => {
+    test("ultrabrain category has deep logical reasoning prompt", () => {
       // #given
       const promptAppend = CATEGORY_PROMPT_APPENDS["ultrabrain"]
 
       // #when / #then
-      expect(promptAppend).toContain("BUSINESS LOGIC")
+      expect(promptAppend).toContain("DEEP LOGICAL REASONING")
       expect(promptAppend).toContain("Strategic advisor")
+    })
+
+    test("deep category has goal-oriented autonomous prompt", () => {
+      // #given
+      const promptAppend = CATEGORY_PROMPT_APPENDS["deep"]
+
+      // #when / #then
+      expect(promptAppend).toContain("GOAL-ORIENTED")
+      expect(promptAppend).toContain("autonomous")
     })
   })
 
@@ -278,6 +297,36 @@ describe("sisyphus-task", () => {
 
       // #when
       const result = resolveCategoryConfig(categoryName, { systemDefaultModel: SYSTEM_DEFAULT_MODEL })
+
+      // #then
+      expect(result).toBeNull()
+    })
+
+    test("blocks requiresModel when availability is known and missing the required model", () => {
+      // #given
+      const categoryName = "deep"
+      const availableModels = new Set<string>(["anthropic/claude-opus-4-5"])
+
+      // #when
+      const result = resolveCategoryConfig(categoryName, {
+        systemDefaultModel: SYSTEM_DEFAULT_MODEL,
+        availableModels,
+      })
+
+      // #then
+      expect(result).toBeNull()
+    })
+
+    test("blocks requiresModel when availability is empty", () => {
+      // #given
+      const categoryName = "deep"
+      const availableModels = new Set<string>()
+
+      // #when
+      const result = resolveCategoryConfig(categoryName, {
+        systemDefaultModel: SYSTEM_DEFAULT_MODEL,
+        availableModels,
+      })
 
       // #then
       expect(result).toBeNull()
@@ -1110,7 +1159,7 @@ describe("sisyphus-task", () => {
       const mockClient = {
         app: { agents: async () => ({ data: [] }) },
         config: { get: async () => ({ data: { model: SYSTEM_DEFAULT_MODEL } }) },
-        model: { list: async () => [{ id: "google/gemini-3-pro" }] },
+        model: { list: async () => ({ data: [{ provider: "google", id: "gemini-3-pro" }] }) },
         session: {
           get: async () => ({ data: { directory: "/project" } }),
           create: async () => ({ data: { id: "ses_unstable_gemini" } }),
@@ -1276,6 +1325,13 @@ describe("sisyphus-task", () => {
     test("artistry category (gemini) with run_in_background=false should force background but wait for result", async () => {
       // #given - artistry also uses gemini model
       const { createDelegateTask } = require("./tools")
+      const providerModelsSpy = spyOn(connectedProvidersCache, "readProviderModelsCache").mockReturnValue({
+        connected: ["anthropic", "google", "openai"],
+        updatedAt: new Date().toISOString(),
+        models: {
+          google: ["gemini-3-pro", "gemini-3-flash"],
+        },
+      })
       let launchCalled = false
       
       const mockManager = {
@@ -1294,7 +1350,7 @@ describe("sisyphus-task", () => {
       const mockClient = {
         app: { agents: async () => ({ data: [] }) },
         config: { get: async () => ({ data: { model: SYSTEM_DEFAULT_MODEL } }) },
-        model: { list: async () => [{ id: "google/gemini-3-pro" }] },
+        model: { list: async () => ({ data: [{ provider: "google", id: "gemini-3-pro" }] }) },
         session: {
           get: async () => ({ data: { directory: "/project" } }),
           create: async () => ({ data: { id: "ses_artistry_gemini" } }),
@@ -1336,6 +1392,7 @@ describe("sisyphus-task", () => {
       expect(launchCalled).toBe(true)
       expect(result).toContain("SUPERVISED TASK COMPLETED")
       expect(result).toContain("Artistry result here")
+      providerModelsSpy.mockRestore()
     }, { timeout: 20000 })
 
     test("writing category (gemini-flash) with run_in_background=false should force background but wait for result", async () => {

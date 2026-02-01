@@ -88,6 +88,7 @@ export const HookNameSchema = z.enum([
   "sisyphus-junior-notepad",
   "start-work",
   "atlas",
+  "stop-continuation-guard",
 ])
 
 export const BuiltinCommandNameSchema = z.enum([
@@ -187,6 +188,7 @@ export const CategoryConfigSchema = z.object({
 export const BuiltinCategoryNameSchema = z.enum([
   "visual-engineering",
   "ultrabrain",
+  "deep",
   "artistry",
   "quick",
   "unspecified-low",
