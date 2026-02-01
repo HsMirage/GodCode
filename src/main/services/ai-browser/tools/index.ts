@@ -1,21 +1,36 @@
-/*
- * Copyright (c) 2025 CodeAll. All rights reserved.
+/**
+ * AI Browser Tools
+ *
+ * Export all tools for the AI browser service.
  */
 
-import type { BrowserTool } from '../types'
-import { navigateTool } from './navigation'
-import { clickTool, fillTool } from './input'
-import { snapshotTool, screenshotTool, extractTool } from './snapshot'
+import { navigationTools } from './navigation'
+import { inputTools } from './input'
+import { snapshotTools } from './snapshot'
+import { consoleTools } from './console'
+import { networkTools } from './network'
+import { emulationTools } from './emulation'
+import { performanceTools } from './performance'
 
-export { navigateTool } from './navigation'
-export { clickTool, fillTool } from './input'
-export { snapshotTool, screenshotTool, extractTool } from './snapshot'
+// Export individual categories
+export * from './navigation'
+export * from './input'
+export * from './snapshot'
+export * from './console'
+export * from './network'
+export * from './emulation'
+export * from './performance'
 
-export const allTools: BrowserTool[] = [
-  navigateTool,
-  clickTool,
-  fillTool,
-  snapshotTool,
-  screenshotTool,
-  extractTool
+// Export all tools as a single array
+export const allTools = [
+  ...navigationTools,
+  ...inputTools,
+  ...snapshotTools,
+  ...consoleTools,
+  ...networkTools,
+  ...emulationTools,
+  ...performanceTools
 ]
+
+// Log tool count for verification
+console.log(`Loaded ${allTools.length} AI Browser tools`)

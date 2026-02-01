@@ -13,6 +13,7 @@
 
 import { DelegateEngine } from '../delegate'
 import { DatabaseService } from '../database'
+import { Prisma } from '@prisma/client'
 import { LoggerService } from '../logger'
 import { createLLMAdapter } from '../llm/factory'
 import type { Message } from '@/types/domain'
@@ -139,7 +140,7 @@ Only return the JSON, no other text.`
   ): Promise<WorkflowResult> {
     const session = await this.getOrCreateDefaultSession()
 
-    const workflow = await this.prisma.$transaction(async tx => {
+    const workflow = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       return tx.task.create({
         data: {
           sessionId: session.id,

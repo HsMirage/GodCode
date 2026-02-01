@@ -48,7 +48,7 @@ export async function handleModelList(_event: IpcMainInvokeEvent): Promise<Prism
   const secureStorage = SecureStorageService.getInstance()
   const models = await prisma.model.findMany()
 
-  return models.map(model => ({
+  return models.map((model: PrismaModel) => ({
     ...model,
     apiKey: model.apiKey ? maskApiKey(secureStorage.decrypt(model.apiKey)) : null
   }))

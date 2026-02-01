@@ -122,3 +122,46 @@ model Model {
 
   @@index([provider, modelName])
 }
+
+// ApiKey表
+model ApiKey {
+  id            String   @id @default(uuid())
+  provider      String   @unique  // e.g., "anthropic", "openai", "gemini"
+  encryptedKey  String   @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([provider])
+}
+
+// SchemaVersion表
+model SchemaVersion {
+  id          String   @id @default(uuid())
+  version     String   @unique  // e.g., "1.0.0" or migration name
+  description String?
+  appliedAt   DateTime @default(now())
+
+  @@index([version])
+}
+
+// AuditLog表 - 审计日志
+model AuditLog {
+  id          String   @id @default(uuid())
+  action      String   // "create", "update", "delete", "access", "config_change", etc.
+  entityType  String   // "space", "session", "task", "apiKey", "model", etc.
+  entityId    String?  // ID of affected entity (nullable for system-wide actions)
+  userId      String?  // User identifier (if applicable)
+  sessionId   String?  // Session ID (if operation was in a session context)
+  ipAddress   String?  // IP address for security tracking
+  metadata    Json?    // Additional context (old values, new values, details)
+  success     Boolean  @default(true)  // Whether operation succeeded
+  errorMsg    String?  // Error message if failed
+  createdAt   DateTime @default(now())
+
+  @@index([action])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([sessionId])
+  @@index([createdAt])
+  @@index([success])
+}

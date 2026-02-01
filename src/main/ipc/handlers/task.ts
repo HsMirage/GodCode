@@ -1,4 +1,5 @@
 import type { IpcMainInvokeEvent } from 'electron'
+import type { Task as PrismaTask } from '@prisma/client'
 import { DatabaseService } from '@/main/services/database'
 import { LoggerService } from '@/main/services/logger'
 import type { Task } from '@/types/domain'
@@ -18,7 +19,7 @@ export async function handleTaskList(
     })
 
     return tasks.map(
-      (task): Task => ({
+      (task: PrismaTask): Task => ({
         id: task.id,
         sessionId: task.sessionId,
         parentTaskId: task.parentTaskId || undefined,

@@ -16,6 +16,12 @@ export interface JsonSchemaProperty {
   description?: string
   enum?: string[]
   default?: unknown
+  minimum?: number
+  maximum?: number
+  items?: JsonSchemaProperty
+  properties?: Record<string, JsonSchemaProperty>
+  required?: string[]
+  nullable?: boolean
 }
 
 export interface BrowserTool {

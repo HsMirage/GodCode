@@ -29,6 +29,8 @@ import {
 } from './handlers/task-continuation'
 import { registerSpaceHandlers } from './handlers/space'
 import { registerArtifactHandlers } from './handlers/artifact'
+import { registerAuditLogHandlers } from './handlers/audit-log'
+import { registerAuditLogExportHandlers } from './handlers/audit-log-export'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('model:create', handleModelCreate)
@@ -72,4 +74,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
 
   // Artifact handlers
   registerArtifactHandlers()
+
+  // Audit Log handlers
+  registerAuditLogHandlers()
+  registerAuditLogExportHandlers()
 }

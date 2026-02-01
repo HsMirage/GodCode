@@ -1,5 +1,5 @@
 import { IpcMainInvokeEvent } from 'electron'
-import type { Message as PrismaMessage } from '@prisma/client'
+import { Prisma, type Message as PrismaMessage } from '@prisma/client'
 import type { Message as DomainMessage } from '@/types/domain'
 import type { LLMConfig } from '@/main/services/llm/adapter.interface'
 import { DatabaseService } from '@/main/services/database'
@@ -37,7 +37,7 @@ export async function handleMessageSend(
   const prisma = DatabaseService.getInstance().getClient()
   const logger = LoggerService.getInstance().getLogger()
 
-  const userMessage = await prisma.$transaction(async tx => {
+  const userMessage = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     return tx.message.create({
       data: {
         sessionId: input.sessionId,
@@ -86,7 +86,7 @@ export async function handleMessageSend(
     throw error
   }
 
-  const assistantMessage = await prisma.$transaction(async tx => {
+  const assistantMessage = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     return tx.message.create({
       data: {
         sessionId: userMessage.sessionId,
