@@ -1,14 +1,28 @@
-import { FileCode, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { useUIStore } from '../../store/ui.store'
+import { FileTree, FileNode } from '../artifacts/FileTree'
 
 export function ArtifactRail() {
   const { toggleArtifactRail } = useUIStore()
 
-  const artifacts = [
-    { id: '1', name: 'App.tsx', type: 'code', path: 'src/App.tsx' },
-    { id: '2', name: 'styles.css', type: 'code', path: 'src/styles.css' },
-    { id: '3', name: 'README.md', type: 'file', path: 'README.md' }
+  const artifacts: FileNode[] = [
+    {
+      id: '1',
+      name: 'src',
+      path: 'src',
+      type: 'folder',
+      children: [
+        { id: '2', name: 'App.tsx', path: 'src/App.tsx', type: 'file', fileType: 'code' },
+        { id: '3', name: 'styles.css', path: 'src/styles.css', type: 'file', fileType: 'code' }
+      ]
+    },
+    { id: '4', name: 'README.md', path: 'README.md', type: 'file', fileType: 'markdown' },
+    { id: '5', name: 'package.json', path: 'package.json', type: 'file', fileType: 'json' }
   ]
+
+  const handleSelect = (node: FileNode) => {
+    console.log('Selected:', node)
+  }
 
   return (
     <div className="h-full flex flex-col bg-slate-950 border-l border-slate-800">
@@ -25,20 +39,8 @@ export function ArtifactRail() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {artifacts.map(artifact => (
-          <button
-            type="button"
-            key={artifact.id}
-            className="w-full flex items-center gap-2 px-2 py-2 rounded text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-900 transition-colors text-left"
-          >
-            <FileCode className="w-4 h-4" />
-            <div className="flex-1 truncate">
-              <div className="text-slate-200">{artifact.name}</div>
-              <div className="text-xs text-slate-600 truncate">{artifact.path}</div>
-            </div>
-          </button>
-        ))}
+      <div className="flex-1 overflow-y-auto p-2">
+        <FileTree nodes={artifacts} onSelect={handleSelect} />
       </div>
     </div>
   )
