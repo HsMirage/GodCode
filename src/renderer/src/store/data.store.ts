@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { safeInvoke } from '../api'
 import type { Space, Session } from '../types/domain'
 
 interface DataState {
@@ -29,7 +30,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   fetchSpaces: async () => {
     set({ isLoading: true, error: null })
     try {
-      const spaces = await (window as any).codeall.invoke('space:list')
+      const spaces = await safeInvoke<Space[]>('space:list')
       set({ spaces, isLoading: false })
 
       const { currentSpaceId } = get()
@@ -45,7 +46,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   fetchSessions: async (spaceId: string) => {
     set({ isLoading: true, error: null })
     try {
-      const sessions = await (window as any).codeall.invoke('session:list', spaceId)
+      const sessions = await safeInvoke<Session[]>('session:list', spaceId)
       set({ sessions, isLoading: false })
 
       const { currentSessionId } = get()
@@ -69,7 +70,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   createSpace: async (name: string, workDir: string) => {
     set({ isLoading: true, error: null })
     try {
-      const newSpace = await (window as any).codeall.invoke('space:create', { name, workDir })
+      const newSpace = await safeInvoke<Space>('space:create', { name, workDir })
       set(state => ({
         spaces: [...state.spaces, newSpace],
         currentSpaceId: newSpace.id,
@@ -84,7 +85,7 @@ export const useDataStore = create<DataState>((set, get) => ({
   createSession: async (spaceId: string, title?: string) => {
     set({ isLoading: true, error: null })
     try {
-      const newSession = await (window as any).codeall.invoke('session:create', { spaceId, title })
+      const newSession = await safeInvoke<Session>('session:create', { spaceId, title })
       set(state => ({
         sessions: [newSession, ...state.sessions],
         currentSessionId: newSession.id,

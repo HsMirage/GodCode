@@ -135,7 +135,9 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.cjs'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Disable sandbox to allow file:// module loading in production
+      sandbox: false
     }
   })
 
@@ -192,6 +194,8 @@ function initAutoUpdater(win: BrowserWindow) {
   })
 
   if (app.isPackaged) {
-    autoUpdater.checkForUpdates()
+    autoUpdater.checkForUpdates().catch(err => {
+      logger.warn('[Updater] Failed to check for updates:', err.message)
+    })
   }
 }

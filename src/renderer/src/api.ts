@@ -58,6 +58,33 @@ const onEvent = window.codeall.on as (
   callback: (...args: unknown[]) => void
 ) => () => void
 
+/**
+ * Safe IPC invoke wrapper that handles wrapped responses.
+ * Main process handlers return { success: true, data: T } or { success: false, error: string }
+ * This utility unwraps the response and throws on errors.
+ */
+export async function safeInvoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+  const response = await invoke(channel, ...args)
+
+  // Check if response is a wrapped IPC result
+  if (
+    response !== null &&
+    typeof response === 'object' &&
+    'success' in response &&
+    typeof (response as any).success === 'boolean'
+  ) {
+    const wrapped = response as ApiResult<T>
+    if (wrapped.success === false) {
+      throw new Error(wrapped.error || 'Unknown IPC error')
+    }
+    // Return unwrapped data, fallback to empty if data is undefined
+    return (wrapped.data as T) ?? ([] as unknown as T)
+  }
+
+  // Not a wrapped response, return as-is
+  return response as T
+}
+
 export const api = {
   createBrowserView: (viewId: string, url?: string) =>
     invoke('browser:create', { viewId, url }) as Promise<ApiResult<BrowserViewState>>,
