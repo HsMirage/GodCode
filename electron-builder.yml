@@ -68,8 +68,6 @@ nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   shortcutName: CodeAll
-  perMachine: true
-  deleteAppDataOnUninstall: true
-  createDesktopShortcut: true
+  createDesktopShortcut: always
   createStartMenuShortcut: true
 publish: null
