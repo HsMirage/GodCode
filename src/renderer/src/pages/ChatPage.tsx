@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
-import { MessageList, type ChatMessage } from '../components/chat/MessageList'
+import { MessageList } from '../components/chat/MessageList'
 import { MessageInput } from '../components/chat/MessageInput'
 import { TypingIndicator } from '../components/chat/TypingIndicator'
 import { WorkflowView } from '../components/workflow/WorkflowView'
-import { ContentCanvas } from '../components/canvas/ContentCanvas'
-import { ArtifactRail } from '../components/artifact/ArtifactRail'
+import { ContentCanvas } from '../components/layout/ContentCanvas'
+import { ArtifactRail } from '../components/layout/ArtifactRail'
 import { useCanvasLifecycle } from '../hooks/useCanvasLifecycle'
+import { Message } from '../components/chat/MessageCard'
 
 type ViewMode = 'chat' | 'workflow'
 
 export function ChatPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
@@ -31,7 +32,8 @@ export function ChatPage() {
             .map(msg => ({
               id: msg.id,
               role: msg.role as 'user' | 'assistant',
-              content: msg.content
+              content: msg.content,
+              createdAt: msg.createdAt || new Date().toISOString()
             }))
         )
       } catch (error) {
@@ -48,8 +50,10 @@ export function ChatPage() {
         setMessages(prev => [
           ...prev,
           {
+            id: Date.now().toString(),
             role: 'assistant',
-            content: streamingContent + content
+            content: streamingContent + content,
+            createdAt: new Date().toISOString()
           }
         ])
         setStreamingContent('')
@@ -67,9 +71,11 @@ export function ChatPage() {
   const handleSend = async (content: string) => {
     if (!sessionId) return
 
-    const userMessage: ChatMessage = {
+    const userMessage: Message = {
+      id: Date.now().toString(),
       role: 'user',
-      content
+      content,
+      createdAt: new Date().toISOString()
     }
     setMessages(prev => [...prev, userMessage])
     setIsLoading(true)
@@ -88,8 +94,11 @@ export function ChatPage() {
   const displayMessages = [...messages]
   if (streamingContent) {
     displayMessages.push({
+      id: 'streaming',
       role: 'assistant',
-      content: streamingContent
+      content: streamingContent,
+      createdAt: new Date().toISOString(),
+      isStreaming: true
     })
   }
 
@@ -185,7 +194,7 @@ export function ChatPage() {
 
       {showArtifacts && sessionId && (
         <div className={canvasIsOpen ? 'w-1/4' : 'w-1/3'}>
-          <ArtifactRail sessionId={sessionId} />
+          <ArtifactRail />
         </div>
       )}
     </div>
