@@ -1,7 +1,8 @@
 {
   "name": "codeall",
+  "productName": "CodeAll",
   "version": "1.0.0",
-  "description": "Multi-LLM collaborative programming platform",
+  "description": "Multi-LLM Collaborative Programming Platform",
   "type": "module",
   "main": "./out/main/index.js",
   "author": "CodeAll Team",
