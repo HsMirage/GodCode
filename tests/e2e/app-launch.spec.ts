@@ -6,30 +6,29 @@ test.describe('Application Launch', () => {
     expect(title).toBeTruthy()
   })
 
-  test('sidebar renders with navigation items', async ({ window }) => {
-    const sidebar = window.locator('aside')
-    await expect(sidebar).toBeVisible()
-
-    const chatNav = window.locator('a:has-text("对话")')
-    await expect(chatNav).toBeVisible()
-
-    const settingsNav = window.locator('a:has-text("设置")')
-    await expect(settingsNav).toBeVisible()
-  })
-
-  test('workspace branding is displayed', async ({ window }) => {
-    const branding = window.locator('text=CodeAll')
+  test('top navigation renders with branding', async ({ window }) => {
+    // Check CodeAll branding is visible in TopNavigation
+    const branding = window.locator('text=CodeAll').first()
     await expect(branding).toBeVisible()
 
-    const workspaceLabel = window.locator('text=Workspace')
-    await expect(workspaceLabel).toBeVisible()
+    // Check settings button exists
+    const settingsBtn = window.locator('button[title="Settings"]')
+    await expect(settingsBtn).toBeVisible()
   })
 
-  test('main content area loads', async ({ window }) => {
-    const chatHeading = window.locator('h1:has-text("对话")')
-    const settingsHeading = window.locator('h1:has-text("设置")')
+  test('sidebar renders with sessions header', async ({ window }) => {
+    // Check sidebar sessions header exists
+    const sessionsHeader = window.locator('h2:has-text("Sessions")')
+    await expect(sessionsHeader).toBeVisible()
+  })
 
-    const eitherVisible = (await chatHeading.isVisible()) || (await settingsHeading.isVisible())
-    expect(eitherVisible).toBe(true)
+  test('main layout loads correctly', async ({ window }) => {
+    // Check the main layout container exists
+    const mainLayout = window.locator('.h-screen').first()
+    await expect(mainLayout).toBeVisible()
+
+    // Check CodeAll branding
+    const branding = window.locator('text=CodeAll').first()
+    await expect(branding).toBeVisible()
   })
 })

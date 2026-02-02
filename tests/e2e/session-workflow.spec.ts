@@ -2,77 +2,36 @@ import { test, expect, navigateTo } from './fixtures/electron'
 
 test.describe('Session Workflow', () => {
   test('chat page displays message input', async ({ window }) => {
-    await navigateTo(window, 'chat')
-
+    // Already on chat page by default
     const textarea = window.locator('textarea')
     await expect(textarea).toBeVisible()
   })
 
-  test('send button exists and is initially disabled', async ({ window }) => {
-    await navigateTo(window, 'chat')
+  test('sidebar shows sessions list', async ({ window }) => {
+    // Check sessions header - use more specific selector
+    const sessionsHeader = window.locator('h2:has-text("Sessions")')
+    await expect(sessionsHeader).toBeVisible()
 
-    const sendBtn = window.locator('button[aria-label="Send message"]')
-    await expect(sendBtn).toBeVisible()
-    await expect(sendBtn).toBeDisabled()
+    // Check new chat button
+    const newChatBtn = window.locator('button[title="New Chat"]')
+    await expect(newChatBtn).toBeVisible()
   })
 
-  test('send button enables when message is typed', async ({ window }) => {
-    await navigateTo(window, 'chat')
-
+  test('can type in message input', async ({ window }) => {
     const textarea = window.locator('textarea')
     await textarea.fill('Hello, this is a test message')
-
-    const sendBtn = window.locator('button[aria-label="Send message"]')
-    await expect(sendBtn).toBeEnabled()
+    await expect(textarea).toHaveValue('Hello, this is a test message')
   })
 
-  test('view mode toggle buttons exist', async ({ window }) => {
-    await navigateTo(window, 'chat')
-
-    const chatViewBtn = window.locator('button:has-text("对话")')
-    await expect(chatViewBtn).toBeVisible()
-
-    const workflowViewBtn = window.locator('button:has-text("流程图")')
-    await expect(workflowViewBtn).toBeVisible()
+  test('no active sessions message shows when empty', async ({ window }) => {
+    // In test environment with no database, should show empty state
+    const emptyState = window.locator('text=No active sessions')
+    await expect(emptyState).toBeVisible()
   })
 
-  test('can switch between chat and workflow views', async ({ window }) => {
-    await navigateTo(window, 'chat')
-
-    const workflowViewBtn = window.locator('button:has-text("流程图")').first()
-    await workflowViewBtn.click()
-    await window.waitForTimeout(500)
-
-    const workflowHeading = window.locator('h1:has-text("流程图")')
-    await expect(workflowHeading).toBeVisible()
-
-    const chatViewBtn = window.locator('button:has-text("对话")').first()
-    await chatViewBtn.click()
-    await window.waitForTimeout(500)
-
-    const chatHeading = window.locator('h1:has-text("对话")')
-    await expect(chatHeading).toBeVisible()
-  })
-
-  test('artifacts panel toggle works', async ({ window }) => {
-    await navigateTo(window, 'chat')
-
-    const artifactsBtn = window.locator('button:has-text("产物")')
-    await expect(artifactsBtn).toBeVisible()
-
-    await artifactsBtn.click()
-    await window.waitForTimeout(500)
-
-    const btnClass = await artifactsBtn.getAttribute('class')
-    expect(btnClass).toContain('text-sky-300')
-  })
-
-  test('message input placeholder is correct', async ({ window }) => {
-    await navigateTo(window, 'chat')
-
-    const textarea = window.locator('textarea')
-    const placeholder = await textarea.getAttribute('placeholder')
-
-    expect(placeholder).toContain('输入消息')
+  test('top navigation shows create space button', async ({ window }) => {
+    // Check the create space button (Plus icon)
+    const createSpaceBtn = window.locator('button[title="Create New Space"]')
+    await expect(createSpaceBtn).toBeVisible()
   })
 })

@@ -53,6 +53,7 @@ const ALLOWED_CHANNELS = [
   'browser:zoom',
   'browser:show-context-menu',
   'browser:zoom-changed',
+  'browser:state-changed',
   'updater:check-for-updates',
   'updater:download-update',
   'updater:quit-and-install',
@@ -61,7 +62,9 @@ const ALLOWED_CHANNELS = [
   'updater:update-not-available',
   'updater:error',
   'updater:download-progress',
-  'updater:update-downloaded'
+  'updater:update-downloaded',
+  'router:get-rules',
+  'router:set-rules'
 ] as const
 
 type AllowedChannel = (typeof ALLOWED_CHANNELS)[number]

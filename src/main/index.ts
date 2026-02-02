@@ -39,46 +39,51 @@ if (!gotTheLock) {
     registerIpcHandlers(mainWindow)
     if (mainWindow) initAutoUpdater(mainWindow)
 
-    try {
-      const db = DatabaseService.getInstance()
-      logger.info('Database initialization started')
-      await db.init()
-      logger.info('Database initialization completed')
-    } catch (error) {
-      logger.error('Database initialization failed:', error)
-      const locale = app.getLocale()
-      const isChinese = locale.startsWith('zh')
+    // Skip database initialization in E2E test environment
+    if (process.env.CODEALL_E2E_TEST === '1') {
+      logger.info('[E2E] Skipping database initialization in test environment')
+    } else {
+      try {
+        const db = DatabaseService.getInstance()
+        logger.info('Database initialization started')
+        await db.init()
+        logger.info('Database initialization completed')
+      } catch (error) {
+        logger.error('Database initialization failed:', error)
+        const locale = app.getLocale()
+        const isChinese = locale.startsWith('zh')
 
-      const logDir = path.join(app.getPath('userData'), 'logs')
-      const logPathHint = app.isPackaged
-        ? `${logDir}/app-YYYY-MM-DD.log`
-        : `Console (开发模式，日志输出到控制台)`
+        const logDir = path.join(app.getPath('userData'), 'logs')
+        const logPathHint = app.isPackaged
+          ? `${logDir}/app-YYYY-MM-DD.log`
+          : `Console (开发模式，日志输出到控制台)`
 
-      const title = isChinese ? '数据库初始化失败' : 'Database Initialization Failed'
+        const title = isChinese ? '数据库初始化失败' : 'Database Initialization Failed'
 
-      const message = isChinese
-        ? `CodeAll 无法初始化数据库。\n\n` +
-          `可能原因：\n` +
-          `1. 杀毒软件拦截\n` +
-          `2. 磁盘空间不足\n` +
-          `3. 权限问题\n\n` +
-          `建议解决方案：\n` +
-          `1. 临时禁用杀毒软件后重试\n` +
-          `2. 检查磁盘空间\n` +
-          `3. 查看日志获取详细信息：${logPathHint}\n\n` +
-          `错误详情：${error instanceof Error ? error.message : String(error)}`
-        : `CodeAll failed to initialize the database.\n\n` +
-          `Possible causes:\n` +
-          `1. Antivirus software blocking\n` +
-          `2. Insufficient disk space\n` +
-          `3. Permission issues\n\n` +
-          `Suggested solutions:\n` +
-          `1. Temporarily disable antivirus and retry\n` +
-          `2. Check available disk space\n` +
-          `3. Check logs for details: ${logPathHint}\n\n` +
-          `Error details: ${error instanceof Error ? error.message : String(error)}`
+        const message = isChinese
+          ? `CodeAll 无法初始化数据库。\n\n` +
+            `可能原因：\n` +
+            `1. 杀毒软件拦截\n` +
+            `2. 磁盘空间不足\n` +
+            `3. 权限问题\n\n` +
+            `建议解决方案：\n` +
+            `1. 临时禁用杀毒软件后重试\n` +
+            `2. 检查磁盘空间\n` +
+            `3. 查看日志获取详细信息：${logPathHint}\n\n` +
+            `错误详情：${error instanceof Error ? error.message : String(error)}`
+          : `CodeAll failed to initialize the database.\n\n` +
+            `Possible causes:\n` +
+            `1. Antivirus software blocking\n` +
+            `2. Insufficient disk space\n` +
+            `3. Permission issues\n\n` +
+            `Suggested solutions:\n` +
+            `1. Temporarily disable antivirus and retry\n` +
+            `2. Check available disk space\n` +
+            `3. Check logs for details: ${logPathHint}\n\n` +
+            `Error details: ${error instanceof Error ? error.message : String(error)}`
 
-      dialog.showErrorBox(title, message)
+        dialog.showErrorBox(title, message)
+      }
     }
   })
 

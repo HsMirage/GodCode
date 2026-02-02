@@ -52,8 +52,23 @@ export interface Artifact {
   updatedAt: Date
 }
 
-const invoke = window.codeall.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>
-const onEvent = window.codeall.on as (
+// Safe access to preload API - if not available, provide mock that logs errors
+const codeallApi =
+  typeof window !== 'undefined' && window.codeall
+    ? window.codeall
+    : {
+        invoke: async (channel: string, ..._args: unknown[]) => {
+          console.error(`[API] window.codeall not available. Cannot invoke: ${channel}`)
+          return { success: false, error: 'Preload API not available' }
+        },
+        on: (channel: string, _callback: (...args: unknown[]) => void) => {
+          console.error(`[API] window.codeall not available. Cannot subscribe: ${channel}`)
+          return () => {}
+        }
+      }
+
+const invoke = codeallApi.invoke as (channel: string, ...args: unknown[]) => Promise<unknown>
+const onEvent = codeallApi.on as (
   channel: string,
   callback: (...args: unknown[]) => void
 ) => () => void

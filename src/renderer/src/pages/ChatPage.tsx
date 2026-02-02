@@ -28,9 +28,21 @@ export function ChatPage() {
     const initializeSession = async () => {
       try {
         const session = await window.codeall.invoke('session:get-or-create-default')
-        setSessionId(session.id)
+        if (!session || typeof session !== 'object' || !('id' in session)) {
+          // Session not available (e.g., in E2E test environment without database)
+          console.warn('No session available, chat will be disabled')
+          return
+        }
+        setSessionId((session as { id: string }).id)
 
-        const existingMessages = await window.codeall.invoke('message:list', session.id)
+        const existingMessages = await window.codeall.invoke(
+          'message:list',
+          (session as { id: string }).id
+        )
+        if (!Array.isArray(existingMessages)) {
+          console.warn('No messages available')
+          return
+        }
         setMessages(
           existingMessages
             .filter(msg => msg.role !== 'system')

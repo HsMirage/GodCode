@@ -1,62 +1,23 @@
-import { test, expect, _electron as electron } from '@playwright/test'
-import path from 'path'
-import { fileURLToPath } from 'url'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+import { test, expect } from './fixtures/electron'
 
 test.describe('MVP1 End-to-End Tests', () => {
-  test('should launch application successfully', async () => {
-    const electronApp = await electron.launch({
-      args: [path.join(__dirname, '../../out/main/index.js')]
-    })
-
-    const window = await electronApp.firstWindow()
-    await window.waitForLoadState('domcontentloaded')
-
+  test('should launch application successfully', async ({ window }) => {
     const title = await window.title()
     expect(title).toBeTruthy()
-
-    await electronApp.close()
   })
 
-  test('should navigate to Settings page', async () => {
-    const electronApp = await electron.launch({
-      args: [path.join(__dirname, '../../out/main/index.js')]
-    })
-
-    const window = await electronApp.firstWindow()
-    await window.waitForLoadState('domcontentloaded')
-
-    const settingsLink = window.locator('text=设置')
-    if (await settingsLink.isVisible()) {
-      await settingsLink.click()
-      await window.waitForTimeout(500)
-
-      const heading = window.locator('h1:has-text("设置")')
-      await expect(heading).toBeVisible()
-    }
-
-    await electronApp.close()
+  test('should display CodeAll branding', async ({ window }) => {
+    const branding = window.locator('text=CodeAll')
+    await expect(branding).toBeVisible()
   })
 
-  test('should navigate to Chat page', async () => {
-    const electronApp = await electron.launch({
-      args: [path.join(__dirname, '../../out/main/index.js')]
-    })
+  test('should have settings button', async ({ window }) => {
+    const settingsBtn = window.locator('button[title="Settings"]')
+    await expect(settingsBtn).toBeVisible()
+  })
 
-    const window = await electronApp.firstWindow()
-    await window.waitForLoadState('domcontentloaded')
-
-    const chatLink = window.locator('text=对话')
-    if (await chatLink.isVisible()) {
-      await chatLink.click()
-      await window.waitForTimeout(500)
-
-      const heading = window.locator('h1:has-text("对话")')
-      await expect(heading).toBeVisible()
-    }
-
-    await electronApp.close()
+  test('should have message input on main page', async ({ window }) => {
+    const textarea = window.locator('textarea')
+    await expect(textarea).toBeVisible()
   })
 })

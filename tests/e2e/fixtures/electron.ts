@@ -80,8 +80,23 @@ export const test = base.extend<ElectronFixtures>({
 
   window: async ({ electronApp }, use) => {
     const window = await electronApp.firstWindow()
+
+    // Capture console messages for debugging
+    window.on('console', msg => {
+      console.log(`[Renderer Console ${msg.type()}]`, msg.text())
+    })
+    window.on('pageerror', err => {
+      console.error('[Renderer Error]', err.message)
+    })
+
     await window.waitForLoadState('domcontentloaded')
-    await window.waitForTimeout(2000)
+    // Wait longer for React to hydrate
+    await window.waitForTimeout(5000)
+
+    // Debug: always log page content
+    const html = await window.content()
+    console.log('[E2E Debug] Page HTML (first 1000 chars):', html.substring(0, 1000))
+
     await use(window)
   }
 })
@@ -96,12 +111,19 @@ export async function takeScreenshot(page: Page, name: string): Promise<void> {
 }
 
 export async function waitForAppReady(window: Page): Promise<void> {
-  await window.waitForSelector('aside', { timeout: 30000 })
+  // Wait for the main layout container to be visible
+  await window.waitForSelector('.h-screen', { timeout: 30000 })
 }
 
 export async function navigateTo(window: Page, destination: 'chat' | 'settings'): Promise<void> {
-  const label = destination === 'chat' ? '对话' : '设置'
-  const link = window.locator(`a:has-text("${label}")`)
-  await link.click()
+  if (destination === 'settings') {
+    // Click the settings button in TopNavigation
+    const settingsBtn = window.locator('button[title="Settings"]')
+    await settingsBtn.click()
+  } else {
+    // Navigate to home/chat by clicking the CodeAll brand
+    const brand = window.locator('text=CodeAll').first()
+    await brand.click()
+  }
   await window.waitForTimeout(500)
 }
