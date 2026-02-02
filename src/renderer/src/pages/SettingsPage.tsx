@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ApiKeyForm } from '../components/settings/ApiKeyForm'
-import { useConfigStore } from '../stores/config.store'
+import { useConfigStore } from '../store/config.store'
 import { ModelConfigForm, ModelConfigFormValues } from '../components/ModelConfigForm'
 import { DataManagement } from '../components/settings/DataManagement'
 import type { Model } from '@renderer/types/domain'

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useUpdaterStore } from '../../stores/updater.store'
+import { useUpdaterStore } from '../../store/updater.store'
 import { UpdateDialog } from './UpdateDialog'
 import { UpdateToast } from './UpdateToast'
 
