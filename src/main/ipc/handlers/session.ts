@@ -138,3 +138,40 @@ export async function handleSessionList(_event: IpcMainInvokeEvent): Promise<Pri
   const sessions = await prisma.session.findMany({ orderBy: { updatedAt: 'desc' } })
   return sessions
 }
+
+export async function handleSessionUpdate(
+  _event: IpcMainInvokeEvent,
+  data: { id: string } & Partial<Omit<PrismaSession, 'id' | 'createdAt' | 'updatedAt'>>
+): Promise<PrismaSession> {
+  const logger = LoggerService.getInstance().getLogger()
+  const db = DatabaseService.getInstance()
+  const prisma = db.getClient()
+
+  try {
+    const { id, ...updateData } = data
+    const session = await prisma.session.update({
+      where: { id },
+      data: updateData
+    })
+
+    return session
+  } catch (error) {
+    logger.error('Failed to update session', { data, error })
+    throw error
+  }
+}
+
+export async function handleSessionDelete(_event: IpcMainInvokeEvent, id: string): Promise<void> {
+  const logger = LoggerService.getInstance().getLogger()
+  const db = DatabaseService.getInstance()
+  const prisma = db.getClient()
+
+  try {
+    await prisma.session.delete({
+      where: { id }
+    })
+  } catch (error) {
+    logger.error('Failed to delete session', { id, error })
+    throw error
+  }
+}

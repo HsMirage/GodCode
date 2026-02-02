@@ -9,9 +9,11 @@ import {
 import { handlePing } from './handlers/ping'
 import {
   handleSessionCreate,
+  handleSessionDelete,
   handleSessionGet,
   handleSessionGetOrCreateDefault,
-  handleSessionList
+  handleSessionList,
+  handleSessionUpdate
 } from './handlers/session'
 import { handleMessageList, handleMessageSend } from './handlers/message'
 import {
@@ -21,7 +23,7 @@ import {
   handleProviderCacheSetStatus
 } from './handlers/provider-cache'
 import { handleRouterGetRules, handleRouterSaveRules } from './handlers/router'
-import { handleTaskList } from './handlers/task'
+import { handleTaskCreate, handleTaskGet, handleTaskList, handleTaskUpdate } from './handlers/task'
 import {
   handleTaskContinuationAbort,
   handleTaskContinuationGetStatus,
@@ -51,6 +53,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('session:get', handleSessionGet)
   ipcMain.handle('session:get-or-create-default', handleSessionGetOrCreateDefault)
   ipcMain.handle('session:list', handleSessionList)
+  ipcMain.handle('session:update', handleSessionUpdate)
+  ipcMain.handle('session:delete', handleSessionDelete)
 
   // Message handlers
   ipcMain.handle('message:send', handleMessageSend)
@@ -67,7 +71,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('router:save-rules', handleRouterSaveRules)
 
   // Task handlers
+  ipcMain.handle('task:create', handleTaskCreate)
+  ipcMain.handle('task:get', handleTaskGet)
   ipcMain.handle('task:list', handleTaskList)
+  ipcMain.handle('task:update', handleTaskUpdate)
 
   // Task continuation handlers
   ipcMain.handle('task-continuation:get-status', handleTaskContinuationGetStatus)
