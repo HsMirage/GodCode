@@ -82,7 +82,7 @@ export async function handleMessageSend(
         }
       }
 
-      const adapter = createLLMAdapter(resolvedModel.provider as 'anthropic', {
+      const adapter = createLLMAdapter(resolvedModel.provider, {
         apiKey: resolvedModel.apiKey ?? 'mock'
       })
 
