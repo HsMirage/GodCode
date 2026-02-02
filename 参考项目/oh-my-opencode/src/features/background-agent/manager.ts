@@ -9,17 +9,21 @@ import { log, getAgentToolRestrictions, promptWithModelSuggestionRetry } from ".
 import { ConcurrencyManager } from "./concurrency"
 import type { BackgroundTaskConfig, TmuxConfig } from "../../config/schema"
 import { isInsideTmux } from "../../shared/tmux"
+import {
+  DEFAULT_STALE_TIMEOUT_MS,
+  MIN_IDLE_TIME_MS,
+  MIN_RUNTIME_BEFORE_STALE_MS,
+  MIN_STABILITY_TIME_MS,
+  POLLING_INTERVAL_MS,
+  TASK_CLEANUP_DELAY_MS,
+  TASK_TTL_MS,
+} from "./constants"
 
 import { subagentSessions } from "../claude-code-session-state"
 import { getTaskToastManager } from "../task-toast-manager"
 import { findNearestMessageWithFields, MESSAGE_STORAGE } from "../hook-message-injector"
 import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
-
-const TASK_TTL_MS = 30 * 60 * 1000
-const MIN_STABILITY_TIME_MS = 10 * 1000  // Must run at least 10s before stability detection kicks in
-const DEFAULT_STALE_TIMEOUT_MS = 180_000  // 3 minutes
-const MIN_RUNTIME_BEFORE_STALE_MS = 30_000  // 30 seconds
 
 type ProcessCleanupEvent = NodeJS.Signals | "beforeExit" | "exit"
 
@@ -134,6 +138,7 @@ export class BackgroundManager {
       parentModel: input.parentModel,
       parentAgent: input.parentAgent,
       model: input.model,
+      category: input.category,
     }
 
     this.tasks.set(task.id, task)
@@ -195,6 +200,11 @@ export class BackgroundManager {
           await this.startTask(item)
         } catch (error) {
           log("[background-agent] Error starting task:", error)
+          // Release concurrency slot if startTask failed and didn't release it itself
+          // This prevents slot leaks when errors occur after acquire but before task.concurrencyKey is set
+          if (!item.task.concurrencyKey) {
+            this.concurrencyManager.release(key)
+          }
         }
 
         queue.shift()
@@ -227,7 +237,7 @@ export class BackgroundManager {
     const createResult = await this.client.session.create({
       body: {
         parentID: input.parentSessionID,
-        title: `Background: ${input.description}`,
+        title: `${input.description} (@${input.agent} subagent)`,
         permission: [
           { permission: "question", action: "deny" as const, pattern: "*" },
         ],
@@ -235,14 +245,14 @@ export class BackgroundManager {
       query: {
         directory: parentDirectory,
       },
-    }).catch((error) => {
-      this.concurrencyManager.release(concurrencyKey)
-      throw error
     })
 
     if (createResult.error) {
-      this.concurrencyManager.release(concurrencyKey)
       throw new Error(`Failed to create background session: ${createResult.error}`)
+    }
+
+    if (!createResult.data?.id) {
+      throw new Error("Failed to create background session: API returned no session ID")
     }
 
     const sessionID = createResult.data.id
@@ -653,7 +663,6 @@ export class BackgroundManager {
 
       // Edge guard: Require minimum elapsed time (5 seconds) before accepting idle
       const elapsedMs = Date.now() - startedAt.getTime()
-      const MIN_IDLE_TIME_MS = 5000
       if (elapsedMs < MIN_IDLE_TIME_MS) {
         log("[background-agent] Ignoring early session.idle, elapsed:", { elapsedMs, taskId: task.id })
         return
@@ -862,7 +871,7 @@ export class BackgroundManager {
 
     this.pollingInterval = setInterval(() => {
       this.pollRunningTasks()
-    }, 2000)
+    }, POLLING_INTERVAL_MS)
     this.pollingInterval.unref()
   }
 
@@ -952,6 +961,12 @@ export class BackgroundManager {
     }
 
     this.markForNotification(task)
+
+    if (task.sessionID) {
+      this.client.session.abort({
+        path: { id: task.sessionID },
+      }).catch(() => {})
+    }
 
     try {
       await this.notifyParentSession(task)
@@ -1085,7 +1100,7 @@ Use \`background_output(task_id="${task.id}")\` to retrieve this result when rea
         this.tasks.delete(taskId)
         log("[background-agent] Removed completed task from memory:", taskId)
       }
-    }, 5 * 60 * 1000)
+    }, TASK_CLEANUP_DELAY_MS)
     this.completionTimers.set(taskId, timer)
   }
 

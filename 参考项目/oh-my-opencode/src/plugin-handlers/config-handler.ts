@@ -30,7 +30,7 @@ import { getOpenCodeConfigPaths } from "../shared/opencode-config-dir";
 import { migrateAgentConfig } from "../shared/permission-compat";
 import { AGENT_NAME_MAP } from "../shared/migration";
 import { AGENT_MODEL_REQUIREMENTS } from "../shared/model-requirements";
-import { PROMETHEUS_SYSTEM_PROMPT, PROMETHEUS_PERMISSION } from "../agents/prometheus-prompt";
+import { PROMETHEUS_SYSTEM_PROMPT, PROMETHEUS_PERMISSION } from "../agents/prometheus";
 import { DEFAULT_CATEGORIES } from "../tools/delegate-task/constants";
 import type { ModelCacheState } from "../plugin-state";
 import type { CategoryConfig } from "../config/schema";
@@ -46,6 +46,28 @@ export function resolveCategoryConfig(
   userCategories?: Record<string, CategoryConfig>
 ): CategoryConfig | undefined {
   return userCategories?.[categoryName] ?? DEFAULT_CATEGORIES[categoryName];
+}
+
+const CORE_AGENT_ORDER = ["sisyphus", "hephaestus", "prometheus", "atlas"] as const;
+
+function reorderAgentsByPriority(agents: Record<string, unknown>): Record<string, unknown> {
+  const ordered: Record<string, unknown> = {};
+  const seen = new Set<string>();
+
+  for (const key of CORE_AGENT_ORDER) {
+    if (Object.prototype.hasOwnProperty.call(agents, key)) {
+      ordered[key] = agents[key];
+      seen.add(key);
+    }
+  }
+
+  for (const [key, value] of Object.entries(agents)) {
+    if (!seen.has(key)) {
+      ordered[key] = value;
+    }
+  }
+
+  return ordered;
 }
 
 export function createConfigHandler(deps: ConfigHandlerDeps) {
@@ -287,7 +309,7 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
           prompt: PROMETHEUS_SYSTEM_PROMPT,
           permission: PROMETHEUS_PERMISSION,
           description: `${configAgent?.plan?.description ?? "Plan agent"} (Prometheus - OhMyOpenCode)`,
-          color: (configAgent?.plan?.color as string) ?? "#FF6347",
+          color: (configAgent?.plan?.color as string) ?? "#9D4EDD", // Amethyst Purple - wisdom/foresight
           ...(temperatureToUse !== undefined ? { temperature: temperatureToUse } : {}),
           ...(topPToUse !== undefined ? { top_p: topPToUse } : {}),
           ...(maxTokensToUse !== undefined ? { maxTokens: maxTokensToUse } : {}),
@@ -301,9 +323,19 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
             : {}),
         };
 
-        agentConfig["prometheus"] = prometheusOverride
-          ? { ...prometheusBase, ...prometheusOverride }
-          : prometheusBase;
+        // Properly handle prompt_append for Prometheus
+        // Extract prompt_append and append it to prompt instead of shallow spread
+        // Fixes: https://github.com/code-yeongyu/oh-my-opencode/issues/723
+        if (prometheusOverride) {
+          const { prompt_append, ...restOverride } = prometheusOverride as Record<string, unknown> & { prompt_append?: string };
+          const merged = { ...prometheusBase, ...restOverride };
+          if (prompt_append && merged.prompt) {
+            merged.prompt = merged.prompt + "\n" + prompt_append;
+          }
+          agentConfig["prometheus"] = merged;
+        } else {
+          agentConfig["prometheus"] = prometheusBase;
+        }
       }
 
     const filteredConfigAgents = configAgent
@@ -359,6 +391,10 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       };
     }
 
+    if (config.agent) {
+      config.agent = reorderAgentsByPriority(config.agent as Record<string, unknown>);
+    }
+
     const agentResult = config.agent as AgentConfig;
 
     config.tools = {
@@ -367,6 +403,8 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
       LspHover: false,
       LspCodeActions: false,
       LspCodeActionResolve: false,
+      "task_*": false,
+      teammate: false,
     };
 
     type AgentWithPermission = { permission?: Record<string, unknown> };
@@ -381,19 +419,23 @@ export function createConfigHandler(deps: ConfigHandlerDeps) {
     }
     if (agentResult["atlas"]) {
       const agent = agentResult["atlas"] as AgentWithPermission;
-      agent.permission = { ...agent.permission, task: "deny", call_omo_agent: "deny", delegate_task: "allow" };
+      agent.permission = { ...agent.permission, task: "deny", call_omo_agent: "deny", delegate_task: "allow", "task_*": "allow", teammate: "allow" };
     }
     if (agentResult.sisyphus) {
       const agent = agentResult.sisyphus as AgentWithPermission;
+      agent.permission = { ...agent.permission, call_omo_agent: "deny", delegate_task: "allow", question: "allow", "task_*": "allow", teammate: "allow" };
+    }
+    if (agentResult.hephaestus) {
+      const agent = agentResult.hephaestus as AgentWithPermission;
       agent.permission = { ...agent.permission, call_omo_agent: "deny", delegate_task: "allow", question: "allow" };
     }
     if (agentResult["prometheus"]) {
       const agent = agentResult["prometheus"] as AgentWithPermission;
-      agent.permission = { ...agent.permission, call_omo_agent: "deny", delegate_task: "allow", question: "allow" };
+      agent.permission = { ...agent.permission, call_omo_agent: "deny", delegate_task: "allow", question: "allow", "task_*": "allow", teammate: "allow" };
     }
     if (agentResult["sisyphus-junior"]) {
       const agent = agentResult["sisyphus-junior"] as AgentWithPermission;
-      agent.permission = { ...agent.permission, delegate_task: "allow" };
+      agent.permission = { ...agent.permission, delegate_task: "allow", "task_*": "allow", teammate: "allow" };
     }
 
     config.permission = {
