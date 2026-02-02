@@ -16,6 +16,7 @@ import { DatabaseService } from '../database'
 import { Prisma } from '@prisma/client'
 import { LoggerService } from '../logger'
 import { createLLMAdapter } from '../llm/factory'
+import { DEFAULT_FALLBACK_CHAINS } from '../llm/model-resolver'
 import type { Message } from '@/types/domain'
 import { workflowEvents } from './events'
 
@@ -42,17 +43,57 @@ export class WorkforceEngine {
   async decomposeTask(input: string): Promise<SubTask[]> {
     this.logger.info('Decomposing task', { input })
 
-    const model = await this.prisma.model.findFirst({
-      where: { provider: 'anthropic' },
+    const models = await this.prisma.model.findMany({
+      where: {
+        apiKey: {
+          not: ''
+        }
+      },
       orderBy: { createdAt: 'desc' }
     })
 
-    if (!model) {
+    if (models.length === 0) {
       throw new Error('No model configured for task decomposition')
     }
 
-    const adapter = createLLMAdapter('anthropic', {
-      apiKey: model.apiKey || ''
+    let selectedProvider: string | undefined
+    let selectedModel: string | undefined
+    let apiKey: string | undefined
+
+    // Try to find a match in the orchestrator fallback chain
+    for (const entry of DEFAULT_FALLBACK_CHAINS.orchestrator) {
+      for (const provider of entry.providers) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const config = models.find((m: any) => m.provider === provider)
+        if (config) {
+          selectedProvider = provider
+          selectedModel = entry.model
+          apiKey = config.apiKey || ''
+          break
+        }
+      }
+      if (selectedProvider) break
+    }
+
+    // Fallback to first available
+    if (!selectedProvider) {
+      const fallback = models[0]
+      selectedProvider = fallback.provider
+      apiKey = fallback.apiKey || ''
+
+      // Default defaults for unknown providers or fallback
+      if (selectedProvider === 'openai') selectedModel = 'gpt-4o'
+      else if (selectedProvider === 'google') selectedModel = 'gemini-1.5-pro'
+      else selectedModel = 'claude-3-5-sonnet-20240620'
+    }
+
+    this.logger.info('Selected model for decomposition', {
+      provider: selectedProvider,
+      model: selectedModel
+    })
+
+    const adapter = createLLMAdapter(selectedProvider!, {
+      apiKey: apiKey || ''
     })
 
     const prompt = `Decompose the following task into 3-5 subtasks. For each subtask, identify any dependencies on other subtasks.
@@ -97,7 +138,7 @@ Only return the JSON, no other text.`
     ]
 
     const response = await adapter.sendMessage(messages, {
-      model: 'claude-3-5-sonnet-20240620',
+      model: selectedModel ?? 'claude-3-5-sonnet-20240620',
       temperature: 0.3
     })
 
