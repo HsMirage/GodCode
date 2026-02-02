@@ -20,10 +20,11 @@ describe('IPC Channel Alignment', () => {
       expect(uniqueValues.size).toBe(values.length)
     })
 
-    it('should follow naming convention (lowercase with colons)', () => {
+    it('should follow naming convention (lowercase, optional colon)', () => {
       const values = Object.values(INVOKE_CHANNELS)
       for (const value of values) {
-        expect(value).toMatch(/^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/)
+        // Allow simple channels like 'ping' or prefixed like 'space:create'
+        expect(value).toMatch(/^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)?$/)
       }
     })
   })
@@ -39,10 +40,11 @@ describe('IPC Channel Alignment', () => {
       expect(uniqueValues.size).toBe(values.length)
     })
 
-    it('should follow naming convention (lowercase with colons)', () => {
+    it('should follow naming convention (lowercase, optional colon)', () => {
       const values = Object.values(EVENT_CHANNELS)
       for (const value of values) {
-        expect(value).toMatch(/^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/)
+        // Allow simple channels like 'ping' or prefixed like 'browser:state-changed'
+        expect(value).toMatch(/^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)?$/)
       }
     })
   })

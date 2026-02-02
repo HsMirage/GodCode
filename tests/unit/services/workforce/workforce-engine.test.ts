@@ -12,7 +12,8 @@ const mockPrisma: any = {
     update: vi.fn()
   },
   model: {
-    findFirst: vi.fn()
+    findFirst: vi.fn(),
+    findMany: vi.fn()
   },
   session: {
     findFirst: vi.fn(),
@@ -74,11 +75,13 @@ describe('WorkforceEngine', () => {
     mockPrisma.session.findFirst.mockResolvedValue({ id: 'session-1' })
     mockPrisma.task.create.mockResolvedValue({ id: 'workflow-1', type: 'workflow' })
     mockPrisma.task.update.mockResolvedValue({ id: 'workflow-1' })
-    mockPrisma.model.findFirst.mockResolvedValue({
-      id: 'model-1',
-      provider: 'anthropic',
-      apiKey: 'test-key'
-    })
+    mockPrisma.model.findMany.mockResolvedValue([
+      {
+        id: 'model-1',
+        provider: 'anthropic',
+        apiKey: 'test-key'
+      }
+    ])
     mockAdapter.sendMessage.mockResolvedValue({
       content: JSON.stringify({
         subtasks: [
@@ -103,9 +106,12 @@ describe('WorkforceEngine', () => {
       const input = 'Complex task'
       const subtasks = await workforceEngine.decomposeTask(input)
 
-      expect(mockPrisma.model.findFirst).toHaveBeenCalledWith(
+      expect(mockPrisma.model.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { provider: 'anthropic' }
+          where: {
+            apiKey: { not: '' }
+          },
+          orderBy: { createdAt: 'desc' }
         })
       )
       expect(createLLMAdapter).toHaveBeenCalledWith(
@@ -121,7 +127,7 @@ describe('WorkforceEngine', () => {
     })
 
     it('should handle model not found error', async () => {
-      mockPrisma.model.findFirst.mockResolvedValue(null)
+      mockPrisma.model.findMany.mockResolvedValue([])
 
       await expect(workforceEngine.decomposeTask('input')).rejects.toThrow(
         'No model configured for task decomposition'
