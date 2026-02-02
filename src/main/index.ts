@@ -5,6 +5,7 @@ const { autoUpdater } = pkg
 import { registerIpcHandlers } from './ipc'
 import { DatabaseService } from './services/database'
 import { processCleanupService } from './services/process-cleanup.service'
+import { browserViewManager } from './services/browser-view.service'
 import { logger } from '../shared/logger'
 
 process.on('uncaughtException', error => {
@@ -104,7 +105,6 @@ if (!gotTheLock) {
     }
 
     try {
-      const { browserViewManager } = await import('./services/browser-view.service')
       browserViewManager.destroyAll()
       logger.info('[Main] BrowserViews destroyed')
     } catch (error) {
