@@ -64,7 +64,7 @@ const ALLOWED_CHANNELS = [
   'updater:download-progress',
   'updater:update-downloaded',
   'router:get-rules',
-  'router:set-rules'
+  'router:save-rules'
 ] as const
 
 type AllowedChannel = (typeof ALLOWED_CHANNELS)[number]
