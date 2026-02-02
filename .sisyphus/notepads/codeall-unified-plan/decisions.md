@@ -166,3 +166,7 @@
 3. Implement message/artifact components (6.2)
 4. Add browser UI shell (6.3)
 5. Build model/agent management UI (6.4)
+
+### Agent System Documentation (2026-02-01)
+- Created `AGENTS.md` to formalize the split between orchestration (Workforce) and execution (Delegate).
+- Defined standard workflow for adding new AI agents to the platform.

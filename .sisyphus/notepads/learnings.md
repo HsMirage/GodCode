@@ -20,3 +20,12 @@
   - Variable substitution (format `{variableName}`).
   - Storage location: `app.getPath('userData')/prompts`.
   - Default template initialization.
+
+## Unified ContentCanvas Component
+
+- Consolidating `ContentCanvas` logic:
+  - Merged `src/renderer/src/components/layout/ContentCanvas.tsx` (Artifact Preview) and `src/renderer/src/components/canvas/ContentCanvas.tsx` (Browser/Tab System).
+  - The new unified component resides in `src/renderer/src/components/canvas/ContentCanvas.tsx`.
+  - It prioritizes `useArtifactStore.selectedArtifact` (legacy artifact preview) over `useCanvasLifecycle.tabs` (browser tabs) to maintain existing user workflow while introducing the new tab system.
+  - Implemented a dual-close mechanism (`handleClose`) that synchronizes `useUIStore.showContentCanvas` (MainLayout visibility) and `useCanvasLifecycle.isOpen` (ChatPage/Canvas visibility).
+  - Removed duplicated stub component from `layout` directory.

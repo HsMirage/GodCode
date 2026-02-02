@@ -4,13 +4,15 @@ import { MessageList } from '../components/chat/MessageList'
 import { MessageInput } from '../components/chat/MessageInput'
 import { TypingIndicator } from '../components/chat/TypingIndicator'
 import { WorkflowView } from '../components/workflow/WorkflowView'
-import { ContentCanvas } from '../components/layout/ContentCanvas'
-import { ArtifactRail } from '../components/layout/ArtifactRail'
+import { ContentCanvas } from '../components/canvas/ContentCanvas'
+import { ArtifactRail } from '../components/artifact/ArtifactRail'
 import { useCanvasLifecycle } from '../hooks/useCanvasLifecycle'
 import { Message } from '../components/chat/MessageCard'
 import { SessionResumeIndicator } from '../components/session/SessionResumeIndicator'
+import { AgentWorkViewer } from '../components/agents/AgentWorkViewer'
+import { useAgentStore } from '../store/agent.store'
 
-type ViewMode = 'chat' | 'workflow'
+type ViewMode = 'chat' | 'workflow' | 'agent'
 
 export function ChatPage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
@@ -20,6 +22,7 @@ export function ChatPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
   const [showArtifacts, setShowArtifacts] = useState(false)
   const { isOpen: canvasIsOpen } = useCanvasLifecycle()
+  const { selectedAgentId } = useAgentStore()
 
   useEffect(() => {
     const initializeSession = async () => {
@@ -147,6 +150,17 @@ export function ChatPage() {
               >
                 流程图
               </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('agent')}
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+                  viewMode === 'agent'
+                    ? 'bg-sky-500/20 text-sky-300 shadow-[0_0_12px_rgba(14,165,233,0.2)]'
+                    : 'text-slate-400 hover:text-slate-300'
+                }`}
+              >
+                代理
+              </button>
             </div>
 
             <button
@@ -163,7 +177,7 @@ export function ChatPage() {
           </div>
         </header>
 
-        {viewMode === 'chat' ? (
+        {viewMode === 'chat' && (
           <>
             {sessionId && (
               <div className="mb-2">
@@ -186,9 +200,28 @@ export function ChatPage() {
               placeholder="输入消息... (Enter发送, Shift+Enter换行)"
             />
           </>
-        ) : (
+        )}
+
+        {viewMode === 'workflow' && (
           <div className="flex-1 overflow-hidden">
             {sessionId && <WorkflowView sessionId={sessionId} />}
+          </div>
+        )}
+
+        {viewMode === 'agent' && (
+          <div className="flex-1 overflow-hidden h-full">
+            {selectedAgentId ? (
+              <AgentWorkViewer agentId={selectedAgentId} className="h-full" />
+            ) : (
+              <div className="flex h-full items-center justify-center">
+                <div className="text-center">
+                  <p className="text-slate-400">请选择一个代理查看工作状态</p>
+                  <p className="mt-2 text-sm text-slate-500">
+                    在右侧面板或代理列表中选择一个活动代理
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

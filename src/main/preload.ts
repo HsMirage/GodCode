@@ -22,6 +22,7 @@ const ALLOWED_CHANNELS = [
   'message:send',
   'message:list',
   'message:stream',
+  'message:stream-chunk',
   'model:create',
   'model:list',
   'model:update',
@@ -51,7 +52,16 @@ const ALLOWED_CHANNELS = [
   'browser:execute-js',
   'browser:zoom',
   'browser:show-context-menu',
-  'browser:zoom-changed'
+  'browser:zoom-changed',
+  'updater:check-for-updates',
+  'updater:download-update',
+  'updater:quit-and-install',
+  'updater:checking-for-update',
+  'updater:update-available',
+  'updater:update-not-available',
+  'updater:error',
+  'updater:download-progress',
+  'updater:update-downloaded'
 ] as const
 
 type AllowedChannel = (typeof ALLOWED_CHANNELS)[number]

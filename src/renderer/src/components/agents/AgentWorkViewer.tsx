@@ -53,27 +53,7 @@ export function AgentWorkViewer({ agentId, className }: AgentWorkViewerProps) {
     }
   }, [logs.length, autoScroll, isPaused])
 
-  useEffect(() => {
-    if (agent?.status === 'working' && logs.length === 0) {
-      const demoLogs: Omit<WorkLogEntry, 'id' | 'timestamp'>[] = [
-        { agentId, type: 'thinking', message: 'Analyzing the request...' },
-        { agentId, type: 'action', message: 'Reading project configuration...' },
-        { agentId, type: 'tool_call', message: 'read_file', metadata: { path: 'package.json' } },
-        { agentId, type: 'tool_result', message: 'File read successfully' },
-        {
-          agentId,
-          type: 'thinking',
-          message: 'Dependencies look correct. Proceeding with task decomposition.'
-        }
-      ]
-
-      demoLogs.forEach((log, i) => {
-        setTimeout(() => {
-          addWorkLog(agentId, log)
-        }, i * 1000)
-      })
-    }
-  }, [agent?.status, logs.length, agentId, addWorkLog])
+  useEffect(() => {}, [])
 
   if (!agent) {
     return (

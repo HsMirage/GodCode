@@ -43,6 +43,11 @@ interface CodeAllAPI {
     channel: 'artifact:delete',
     artifactId: string
   ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'file:read',
+    filePath: string,
+    sessionId: string
+  ): Promise<{ success: boolean; content?: string; error?: string }>
 
   // Browser Channels
   invoke(
@@ -103,6 +108,38 @@ interface CodeAllAPI {
     channel: 'task:status-changed',
     callback: (data: { taskId: string; status: Task['status'] }) => void
   ): () => void
+
+  // Continuation Channels
+  invoke(channel: 'continuation:get-progress'): Promise<{
+    todoCompleted: number
+    todoTotal: number
+    status: 'idle' | 'running' | 'paused'
+    lastResumeTime?: Date
+  }>
+  invoke(channel: 'continuation:trigger-resume'): Promise<void>
+  invoke(channel: 'continuation:get-history'): Promise<
+    {
+      timestamp: Date
+      trigger: 'auto' | 'manual'
+      result: 'success' | 'failed'
+      tasksCompleted: number
+    }[]
+  >
+  on(
+    channel: 'continuation:status-update',
+    callback: (data: { status: 'idle' | 'running' | 'paused'; progress: number }) => void
+  ): () => void
+
+  // Updater
+  invoke(channel: 'updater:check-for-updates'): Promise<any>
+  invoke(channel: 'updater:download-update'): Promise<void>
+  invoke(channel: 'updater:quit-and-install'): Promise<void>
+  on(channel: 'updater:checking-for-update', callback: () => void): () => void
+  on(channel: 'updater:update-available', callback: (info: any) => void): () => void
+  on(channel: 'updater:update-not-available', callback: (info: any) => void): () => void
+  on(channel: 'updater:error', callback: (error: string) => void): () => void
+  on(channel: 'updater:download-progress', callback: (progress: any) => void): () => void
+  on(channel: 'updater:update-downloaded', callback: (info: any) => void): () => void
 }
 
 declare global {

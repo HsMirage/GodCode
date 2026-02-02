@@ -153,10 +153,6 @@ function createWindow() {
 
 function initAutoUpdater(win: BrowserWindow) {
   autoUpdater.autoDownload = false
-  autoUpdater.setFeedURL({
-    provider: 'generic',
-    url: 'https://example.com/updates'
-  })
 
   // IPC Handlers
   ipcMain.handle('updater:check-for-updates', () => autoUpdater.checkForUpdates())

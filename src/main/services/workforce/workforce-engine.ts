@@ -17,6 +17,7 @@ import { Prisma } from '@prisma/client'
 import { LoggerService } from '../logger'
 import { createLLMAdapter } from '../llm/factory'
 import type { Message } from '@/types/domain'
+import { workflowEvents } from './events'
 
 export interface SubTask {
   id: string
@@ -164,6 +165,14 @@ Only return the JSON, no other text.`
       const executeTask = async (task: SubTask): Promise<void> => {
         inProgress.add(task.id)
 
+        workflowEvents.emit({
+          type: 'task:started',
+          workflowId: workflow.id,
+          taskId: task.id,
+          timestamp: new Date(),
+          data: { description: task.description }
+        })
+
         try {
           const result = await this.delegateEngine.delegateTask({
             description: task.description,
@@ -180,6 +189,14 @@ Only return the JSON, no other text.`
             workflowId: workflow.id,
             taskId: task.id,
             description: task.description
+          })
+
+          workflowEvents.emit({
+            type: 'task:completed',
+            workflowId: workflow.id,
+            taskId: task.id,
+            timestamp: new Date(),
+            data: { description: task.description, output: result.output }
           })
         } catch (error) {
           inProgress.delete(task.id)
@@ -222,6 +239,14 @@ Only return the JSON, no other text.`
       })
 
       this.logger.info('Workflow completed', { workflowId: workflow.id })
+
+      workflowEvents.emit({
+        type: 'workflow:completed',
+        workflowId: workflow.id,
+        taskId: workflow.id,
+        timestamp: new Date(),
+        data: { success: true, taskCount: subtasks.length }
+      })
 
       return {
         workflowId: workflow.id,

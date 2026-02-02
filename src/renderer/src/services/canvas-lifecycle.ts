@@ -3,6 +3,7 @@
  */
 import { api } from '../api'
 import { isBinaryExtension } from '../constants/file-types'
+import { useDataStore } from '../store/data.store'
 
 export type ContentType =
   | 'code'
@@ -234,7 +235,11 @@ class CanvasLifecycle {
     }
 
     try {
-      const response = await api.readArtifactContent(path)
+      const { currentSessionId } = useDataStore.getState()
+      if (!currentSessionId) {
+        throw new Error('Session not found')
+      }
+      const response = await api.readArtifactContent(path, currentSessionId)
       if (!this.tabs.has(tabId)) return
 
       if (response.success !== false) {

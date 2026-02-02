@@ -4,13 +4,15 @@ import type {
   MessageCreateParams,
   MessageParam,
   TextBlock,
-  ToolResultBlockParam
+  ToolResultBlockParam,
+  ContentBlock
 } from '@anthropic-ai/sdk/resources/messages'
 import type { LLMAdapter, LLMChunk, LLMConfig, LLMResponse } from './adapter.interface'
 import type { Message } from '@/types/domain'
 import { logger } from '@/shared/logger'
 import { allTools } from '@/main/services/ai-browser'
 import { browserViewManager } from '@/main/services/browser-view.service'
+import { toolExecutionService, type ToolCall } from '@/main/services/tools/tool-execution.service'
 
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 1000
@@ -186,31 +188,12 @@ export class AnthropicAdapter implements LLMAdapter {
 
   async *streamMessage(messages: Message[], config: LLMConfig): AsyncGenerator<LLMChunk> {
     const system = getSystemPrompt(messages)
-    const anthropicMessages = toAnthropicMessages(messages)
+    let anthropicMessages = toAnthropicMessages(messages)
     const maxTokens = config.maxTokens ?? 1024
+    const maxToolIterations = 10
 
-    const params: MessageCreateParams = {
-      model: this.model,
-      max_tokens: maxTokens,
-      messages: anthropicMessages,
-      stream: true
-    }
-
-    if (system) {
-      params.system = system
-    }
-
-    if (config.temperature !== undefined) {
-      params.temperature = config.temperature
-    }
-
-    if (config.topP !== undefined) {
-      params.top_p = config.topP
-    }
-
-    if (config.stopSequences?.length) {
-      params.stop_sequences = config.stopSequences
-    }
+    // Register browser tools with the execution service
+    toolExecutionService.registerBrowserTools(allTools)
 
     const tools = allTools.map(tool => ({
       name: tool.name,
@@ -218,54 +201,194 @@ export class AnthropicAdapter implements LLMAdapter {
       input_schema: tool.parameters
     }))
 
-    params.tools = tools
+    // Tool use loop - continues streaming until stop_reason != tool_use
+    for (let iteration = 0; iteration < maxToolIterations; iteration++) {
+      const params: MessageCreateParams = {
+        model: this.model,
+        max_tokens: maxTokens,
+        messages: anthropicMessages,
+        stream: true,
+        tools
+      }
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
-      const { controller, timeoutId } = createTimeoutController()
+      if (system) {
+        params.system = system
+      }
 
-      try {
-        const stream = this.client.messages.stream(params, {
-          signal: controller.signal
-        })
-        let doneEmitted = false
+      if (config.temperature !== undefined) {
+        params.temperature = config.temperature
+      }
 
-        for await (const event of stream) {
-          if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-            const text = event.delta.text
-            if (text.length > 0) {
-              yield { content: text, done: false }
+      if (config.topP !== undefined) {
+        params.top_p = config.topP
+      }
+
+      if (config.stopSequences?.length) {
+        params.stop_sequences = config.stopSequences
+      }
+
+      // State for accumulating tool_use blocks during streaming
+      const toolUseBlocks: Array<{ id: string; name: string; inputJson: string }> = []
+      let currentBlockIndex = -1
+      let currentBlockType: string | null = null
+      let stopReason: string | null = null
+      const contentBlocks: ContentBlock[] = []
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
+        const { controller, timeoutId } = createTimeoutController()
+
+        try {
+          const stream = this.client.messages.stream(params, {
+            signal: controller.signal
+          })
+
+          for await (const event of stream) {
+            // Handle content_block_start - start of a new content block
+            if (event.type === 'content_block_start') {
+              currentBlockIndex = event.index
+              const block = event.content_block
+
+              if (block.type === 'tool_use') {
+                currentBlockType = 'tool_use'
+                toolUseBlocks[currentBlockIndex] = {
+                  id: block.id,
+                  name: block.name,
+                  inputJson: ''
+                }
+              } else if (block.type === 'text') {
+                currentBlockType = 'text'
+              }
+            }
+
+            // Handle content_block_delta - incremental content
+            if (event.type === 'content_block_delta') {
+              const delta = event.delta
+
+              if (delta.type === 'text_delta') {
+                const text = delta.text
+                if (text.length > 0) {
+                  yield { content: text, done: false }
+                }
+              } else if (delta.type === 'input_json_delta') {
+                // Accumulate partial JSON for tool_use
+                const blockData = toolUseBlocks[event.index]
+                if (blockData) {
+                  blockData.inputJson += delta.partial_json
+                }
+              }
+            }
+
+            // Handle content_block_stop - end of a content block
+            if (event.type === 'content_block_stop') {
+              const blockData = toolUseBlocks[event.index]
+              if (blockData) {
+                // Parse the accumulated JSON
+                try {
+                  const parsedInput = JSON.parse(blockData.inputJson || '{}')
+                  contentBlocks[event.index] = {
+                    type: 'tool_use',
+                    id: blockData.id,
+                    name: blockData.name,
+                    input: parsedInput
+                  }
+                } catch (parseError) {
+                  logger.error('Failed to parse tool input JSON', {
+                    blockId: blockData.id,
+                    inputJson: blockData.inputJson,
+                    error: parseError
+                  })
+                  contentBlocks[event.index] = {
+                    type: 'tool_use',
+                    id: blockData.id,
+                    name: blockData.name,
+                    input: {}
+                  }
+                }
+              }
+              currentBlockType = null
+            }
+
+            // Handle message_delta - contains stop_reason
+            if (event.type === 'message_delta') {
+              stopReason = event.delta.stop_reason ?? null
+            }
+
+            // Handle message_stop - end of message
+            if (event.type === 'message_stop') {
+              // Don't emit done:true here if we have tool_use to process
+              if (stopReason !== 'tool_use') {
+                yield { content: '', done: true }
+              }
             }
           }
 
-          if (event.type === 'message_stop') {
-            doneEmitted = true
-            yield { content: '', done: true }
+          break // Success, exit retry loop
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          logger.error('Anthropic streamMessage failed', { attempt, error: message })
+
+          if (attempt === MAX_RETRIES) {
+            throw error
           }
+
+          await sleep(BASE_DELAY_MS * Math.pow(2, attempt - 1))
+        } finally {
+          clearTimeout(timeoutId)
         }
-
-        if (!doneEmitted) {
-          yield { content: '', done: true }
-        }
-
-        // TODO: Handle tool calls in streaming mode
-        // For now, we only support tools in sendMessage (non-streaming)
-        // because streaming tool calls requires complex state management
-
-        return
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        logger.error('Anthropic streamMessage failed', { attempt, error: message })
-
-        if (attempt === MAX_RETRIES) {
-          throw error
-        }
-
-        await sleep(BASE_DELAY_MS * Math.pow(2, attempt - 1))
-      } finally {
-        clearTimeout(timeoutId)
       }
+
+      // Check if we need to execute tools
+      const validToolBlocks = contentBlocks.filter(
+        (block): block is ContentBlock & { type: 'tool_use' } => block?.type === 'tool_use'
+      )
+
+      if (validToolBlocks.length === 0 || stopReason !== 'tool_use') {
+        // No tool calls or not a tool_use stop reason - we're done
+        return
+      }
+
+      // Execute tools via ToolExecutionService
+      logger.info('Streaming: executing tool calls', {
+        iteration,
+        toolCount: validToolBlocks.length,
+        tools: validToolBlocks.map(b => b.name)
+      })
+
+      const toolCalls: ToolCall[] = validToolBlocks.map(block => ({
+        id: block.id,
+        name: block.name,
+        arguments: block.input as Record<string, unknown>
+      }))
+
+      const viewId = 'default'
+      const webContents = browserViewManager.getWebContents(viewId)
+      const context = { viewId, webContents }
+
+      const executionResult = await toolExecutionService.executeToolCalls(toolCalls, context)
+
+      // Format tool results for LLM
+      const toolResults: ToolResultBlockParam[] = executionResult.outputs.map(output => ({
+        type: 'tool_result',
+        tool_use_id: output.toolCall.id,
+        content: JSON.stringify(output.result)
+      }))
+
+      logger.info('Streaming: tool execution complete', {
+        iteration,
+        allSucceeded: executionResult.allSucceeded,
+        durationMs: executionResult.totalDurationMs
+      })
+
+      // Append assistant response (with tool_use blocks) and tool results for next iteration
+      anthropicMessages = [
+        ...anthropicMessages,
+        { role: 'assistant', content: contentBlocks.filter(Boolean) },
+        { role: 'user', content: toolResults }
+      ]
     }
 
-    throw new Error('Anthropic streamMessage failed after retries')
+    // Exceeded max tool iterations
+    logger.warn('Streaming: max tool iterations exceeded', { maxToolIterations })
+    yield { content: '', done: true }
   }
 }

@@ -179,7 +179,7 @@ describe('LLM Providers Integration', () => {
 
       mocks.gemini.sendMessage.mockResolvedValueOnce({
         response: {
-          text: () => 'Hello from Gemini',
+          candidates: [{ content: { parts: [{ text: 'Hello from Gemini' }] } }],
           usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3 }
         }
       })
@@ -211,7 +211,7 @@ describe('LLM Providers Integration', () => {
 
       mocks.gemini.sendMessage.mockResolvedValue({
         response: {
-          text: () => 'Gemini response',
+          candidates: [{ content: { parts: [{ text: 'Gemini response' }] } }],
           usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3 }
         }
       })

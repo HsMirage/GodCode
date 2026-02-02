@@ -265,7 +265,13 @@ describe('LLM Adapters Integration', () => {
     it('should send message successfully (non-streaming)', async () => {
       mocks.gemini.sendMessage.mockResolvedValueOnce({
         response: {
-          text: () => 'Hello from Gemini',
+          candidates: [
+            {
+              content: {
+                parts: [{ text: 'Hello from Gemini' }]
+              }
+            }
+          ],
           usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3 }
         }
       })
@@ -280,8 +286,24 @@ describe('LLM Adapters Integration', () => {
     it('should stream message successfully', async () => {
       const mockStream = {
         stream: (async function* () {
-          yield { text: () => 'Hello' }
-          yield { text: () => ' Gemini' }
+          yield {
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: 'Hello' }]
+                }
+              }
+            ]
+          }
+          yield {
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: ' Gemini' }]
+                }
+              }
+            ]
+          }
         })()
       }
 

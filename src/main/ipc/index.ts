@@ -31,6 +31,11 @@ import { registerSpaceHandlers } from './handlers/space'
 import { registerArtifactHandlers } from './handlers/artifact'
 import { registerAuditLogHandlers } from './handlers/audit-log'
 import { registerAuditLogExportHandlers } from './handlers/audit-log-export'
+import {
+  handleKeychainDeletePassword,
+  handleKeychainGetPassword,
+  handleKeychainSetPassword
+} from './handlers/keychain'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('model:create', handleModelCreate)
@@ -78,4 +83,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   // Audit Log handlers
   registerAuditLogHandlers()
   registerAuditLogExportHandlers()
+
+  // Keychain handlers
+  ipcMain.handle('keychain:set-password', handleKeychainSetPassword)
+  ipcMain.handle('keychain:get-password', handleKeychainGetPassword)
+  ipcMain.handle('keychain:delete-password', handleKeychainDeletePassword)
 }

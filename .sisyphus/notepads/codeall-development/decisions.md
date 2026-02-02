@@ -10,3 +10,5 @@
   - hello-halo: MIT ✅
   - moltbot: MIT ✅
   - oh-my-opencode: **SUL-1.0 (Sustainable Use License)** ⚠️ - Not standard MIT/Apache. Limited to internal business or non-commercial use. CodeAll as personal/non-commercial project is compliant.
+- 2026-02-01: Configured `electron-updater` in `src/main/index.ts` with a placeholder feed URL (`https://example.com/updates`). Real URL to be configured later.
+- 2026-02-01: Used `logger` service for all auto-updater events to ensure visibility in production logs.

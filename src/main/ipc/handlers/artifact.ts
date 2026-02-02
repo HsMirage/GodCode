@@ -1,17 +1,103 @@
 import { ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import { PathValidator } from '@/shared/path-validator'
+import { AuditLogService } from '../../services/audit-log.service'
 import { DatabaseService } from '../../services/database'
 
 export function registerArtifactHandlers(): void {
-  ipcMain.handle('file:read', async (_, filePath: string) => {
+  const auditLogService = AuditLogService.getInstance()
+  const logAudit = (input: {
+    action: string
+    entityType: string
+    entityId?: string
+    metadata?: any
+    success?: boolean
+    errorMsg?: string
+  }) => {
+    void auditLogService.log(input).catch(error => {
+      console.error('Failed to write audit log:', error)
+    })
+  }
+
+  ipcMain.handle('file:read', async (_, filePath: string, sessionId: string) => {
     try {
-      if (!fs.existsSync(filePath)) {
+      const db = DatabaseService.getInstance().getClient()
+      const session = await db.session.findUnique({
+        where: { id: sessionId },
+        include: { space: true }
+      })
+
+      if (!session?.space?.workDir) {
+        logAudit({
+          action: 'file:read',
+          entityType: 'file',
+          entityId: filePath,
+          metadata: { filePath, sessionId },
+          success: false,
+          errorMsg: 'Session not found'
+        })
+        return { success: false, error: 'Session not found' }
+      }
+
+      const workDir = session.space.workDir
+      let resolvedPath: string
+
+      if (!PathValidator.isPathSafe(filePath, workDir)) {
+        logAudit({
+          action: 'file:read',
+          entityType: 'file',
+          entityId: filePath,
+          metadata: { filePath, sessionId, workDir },
+          success: false,
+          errorMsg: 'Path traversal detected'
+        })
+        return { success: false, error: 'Path traversal detected' }
+      }
+
+      try {
+        resolvedPath = PathValidator.resolveSafePath(filePath, workDir)
+      } catch (error) {
+        logAudit({
+          action: 'file:read',
+          entityType: 'file',
+          entityId: filePath,
+          metadata: { filePath, sessionId, workDir },
+          success: false,
+          errorMsg: (error as Error).message
+        })
+        return { success: false, error: 'Path traversal detected' }
+      }
+
+      if (!fs.existsSync(resolvedPath)) {
+        logAudit({
+          action: 'file:read',
+          entityType: 'file',
+          entityId: filePath,
+          metadata: { filePath, sessionId, workDir },
+          success: false,
+          errorMsg: 'File not found'
+        })
         return { success: false, error: 'File not found' }
       }
-      const content = fs.readFileSync(filePath, 'utf-8')
+      const content = fs.readFileSync(resolvedPath, 'utf-8')
+      logAudit({
+        action: 'file:read',
+        entityType: 'file',
+        entityId: filePath,
+        metadata: { filePath, sessionId, workDir },
+        success: true
+      })
       return { success: true, content }
     } catch (error) {
+      logAudit({
+        action: 'file:read',
+        entityType: 'file',
+        entityId: filePath,
+        metadata: { filePath, sessionId },
+        success: false,
+        errorMsg: (error as Error).message
+      })
       return { success: false, error: (error as Error).message }
     }
   })
@@ -19,8 +105,23 @@ export function registerArtifactHandlers(): void {
   ipcMain.handle('shell:open-path', async (_, filePath: string) => {
     try {
       await shell.openPath(filePath)
+      logAudit({
+        action: 'shell:open-path',
+        entityType: 'file',
+        entityId: filePath,
+        metadata: { filePath },
+        success: true
+      })
       return { success: true }
     } catch (error) {
+      logAudit({
+        action: 'shell:open-path',
+        entityType: 'file',
+        entityId: filePath,
+        metadata: { filePath },
+        success: false,
+        errorMsg: (error as Error).message
+      })
       return { success: false, error: (error as Error).message }
     }
   })

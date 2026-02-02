@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { ModelConfigForm, ModelConfigFormValues } from '../components/ModelConfigForm'
+import { ApiKeyForm } from '../components/settings/ApiKeyForm'
 import { useConfigStore } from '../stores/config.store'
+import { ModelConfigForm, ModelConfigFormValues } from '../components/ModelConfigForm'
+import { DataManagement } from '../components/settings/DataManagement'
 import type { Model } from '@renderer/types/domain'
 
 type Strategy = 'delegate' | 'workforce' | 'direct'
@@ -59,12 +61,13 @@ const panelClass = [
 const TABS = [
   { id: 'llm', label: 'LLM配置' },
   { id: 'keys', label: 'API密钥' },
-  { id: 'rules', label: '路由规则' }
+  { id: 'rules', label: '路由规则' },
+  { id: 'data', label: '数据管理' }
 ]
 
 export function SettingsPage() {
   const { models, loadModels } = useConfigStore()
-  const [activeTab, setActiveTab] = useState<'llm' | 'keys' | 'rules'>('llm')
+  const [activeTab, setActiveTab] = useState<'llm' | 'keys' | 'rules' | 'data'>('llm')
   const [rules, setRules] = useState<RoutingRule[]>(DEFAULT_RULES)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -287,9 +290,7 @@ export function SettingsPage() {
             <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Secure Access</p>
             <h2 className="mt-2 text-xl font-semibold text-white">API密钥</h2>
           </div>
-          <div className="rounded-xl border border-slate-800/70 bg-slate-950/40 p-6 text-sm text-slate-300">
-            API密钥管理即将上线。请使用配置文件或环境变量注入凭证。
-          </div>
+          <ApiKeyForm />
         </div>
       ) : null}
 
@@ -501,6 +502,8 @@ export function SettingsPage() {
           </div>
         </div>
       ) : null}
+
+      {activeTab === 'data' ? <DataManagement /> : null}
     </div>
   )
 }

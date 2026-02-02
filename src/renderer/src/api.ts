@@ -112,7 +112,8 @@ export const api = {
     invoke('browser:show-context-menu', options) as Promise<ApiResult>,
   getArtifact: (artifactId: string) => invoke('artifact:get', artifactId) as Promise<Artifact>,
   openArtifact: (path: string) => invoke('shell:open-path', path) as Promise<ApiResult>,
-  readArtifactContent: (path: string) => invoke('file:read', path) as Promise<ApiResult>,
+  readArtifactContent: (path: string, sessionId: string) =>
+    invoke('file:read', path, sessionId) as Promise<ApiResult>,
   onBrowserStateChange: (callback: (data: BrowserStateChange) => void) =>
     onEvent('browser:state-changed', callback as (...args: unknown[]) => void),
   onBrowserZoomChanged: (callback: (data: BrowserZoomChanged) => void) =>

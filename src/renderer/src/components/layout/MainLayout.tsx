@@ -1,17 +1,19 @@
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { Sidebar } from './Sidebar'
-import { ChatView } from './ChatView'
-import { ArtifactRail } from './ArtifactRail'
-import { ContentCanvas } from './ContentCanvas'
+import { ChatPage } from '../../pages/ChatPage'
+import { ArtifactRail } from '../artifact/ArtifactRail'
+import { ContentCanvas } from '../canvas/ContentCanvas'
 import { TopNavigation } from './TopNavigation'
 import { useUIStore } from '../../store/ui.store'
 import { PanelRight, PanelBottom } from 'lucide-react'
+import { UpdaterManager } from '../updater/UpdaterManager'
 
 export function MainLayout() {
   const { showSidebar, showArtifactRail, showContentCanvas, setView } = useUIStore()
 
   return (
     <div className="h-screen flex flex-col bg-slate-950 text-slate-200 overflow-hidden">
+      <UpdaterManager />
       <TopNavigation />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -26,7 +28,7 @@ export function MainLayout() {
           )}
 
           <Panel defaultSize={60} id="chat">
-            <ChatView />
+            <ChatPage />
           </Panel>
 
           {(showArtifactRail || showContentCanvas) && (

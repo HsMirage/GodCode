@@ -1,81 +1,95 @@
-# CodeAll User Guide
+# CodeAll 用户手册
 
-Welcome to **CodeAll**, a powerful multi-LLM collaborative programming platform designed to orchestrate complex coding tasks using multiple AI models and agents.
+欢迎使用 **CodeAll** —— 下一代多 LLM 协同编程平台。本手册将引导您完成安装、配置及日常使用。
 
-## 1. Getting Started
+---
 
-### Prerequisites
+## 1. 安装指南
 
-- Node.js (LTS version recommended)
-- PNPM (Package Manager)
-- PostgreSQL (Embedded in dev, requires setup for production)
-- API Keys for supported LLMs (Anthropic, OpenAI, etc.)
+### 1.1 系统要求
 
-### Installation
+- **操作系统**：Windows 10/11 (x64) 或 Linux (远程网页版)
+- **网络**：需要连接互联网以访问主流 LLM API
 
-1. Clone the repository
-2. Install dependencies:
-   ```bash
-   pnpm install
-   ```
-3. Start the development server:
-   ```bash
-   pnpm dev
-   ```
+### 1.2 安装步骤
 
-## 2. Configuration
+1. 下载最新的 `CodeAll Setup.exe` 安装包。
+2. 双击运行并按照提示完成安装。
+3. 启动应用。
 
-### Setting up LLMs
+---
 
-CodeAll supports multiple LLM providers. To configure them:
+## 2. 首次使用与配置
 
-1. Navigate to **Settings** > **Models**.
-2. Click **Add Model**.
-3. Select your provider (Anthropic, OpenAI, Gemini).
-4. Enter your API Key and optional Base URL.
-5. Save the configuration.
+### 2.1 配置 LLM 模型
 
-_Note: You must have at least one active model to start a chat session._
+在开始对话前，您需要至少配置一个 AI 模型：
 
-## 3. Core Features
+1. 点击侧边栏底部的 **设置 (Settings)** 图标。
+2. 进入 **API 密钥 (API Keys)** 选项卡，输入您的 OpenAI、Anthropic 或 Gemini API 密钥并保存。
+3. 在 **LLM 配置 (LLM Config)** 中添加您想要使用的模型。
 
-### 3.1 Spaces & Sessions
+### 2.2 配置路由规则 (可选)
 
-- **Spaces**: Isolated working environments. Each space corresponds to a working directory on your file system.
-- **Sessions**: Chat threads within a space. Multiple sessions can exist in one space, sharing context.
+CodeAll 允许您根据输入内容自动选择模型或执行策略：
 
-### 3.2 Workforce Engine
+- 进入 **路由规则 (Routing Rules)**。
+- 您可以设置关键词匹配，例如：“前端” 相关任务优先使用 Gemini，“架构” 相关任务使用 GPT-4。
 
-The Workforce Engine automatically decomposes complex user requests into smaller, manageable tasks.
+---
 
-- **Auto-Decomposition**: Just state your high-level goal (e.g., "Build a React todo app").
-- **Parallel Execution**: Agents work on sub-tasks simultaneously.
+## 3. 核心操作流程
 
-### 3.3 AI Browser
+### 3.1 创建 Space (工作区)
 
-Integrated BrowserView for web automation.
+Space 是项目的独立环境，对应您本地磁盘上的一个文件夹。
 
-- **Navigation**: Agents can browse docs and gather info.
-- **Interaction**: Click, type, and capture screenshots.
-- **Tools**: `browser:navigate`, `browser:click`, `browser:fill`, etc.
+1. 在侧边栏点击 **+** 号或 **Create Space**。
+2. 输入空间名称，并选择一个本地文件夹作为工作目录。
+3. 点击 **Create** 确认。
 
-### 3.4 Artifact Management
+### 3.2 发送消息
 
-Generated code and files are stored as artifacts.
+1. 在底部输入框中描述您的目标（例如：“帮我用 React 写一个待办事项应用”）。
+2. 按下 **Enter** 或点击发送图标。
 
-- View, download, or apply changes directly to your workspace.
-- Access artifacts from the chat interface.
+### 3.3 查看执行结果
 
-## 4. Basic Workflow
+- **消息流**：实时查看 AI 的思考过程。
+- **工作流视图 (Workflow)**：点击右上角的工作流图标，查看任务拆解及执行进度（DAG 图）。
+- **产物管理 (Artifacts)**：生成的代码文件将显示在右侧的产物栏中，您可以预览、复制或将其保存到本地。
+- **内置浏览器**：如果任务涉及网页操作，您可以直接在应用内的画布 (Canvas) 视图中看到 AI 控制的浏览器窗口。
 
-1. **Create a Space**: Select a local directory for your project.
-2. **Start a Session**: Open a new chat.
-3. **Prompt**: "Create a Next.js landing page."
-4. **Monitor**: Watch the Workforce Engine break down tasks.
-5. **Review**: Check generated files in the Artifacts panel.
+---
 
-## 5. Troubleshooting
+## 4. 常见问题 (FAQ)
 
-- **Database Connection**: Ensure no other process is using the Postgres port.
-- **API Errors**: Verify your API keys in Settings.
-- **Logs**: Check the application logs in the `logs` directory for detailed error messages.
+### Q: 数据库初始化失败怎么办？
+
+**A**: CodeAll 使用嵌入式 PostgreSQL。如果提示初始化失败，请检查是否有其他程序占用了数据库端口，或尝试以管理员权限重新启动应用。
+
+### Q: 为什么发送消息没有响应？
+
+**A**:
+
+1. 检查您的网络连接。
+2. 确认在“设置”中已正确填写 API 密钥且该 Key 余额充足。
+3. 检查是否配置了正确的 LLM 模型。
+
+### Q: 如何更新应用？
+
+**A**: 桌面版支持自动检查更新。当有新版本可用时，应用会弹出提示框指引您完成下载与安装。
+
+---
+
+## 5. 故障排除
+
+如果您遇到严重错误，可以尝试以下步骤：
+
+1. **重启应用**：解决 90% 的临时性卡顿或连接中断。
+2. **清除缓存**：在设置 -> 数据管理中可以清理临时数据（注意备份重要会话）。
+3. **查看日志**：应用运行目录下会生成 `logs` 文件夹，其中包含详细的出错信息，可提交给技术支持参考。
+
+---
+
+_由 [Sisyphus](https://github.com/code-yeongyu/oh-my-opencode) 驱动开发_

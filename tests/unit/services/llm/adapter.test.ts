@@ -36,6 +36,24 @@ vi.mock('@/main/services/browser-view.service', () => ({
   }
 }))
 
+vi.mock('@/main/services/tools/tool-execution.service', () => ({
+  toolExecutionService: {
+    registerBrowserTools: vi.fn(),
+    executeToolCalls: vi.fn().mockResolvedValue({
+      outputs: [
+        {
+          toolCall: { id: 'tool-1', name: 'test_tool', arguments: {} },
+          result: { success: true, data: 'test result' },
+          success: true,
+          durationMs: 100
+        }
+      ],
+      allSucceeded: true,
+      totalDurationMs: 100
+    })
+  }
+}))
+
 describe('AnthropicAdapter', () => {
   let adapter: AnthropicAdapter
 
@@ -150,6 +168,94 @@ describe('AnthropicAdapter', () => {
       }
 
       expect(chunks).toContain('Response')
+    })
+
+    it('should handle tool use in streaming mode', async () => {
+      const { toolExecutionService } = await import('@/main/services/tools/tool-execution.service')
+
+      let streamCallCount = 0
+
+      const mockStreamWithTool = {
+        [Symbol.asyncIterator]: async function* () {
+          yield { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }
+          yield {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: 'Let me help' }
+          }
+          yield { type: 'content_block_stop', index: 0 }
+          yield {
+            type: 'content_block_start',
+            index: 1,
+            content_block: { type: 'tool_use', id: 'tool-1', name: 'test_tool' }
+          }
+          yield {
+            type: 'content_block_delta',
+            index: 1,
+            delta: { type: 'input_json_delta', partial_json: '{"key":' }
+          }
+          yield {
+            type: 'content_block_delta',
+            index: 1,
+            delta: { type: 'input_json_delta', partial_json: '"value"}' }
+          }
+          yield { type: 'content_block_stop', index: 1 }
+          yield { type: 'message_delta', delta: { stop_reason: 'tool_use' } }
+          yield { type: 'message_stop' }
+        }
+      }
+
+      const mockStreamFinal = {
+        [Symbol.asyncIterator]: async function* () {
+          yield { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }
+          yield {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: 'Done!' }
+          }
+          yield { type: 'content_block_stop', index: 0 }
+          yield { type: 'message_delta', delta: { stop_reason: 'end_turn' } }
+          yield { type: 'message_stop' }
+        }
+      }
+
+      ;(adapter as any).client.messages.stream.mockImplementation(() => {
+        streamCallCount++
+        return streamCallCount === 1 ? mockStreamWithTool : mockStreamFinal
+      })
+
+      const messages: any[] = [
+        { role: 'user', content: 'Use the tool', id: '1', sessionId: '1', createdAt: new Date() }
+      ]
+
+      const chunks: string[] = []
+      const doneFlags: boolean[] = []
+      for await (const chunk of adapter.streamMessage(messages as any, {
+        model: 'claude-3-5-sonnet-20241022'
+      })) {
+        if (chunk.content) {
+          chunks.push(chunk.content)
+        }
+        if (chunk.done) {
+          doneFlags.push(chunk.done)
+        }
+      }
+
+      expect(streamCallCount).toBe(2)
+      expect(chunks).toContain('Let me help')
+      expect(chunks).toContain('Done!')
+      expect(doneFlags).toContain(true)
+      expect(toolExecutionService.registerBrowserTools).toHaveBeenCalled()
+      expect(toolExecutionService.executeToolCalls).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'tool-1',
+            name: 'test_tool',
+            arguments: { key: 'value' }
+          })
+        ]),
+        expect.anything()
+      )
     })
   })
 

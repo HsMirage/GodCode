@@ -6,6 +6,7 @@ import { DatabaseService } from '@/main/services/database'
 import { createLLMAdapter } from '@/main/services/llm/factory'
 import { costTracker } from '@/main/services/llm/cost-tracker'
 import { LoggerService } from '@/main/services/logger'
+import { SmartRouter, type RouteResult } from '@/main/services/router/smart-router'
 
 type MessageSendInput = {
   sessionId: string
@@ -30,12 +31,26 @@ const toLLMConfig = (config: unknown): LLMConfig => {
   return config as LLMConfig
 }
 
+function extractRouteOutput(result: RouteResult): string {
+  if ('strategy' in result && result.strategy === 'direct') {
+    return result.output
+  }
+  if ('taskId' in result) {
+    return result.output
+  }
+  if ('workflowId' in result) {
+    return Array.from(result.results.values()).join('\n\n---\n\n')
+  }
+  return ''
+}
+
 export async function handleMessageSend(
   event: IpcMainInvokeEvent,
   input: MessageSendInput
 ): Promise<PrismaMessage> {
   const prisma = DatabaseService.getInstance().getClient()
   const logger = LoggerService.getInstance().getLogger()
+  const router = new SmartRouter()
 
   const userMessage = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     return tx.message.create({
@@ -47,42 +62,65 @@ export async function handleMessageSend(
     })
   })
 
-  const model = await prisma.model.findFirst({ orderBy: { createdAt: 'desc' } })
-  if (!model) {
-    throw new Error('No active model configured')
-  }
-
-  if (!model.apiKey) {
-    throw new Error('Active model API key is missing')
-  }
-
-  const adapter = createLLMAdapter(model.provider as 'anthropic', {
-    apiKey: model.apiKey
-  })
-
-  const history = await prisma.message.findMany({
-    where: { sessionId: input.sessionId },
-    orderBy: { createdAt: 'asc' }
-  })
-
-  const llmConfig = toLLMConfig(model.config)
-  const domainMessages = toDomainMessages(history)
+  const strategy = router.analyzeTask(input.content)
   let assistantContent = ''
 
   try {
-    for await (const chunk of adapter.streamMessage(domainMessages, llmConfig)) {
-      if (chunk.content) {
-        assistantContent += chunk.content
+    if (strategy === 'direct') {
+      const isE2ETest = process.env.CODEALL_E2E_TEST === '1'
+      const model = await prisma.model.findFirst({ orderBy: { createdAt: 'desc' } })
+      const resolvedModel =
+        model ?? (isE2ETest ? { provider: 'mock', apiKey: 'mock', config: {} } : null)
+
+      if (!resolvedModel) {
+        throw new Error('No active model configured')
       }
 
+      if (!resolvedModel.apiKey) {
+        if (!isE2ETest) {
+          throw new Error('Active model API key is missing')
+        }
+      }
+
+      const adapter = createLLMAdapter(resolvedModel.provider as 'anthropic', {
+        apiKey: resolvedModel.apiKey ?? 'mock'
+      })
+
+      const history = await prisma.message.findMany({
+        where: { sessionId: input.sessionId },
+        orderBy: { createdAt: 'asc' }
+      })
+
+      const llmConfig = toLLMConfig(resolvedModel.config)
+      const domainMessages = toDomainMessages(history)
+
+      for await (const chunk of adapter.streamMessage(domainMessages, llmConfig)) {
+        if (chunk.content) {
+          assistantContent += chunk.content
+        }
+
+        event.sender.send('message:stream-chunk', {
+          content: chunk.content,
+          done: chunk.done
+        })
+      }
+
+      costTracker.trackUsage(resolvedModel.provider, 0, 0)
+    } else {
+      const routeResult = await router.route(input.content, {
+        prompt: input.content
+      })
+
+      assistantContent = extractRouteOutput(routeResult)
+
       event.sender.send('message:stream-chunk', {
-        content: chunk.content,
-        done: chunk.done
+        content: assistantContent,
+        done: true
       })
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    logger.error('IPC message:send streaming failed', { error: message })
+    logger.error('IPC message:send failed', { error: message, strategy })
     throw error
   }
 
@@ -96,7 +134,6 @@ export async function handleMessageSend(
     })
   })
 
-  costTracker.trackUsage(model.provider, 0, 0)
   return assistantMessage
 }
 

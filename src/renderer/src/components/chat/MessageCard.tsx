@@ -1,6 +1,5 @@
 import { Bot, User, Terminal } from 'lucide-react'
 import { cn } from '../../utils'
-import { formatDistanceToNow } from 'date-fns'
 
 export interface Message {
   id: string
@@ -18,9 +17,7 @@ export function MessageCard({ message }: MessageCardProps) {
   const isUser = message.role === 'user'
   const isSystem = message.role === 'system'
 
-  const timestamp = message.createdAt
-    ? formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })
-    : ''
+  const timestamp = message.createdAt ? new Date(message.createdAt).toLocaleString() : ''
 
   if (isSystem) {
     return (

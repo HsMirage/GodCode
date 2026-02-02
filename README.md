@@ -1,8 +1,12 @@
 # CodeAll
 
+**Version 1.0.0** | 🧪 **Beta** | 🏗 **Active Development**
+
 CodeAll is a next-generation Multi-LLM Collaborative Programming Platform. It empowers developers to orchestrate complex software development tasks by integrating local workspaces, diverse AI models, and browser automation into a unified, high-performance environment.
 
 Built with Electron and React, CodeAll serves as a robust workforce engine that decomposes high-level goals into executable sub-tasks, handled by specialized AI agents.
+
+> **🛠 Project Status**: Active development. See the [Roadmap](.sisyphus/notepads/codeall-unified-plan/PROJECT_COMPLETE.md) for current progress and planned improvements.
 
 ## 🚀 Key Features
 
@@ -11,8 +15,8 @@ Built with Electron and React, CodeAll serves as a robust workforce engine that 
 - **AI-Controlled Browser**: Integrated browser environment allowing agents to perform documentation research, web automation, and E2E testing using Playwright.
 - **Workspace Isolation**: Manage distinct projects in isolated "Spaces" mapped directly to your local file system with real-time file tree synchronization.
 - **Embedded Database**: Zero-config, embedded PostgreSQL database powered by Prisma ORM for reliable state management and task persistence.
-- **Workflow Visualization**: Real-time interactive graph view of agent activities, task dependencies, and execution status.
-- **Cross-Platform Delivery**: Native Windows desktop application and a Linux-compatible Web Server mode for remote access.
+- **Workflow Visualization**: Real-time interactive graph view of agent activities, task dependencies, and execution status. Toggle available in the Chat interface.
+- **Cross-Platform Delivery**: Native Windows desktop application. (Linux-compatible Web Server mode is **Planned**).
 
 ## 🛠 Tech Stack
 
@@ -58,9 +62,9 @@ Built with Electron and React, CodeAll serves as a robust workforce engine that 
   pnpm dev
   ```
 
-- **Web Server Mode** (Linux/Remote):
+- **Web Server Mode** (Linux/Remote) [Planned]:
   ```bash
-  pnpm start:web
+  # Planned feature - not yet available
   ```
 
 ### Building for Production
@@ -75,6 +79,10 @@ Built with Electron and React, CodeAll serves as a robust workforce engine that 
   ```bash
   pnpm build:linux
   ```
+
+### 🛠 Deployment & Updates
+
+The application uses `electron-updater` for seamless updates. The update server URL is configured via the `CODEALL_UPDATE_URL` environment variable in the `electron-builder` configuration.
 
 ## 📖 Documentation
 

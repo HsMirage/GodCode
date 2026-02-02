@@ -1,82 +1,130 @@
-import { useState } from 'react'
-import { Send, Paperclip, Bot, User } from 'lucide-react'
-import { cn } from '../../utils'
+import { useEffect, useState, useRef } from 'react'
+import { Message } from '../chat/MessageCard'
+import { MessageList } from '../chat/MessageList'
+import { MessageInput } from '../chat/MessageInput'
+import { TypingIndicator } from '../chat/TypingIndicator'
+import { SessionResumeIndicator } from '../session/SessionResumeIndicator'
 
 export function ChatView() {
-  const [input, setInput] = useState('')
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [isLoading, setIsLoading] = useState(false)
 
-  const [messages, setMessages] = useState([
-    { id: '1', role: 'assistant', content: 'Hello! I am CodeAll. How can I help you today?' }
-  ])
+  const streamingContentRef = useRef('')
+  const [streamingContent, setStreamingContent] = useState('')
 
-  const handleSend = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!input.trim()) return
+  useEffect(() => {
+    const initializeSession = async () => {
+      try {
+        const session = await window.codeall.invoke('session:get-or-create-default')
+        setSessionId(session.id)
 
-    setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: input }])
-    setInput('')
+        const existingMessages = await window.codeall.invoke('message:list', session.id)
+        setMessages(
+          existingMessages
+            .filter((msg: any) => msg.role !== 'system')
+            .map((msg: any) => ({
+              id: msg.id,
+              role: msg.role as 'user' | 'assistant',
+              content: msg.content,
+              createdAt: msg.createdAt || new Date().toISOString()
+            }))
+        )
+      } catch (error) {
+        console.error('Failed to initialize session:', error)
+      }
+    }
+
+    initializeSession()
+  }, [])
+
+  useEffect(() => {
+    const removeListener = window.codeall.on(
+      'message:stream-chunk',
+      ({ content, done }: { content: string; done: boolean }) => {
+        if (done) {
+          const finalContent = streamingContentRef.current + content
+          setMessages(prev => [
+            ...prev,
+            {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: finalContent,
+              createdAt: new Date().toISOString()
+            }
+          ])
+          streamingContentRef.current = ''
+          setStreamingContent('')
+          setIsLoading(false)
+        } else {
+          streamingContentRef.current += content
+          setStreamingContent(streamingContentRef.current)
+        }
+      }
+    )
+
+    return () => {
+      removeListener()
+    }
+  }, [])
+
+  const handleSend = async (content: string) => {
+    if (!sessionId) return
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content,
+      createdAt: new Date().toISOString()
+    }
+    setMessages(prev => [...prev, userMessage])
+    setIsLoading(true)
+
+    streamingContentRef.current = ''
+    setStreamingContent('')
+
+    try {
+      await window.codeall.invoke('message:send', {
+        sessionId,
+        content
+      })
+    } catch (error) {
+      console.error('Failed to send message:', error)
+      setIsLoading(false)
+    }
+  }
+
+  const displayMessages = [...messages]
+  if (streamingContent) {
+    displayMessages.push({
+      id: 'streaming',
+      role: 'assistant',
+      content: streamingContent,
+      createdAt: new Date().toISOString(),
+      isStreaming: true
+    })
   }
 
   return (
     <div className="h-full flex flex-col bg-slate-950">
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {messages.map(msg => (
-          <div
-            key={msg.id}
-            className={cn(
-              'flex gap-4 max-w-3xl mx-auto',
-              msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'
-            )}
-          >
-            <div
-              className={cn(
-                'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0',
-                msg.role === 'user' ? 'bg-indigo-600' : 'bg-emerald-600'
-              )}
-            >
-              {msg.role === 'user' ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5" />}
-            </div>
-
-            <div
-              className={cn(
-                'rounded-lg p-3 text-sm leading-relaxed',
-                msg.role === 'user'
-                  ? 'bg-indigo-500/10 text-indigo-100 border border-indigo-500/20'
-                  : 'bg-slate-900 text-slate-200 border border-slate-800'
-              )}
-            >
-              {msg.content}
-            </div>
+        {sessionId && (
+          <div className="mb-2">
+            <SessionResumeIndicator sessionId={sessionId} />
           </div>
-        ))}
+        )}
+        <MessageList messages={displayMessages} />
+
+        {isLoading && !streamingContent && (
+          <div className="flex justify-center">
+            <TypingIndicator />
+          </div>
+        )}
       </div>
 
       <div className="p-4 border-t border-slate-800 bg-slate-950">
         <div className="max-w-3xl mx-auto relative">
-          <form onSubmit={handleSend} className="relative">
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="Type a message..."
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-4 pr-24 py-3 text-slate-200 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-            />
-            <div className="absolute right-2 top-2 flex items-center gap-1">
-              <button
-                type="button"
-                className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded transition-colors"
-              >
-                <Paperclip className="w-4 h-4" />
-              </button>
-              <button
-                type="submit"
-                disabled={!input.trim()}
-                className="p-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-500 transition-colors disabled:opacity-50 disabled:hover:bg-indigo-600"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </div>
-          </form>
+          <MessageInput isLoading={isLoading} onSend={handleSend} placeholder="Type a message..." />
           <div className="text-xs text-center text-slate-500 mt-2">
             CodeAll can make mistakes. Please verify generated code.
           </div>

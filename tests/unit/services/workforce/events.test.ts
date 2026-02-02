@@ -45,6 +45,23 @@ describe('WorkflowEventEmitter', () => {
     expect(callback2).toHaveBeenCalledWith(event)
   })
 
+  it('should emit workflow completed events to listeners', () => {
+    const callback = vi.fn()
+    emitter.on('workflow:completed', callback)
+
+    const event: WorkflowEvent = {
+      type: 'workflow:completed',
+      workflowId: 'wf-2',
+      taskId: 'task-2',
+      timestamp: new Date()
+    }
+
+    emitter.emit(event)
+
+    expect(callback).toHaveBeenCalledWith(event)
+    expect(callback).toHaveBeenCalledTimes(1)
+  })
+
   it('should not trigger listeners for different events', () => {
     const callback = vi.fn()
     emitter.on('task:failed', callback)

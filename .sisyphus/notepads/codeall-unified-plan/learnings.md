@@ -92,3 +92,39 @@ Check ALL dependencies before packaging:
 1. Identify CommonJS modules (look for `exports.autoUpdater =` in node_modules)
 2. Use default import pattern preemptively
 3. Test packaged app, not just dev mode
+
+## [2026-02-02] Gemini Adapter Test Mock Shape Update
+
+### Issue
+Gemini adapter integration tests failing due to outdated mock response shapes.
+
+### Root Cause
+The Gemini adapter was updated to parse responses using the new Google Generative AI SDK format:
+- `response.candidates[0].content.parts` for non-streaming
+- `chunk.candidates[0].content.parts` for streaming
+
+But tests still used the old `text()` function API:
+```typescript
+// OLD (broken)
+{ text: () => 'Hello from Gemini' }
+```
+
+### Solution
+Updated mocks to match new SDK response structure:
+```typescript
+// NEW (correct)
+{
+  candidates: [{
+    content: {
+      parts: [{ text: 'Hello from Gemini' }]
+    }
+  }]
+}
+```
+
+### Files Modified
+- `tests/integration/llm-adapters.test.ts` (2 test cases in GeminiAdapter describe block)
+
+### Pattern
+When SDK APIs change, test mocks must match the **exact shape** that production code parses.
+Review adapter implementation (`response.candidates?.[0]?.content?.parts`) to understand expected mock structure.

@@ -70,4 +70,6 @@ nsis:
   shortcutName: CodeAll
   createDesktopShortcut: always
   createStartMenuShortcut: true
-publish: null
+publish:
+  provider: generic
+  url: '${env.CODEALL_UPDATE_URL}'

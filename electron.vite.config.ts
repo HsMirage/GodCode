@@ -1,6 +1,17 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
+import type { Plugin } from 'vite'
+
+// Plugin to remove crossorigin attribute from HTML (fixes file:// protocol issues)
+function removeCrossorigin(): Plugin {
+  return {
+    name: 'remove-crossorigin',
+    transformIndexHtml(html) {
+      return html.replace(/ crossorigin/g, '')
+    }
+  }
+}
 
 export default defineConfig({
   main: {
@@ -42,7 +53,7 @@ export default defineConfig({
     }
   },
   renderer: {
-    plugins: [react()],
+    plugins: [react(), removeCrossorigin()],
     resolve: {
       alias: {
         '@renderer': resolve(__dirname, 'src/renderer'),
@@ -51,9 +62,16 @@ export default defineConfig({
       }
     },
     build: {
+      cssCodeSplit: false,
+      modulePreload: {
+        polyfill: false
+      },
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/renderer/index.html')
+        },
+        output: {
+          format: 'es'
         }
       }
     }

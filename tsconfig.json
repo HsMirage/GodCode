@@ -21,7 +21,7 @@
       "@shared/*": ["src/shared/*"],
       "@types/*": ["src/types/*"]
     },
-    "types": ["node"]
+    "types": ["node", "vite/client"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist", "out"]
