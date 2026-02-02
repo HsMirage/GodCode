@@ -65,7 +65,7 @@ export const test = base.extend<ElectronFixtures>({
     console.log(`[E2E] Launching app from: ${PROJECT_ROOT}`)
 
     const app = await electron.launch({
-      args: [PROJECT_ROOT, '--no-sandbox'],
+      args: [path.join(PROJECT_ROOT, 'out/main/index.js'), '--no-sandbox'],
       env: {
         ...process.env,
         ELECTRON_DISABLE_GPU: '1',
