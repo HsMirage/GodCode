@@ -116,7 +116,13 @@ export const INVOKE_CHANNELS = {
   // Keychain Operations
   KEYCHAIN_SET_PASSWORD: 'keychain:set-password',
   KEYCHAIN_GET_PASSWORD: 'keychain:get-password',
-  KEYCHAIN_DELETE_PASSWORD: 'keychain:delete-password'
+  KEYCHAIN_DELETE_PASSWORD: 'keychain:delete-password',
+
+  // Backup Operations
+  BACKUP_LIST: 'backup:list',
+  BACKUP_CREATE: 'backup:create',
+  BACKUP_DELETE: 'backup:delete',
+  RESTORE_FROM_FILE: 'restore:from-file'
 } as const
 
 /**

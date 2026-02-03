@@ -33,6 +33,7 @@ import { registerSpaceHandlers } from './handlers/space'
 import { registerArtifactHandlers } from './handlers/artifact'
 import { registerAuditLogHandlers } from './handlers/audit-log'
 import { registerAuditLogExportHandlers } from './handlers/audit-log-export'
+import { registerBackupHandlers } from './handlers/backup'
 import {
   handleKeychainDeletePassword,
   handleKeychainGetPassword,
@@ -90,6 +91,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   // Audit Log handlers
   registerAuditLogHandlers()
   registerAuditLogExportHandlers()
+  registerBackupHandlers()
 
   // Keychain handlers
   ipcMain.handle('keychain:set-password', handleKeychainSetPassword)

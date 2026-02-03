@@ -201,4 +201,90 @@ export class BackupService {
       return null
     }
   }
+
+  /**
+   * Restore database from a backup file
+   * @param filePath - Path to the backup file
+   */
+  async restoreFromFile(filePath: string): Promise<void> {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Backup file not found: ${filePath}`)
+    }
+
+    const content = fs.readFileSync(filePath, 'utf-8')
+    const backupData = JSON.parse(content) as BackupData
+
+    // Verify backup version compatibility if needed
+    const currentVersion = await SchemaVersionService.getInstance().getCurrentVersion()
+    if (
+      backupData.metadata.version &&
+      currentVersion &&
+      backupData.metadata.version !== currentVersion
+    ) {
+      console.warn(
+        `Restoring backup from version ${backupData.metadata.version} to ${currentVersion}`
+      )
+    }
+
+    const db = DatabaseService.getInstance().getClient()
+
+    // Execute restore in a transaction
+    await db.$transaction(async (tx: any) => {
+      // Clear existing data in reverse dependency order
+      await tx.message.deleteMany()
+      await tx.task.deleteMany()
+      await tx.run.deleteMany()
+      await tx.artifact.deleteMany()
+      await tx.session.deleteMany()
+      await tx.space.deleteMany()
+      await tx.model.deleteMany()
+      await tx.apiKey.deleteMany()
+
+      // We don't delete schema versions to maintain history, or we could if we want full state restore
+      // await tx.schemaVersion.deleteMany()
+
+      // Restore data in dependency order
+      // 1. Independent entities
+      if (backupData.tables.schemaVersions?.length) {
+        await tx.schemaVersion.createMany({
+          data: backupData.tables.schemaVersions,
+          skipDuplicates: true
+        })
+      }
+
+      if (backupData.tables.apiKeys?.length) {
+        await tx.apiKey.createMany({ data: backupData.tables.apiKeys })
+      }
+
+      if (backupData.tables.models?.length) {
+        await tx.model.createMany({ data: backupData.tables.models })
+      }
+
+      if (backupData.tables.spaces?.length) {
+        await tx.space.createMany({ data: backupData.tables.spaces })
+      }
+
+      // 2. Dependent entities
+      if (backupData.tables.sessions?.length) {
+        await tx.session.createMany({ data: backupData.tables.sessions })
+      }
+
+      if (backupData.tables.runs?.length) {
+        await tx.run.createMany({ data: backupData.tables.runs })
+      }
+
+      if (backupData.tables.tasks?.length) {
+        await tx.task.createMany({ data: backupData.tables.tasks })
+      }
+
+      if (backupData.tables.artifacts?.length) {
+        await tx.artifact.createMany({ data: backupData.tables.artifacts })
+      }
+
+      // 3. Deeply dependent entities
+      if (backupData.tables.messages?.length) {
+        await tx.message.createMany({ data: backupData.tables.messages })
+      }
+    })
+  }
 }
