@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Plus, Box, Settings } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Plus, Box, Settings, ArrowLeft } from 'lucide-react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useDataStore } from '../../store/data.store'
 import { cn } from '../../utils'
 
@@ -9,6 +9,7 @@ export function TopNavigation() {
   const [isCreating, setIsCreating] = useState(false)
   const [newSpaceName, setNewSpaceName] = useState('')
   const navigate = useNavigate()
+  const location = useLocation()
 
   useEffect(() => {
     fetchSpaces()
@@ -27,22 +28,36 @@ export function TopNavigation() {
     }
   }
 
+  const isHomePage = location.pathname === '/'
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1)
+    } else {
+      navigate('/')
+    }
+  }
+
   return (
     <div className="h-12 bg-slate-950 border-b border-slate-800 flex items-center px-4 gap-4 select-none">
-      <div
-        className="flex items-center gap-2 text-slate-100 font-semibold mr-4 cursor-pointer hover:opacity-80 transition-opacity"
+      {!isHomePage && (
+        <button
+          type="button"
+          data-testid="back-button"
+          onClick={handleBack}
+          className="flex items-center gap-2 text-slate-400 hover:text-white transition rounded-lg px-2 py-1 hover:bg-slate-800/50 mr-2"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          <span className="text-sm">返回</span>
+        </button>
+      )}
+      <button
+        type="button"
+        className="flex items-center gap-2 text-slate-100 font-semibold mr-4 cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-none p-0"
         onClick={() => navigate('/')}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            navigate('/')
-          }
-        }}
-        role="button"
-        tabIndex={0}
       >
         <Box className="w-5 h-5 text-indigo-500" />
         <span>CodeAll</span>
-      </div>
+      </button>
 
       <div className="flex-1 flex items-center gap-2 overflow-x-auto no-scrollbar">
         {spaces.map(space => (

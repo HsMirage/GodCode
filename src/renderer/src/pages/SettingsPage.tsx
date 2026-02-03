@@ -269,15 +269,8 @@ export function SettingsPage() {
 
   return (
     <div className="px-6 py-4 space-y-6">
-      {/* Header with back button */}
+      {/* Header */}
       <div className="flex items-center gap-4">
-        <button
-          onClick={() => window.history.back()}
-          className="flex items-center gap-2 text-slate-400 hover:text-white transition rounded-lg px-3 py-2 hover:bg-slate-800/50"
-        >
-          <ArrowLeft className="h-5 w-5" />
-          <span className="text-sm">返回</span>
-        </button>
         <h1 className="text-2xl font-bold text-white">设置</h1>
       </div>
 
