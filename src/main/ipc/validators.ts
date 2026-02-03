@@ -20,7 +20,15 @@ export const sessionGetOrCreateDefaultSchema = z.object({
 })
 
 export const modelCreateSchema = z.object({
-  provider: z.enum(['anthropic', 'openai', 'gemini', 'openai-compatible']),
+  provider: z.enum([
+    'anthropic',
+    'openai',
+    'gemini',
+    'google',
+    'ollama',
+    'custom',
+    'openai-compatible'
+  ]),
   modelName: z.string().min(1),
   apiKey: z.string().optional(),
   baseURL: z.string().url().optional().nullable(),
@@ -30,7 +38,9 @@ export const modelCreateSchema = z.object({
 export const modelUpdateSchema = z.object({
   id: z.string().uuid(),
   data: z.object({
-    provider: z.enum(['anthropic', 'openai', 'gemini', 'openai-compatible']).optional(),
+    provider: z
+      .enum(['anthropic', 'openai', 'gemini', 'google', 'ollama', 'custom', 'openai-compatible'])
+      .optional(),
     modelName: z.string().min(1).optional(),
     apiKey: z.string().optional(),
     baseURL: z.string().url().optional().nullable(),
