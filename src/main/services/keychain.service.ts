@@ -14,95 +14,118 @@ export class KeychainService {
   }
 
   /**
-   * Securely store an API key for a provider.
-   * If the key already exists, it will be updated (upsert).
-   * @param provider The provider name (e.g., 'openai', 'anthropic')
-   * @param plainKey The plaintext API key
+   * Securely store an API key entry.
+   * @param id The ID of the key entry (optional, for updates)
+   * @param data The key data including provider/label, baseURL and key
    */
-  async storeApiKey(provider: string, plainKey: string): Promise<void> {
+  async storeApiKey(data: {
+    id?: string
+    label?: string
+    baseURL: string
+    apiKey: string
+    provider?: string
+  }): Promise<void> {
     try {
-      if (!provider || !plainKey) {
-        throw new Error('Provider and API key are required')
+      const { id, label, baseURL, apiKey, provider } = data
+
+      if (!baseURL || !apiKey) {
+        throw new Error('Base URL and API key are required')
       }
 
       const secureStorage = SecureStorageService.getInstance()
-      const encryptedKey = secureStorage.encrypt(plainKey)
+      const encryptedKey = secureStorage.encrypt(apiKey)
 
       const prisma = DatabaseService.getInstance().getClient()
 
-      await prisma.apiKey.upsert({
-        where: {
-          provider
-        },
-        update: {
-          encryptedKey,
-          updatedAt: new Date()
-        },
-        create: {
-          provider,
-          encryptedKey
-        }
-      })
+      // For backward compatibility or if provider is used
+      const providerValue = provider || label || 'custom'
 
-      console.log(`[Keychain] Successfully stored API key for ${provider}`)
-    } catch (error) {
-      console.error(`[Keychain] Failed to store API key for ${provider}:`, error)
-      throw error
-    }
-  }
-
-  /**
-   * Retrieve and decrypt an API key for a provider.
-   * @param provider The provider name
-   * @returns The decrypted API key or null if not found
-   */
-  async getApiKey(provider: string): Promise<string | null> {
-    try {
-      const prisma = DatabaseService.getInstance().getClient()
-      const record = await prisma.apiKey.findUnique({
-        where: {
-          provider
-        }
-      })
-
-      if (!record) {
-        return null
-      }
-
-      const secureStorage = SecureStorageService.getInstance()
-      return secureStorage.decrypt(record.encryptedKey)
-    } catch (error) {
-      console.error(`[Keychain] Failed to retrieve API key for ${provider}:`, error)
-      throw error
-    }
-  }
-
-  /**
-   * Delete an API key for a provider.
-   * @param provider The provider name
-   */
-  async deleteApiKey(provider: string): Promise<void> {
-    try {
-      const prisma = DatabaseService.getInstance().getClient()
-      // Check if it exists first to avoid error or to decide on idempotent behavior
-      // Prisma delete throws if record not found
-      try {
-        await prisma.apiKey.delete({
-          where: {
-            provider
+      if (id) {
+        await prisma.apiKey.update({
+          where: { id },
+          data: {
+            label: label || providerValue,
+            baseURL,
+            encryptedKey,
+            provider: providerValue,
+            updatedAt: new Date()
           }
         })
-        console.log(`[Keychain] Deleted API key for ${provider}`)
+      } else {
+        await prisma.apiKey.create({
+          data: {
+            label: label || providerValue,
+            baseURL,
+            encryptedKey,
+            provider: providerValue
+          }
+        })
+      }
+
+      console.log(`[Keychain] Successfully stored API key for ${label || providerValue}`)
+    } catch (error) {
+      console.error(`[Keychain] Failed to store API key:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * Retrieve all API keys.
+   * @returns Array of API key entries with decrypted keys
+   */
+  async getAllApiKeys(): Promise<
+    Array<{ id: string; label: string | null; baseURL: string; apiKey: string; provider: string }>
+  > {
+    try {
+      const prisma = DatabaseService.getInstance().getClient()
+      const records = await prisma.apiKey.findMany({
+        orderBy: { createdAt: 'desc' }
+      })
+
+      const secureStorage = SecureStorageService.getInstance()
+
+      return records.map(
+        (record: {
+          id: string
+          label: string | null
+          baseURL: string
+          encryptedKey: string
+          provider: string
+        }) => ({
+          id: record.id,
+          label: record.label,
+          baseURL: record.baseURL,
+          provider: record.provider,
+          apiKey: secureStorage.decrypt(record.encryptedKey)
+        })
+      )
+    } catch (error) {
+      console.error(`[Keychain] Failed to retrieve API keys:`, error)
+      throw error
+    }
+  }
+
+  /**
+   * Delete an API key by ID.
+   * @param id The ID of the key entry
+   */
+  async deleteApiKey(id: string): Promise<void> {
+    try {
+      const prisma = DatabaseService.getInstance().getClient()
+      try {
+        await prisma.apiKey.delete({
+          where: { id }
+        })
+        console.log(`[Keychain] Deleted API key ${id}`)
       } catch (e) {
-        // Ignore "Record to delete does not exist" error
         if ((e as any).code === 'P2025') {
-          console.log(`[Keychain] No API key found to delete for ${provider}`)
+          console.log(`[Keychain] No API key found to delete for ${id}`)
           return
         }
         throw e
       }
     } catch (error) {
-      console.error(`[Keychain] Failed to delete API key for ${provider}:`, error)
+      console.error(`[Keychain] Failed to delete API key ${id}:`, error)
       throw error
     }
   }
@@ -110,6 +133,7 @@ export class KeychainService {
   /**
    * List all providers that have stored API keys.
    * @returns Array of provider names
+   * @deprecated Use getAllApiKeys instead
    */
   async listProviders(): Promise<string[]> {
     try {
@@ -133,6 +157,7 @@ export class KeychainService {
    * Check if an API key exists for a provider.
    * @param provider The provider name
    * @returns True if key exists, false otherwise
+   * @deprecated Use getAllApiKeys instead
    */
   async hasApiKey(provider: string): Promise<boolean> {
     try {
