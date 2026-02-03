@@ -28,19 +28,17 @@ const DEFAULT_RULES: RoutingRule[] = [
   {
     pattern: /前端|UI|页面|组件/i,
     strategy: 'delegate',
-    category: 'visual-engineering',
-    model: 'gemini'
+    category: 'visual-engineering'
   },
   {
     pattern: /后端|API|数据库/i,
     strategy: 'delegate',
-    model: 'gpt-4'
+    category: 'quick'
   },
   {
     pattern: /架构|设计/i,
     strategy: 'delegate',
-    subagent: 'oracle',
-    model: 'claude-opus'
+    subagent: 'oracle'
   },
   {
     pattern: /创建|开发|实现/i,
