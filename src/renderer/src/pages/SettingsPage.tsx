@@ -4,6 +4,7 @@ import { useConfigStore } from '../store/config.store'
 import { ModelConfigForm, ModelConfigFormValues } from '../components/ModelConfigForm'
 import { DataManagement } from '../components/settings/DataManagement'
 import type { Model } from '@renderer/types/domain'
+import { ArrowLeft, Check, AlertTriangle } from 'lucide-react'
 
 type Strategy = 'delegate' | 'workforce' | 'direct'
 
@@ -72,6 +73,17 @@ export function SettingsPage() {
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+
+  // Auto-clear toast after 3 seconds
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000)
+      return () => clearTimeout(timer)
+    }
+    return
+  }, [toast])
+
   const [draft, setDraft] = useState<RuleDraft>({
     pattern: '.*',
     strategy: 'delegate',
@@ -113,8 +125,10 @@ export function SettingsPage() {
       await window.codeall.invoke('model:create', values)
       const data = (await window.codeall.invoke('model:list')) as Model[]
       loadModels(data)
+      setToast({ type: 'success', text: '模型添加成功' })
     } catch (error) {
       console.error('Failed to create model:', error)
+      setToast({ type: 'error', text: '添加失败: ' + (error as Error).message })
     }
   }
 
@@ -125,9 +139,14 @@ export function SettingsPage() {
         await window.codeall.invoke('model:update', { id: model.id, data: values })
         const data = (await window.codeall.invoke('model:list')) as Model[]
         loadModels(data)
+        setToast({ type: 'success', text: '模型配置已保存' })
+      } else {
+        // No model exists, create one instead
+        await handleAdd(values)
       }
     } catch (error) {
       console.error('Failed to update model:', error)
+      setToast({ type: 'error', text: '保存失败: ' + (error as Error).message })
     }
   }
 
@@ -138,9 +157,11 @@ export function SettingsPage() {
         await window.codeall.invoke('model:delete', model.id)
         const data = (await window.codeall.invoke('model:list')) as Model[]
         loadModels(data)
+        setToast({ type: 'success', text: '模型已删除' })
       }
     } catch (error) {
       console.error('Failed to delete model:', error)
+      setToast({ type: 'error', text: '删除失败: ' + (error as Error).message })
     }
   }
 
@@ -248,6 +269,37 @@ export function SettingsPage() {
 
   return (
     <div className="px-6 py-4 space-y-6">
+      {/* Header with back button */}
+      <div className="flex items-center gap-4">
+        <button
+          onClick={() => window.history.back()}
+          className="flex items-center gap-2 text-slate-400 hover:text-white transition rounded-lg px-3 py-2 hover:bg-slate-800/50"
+        >
+          <ArrowLeft className="h-5 w-5" />
+          <span className="text-sm">返回</span>
+        </button>
+        <h1 className="text-2xl font-bold text-white">设置</h1>
+      </div>
+
+      {/* Toast notification */}
+      {toast && (
+        <div
+          className={[
+            'flex items-center gap-2 rounded-xl px-4 py-3 text-sm animate-in fade-in slide-in-from-top-2',
+            toast.type === 'success'
+              ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+              : 'border border-rose-500/20 bg-rose-500/10 text-rose-400'
+          ].join(' ')}
+        >
+          {toast.type === 'success' ? (
+            <Check className="h-4 w-4" />
+          ) : (
+            <AlertTriangle className="h-4 w-4" />
+          )}
+          {toast.text}
+        </div>
+      )}
+
       <div className={`${panelClass} p-2`}>
         <div className="flex flex-wrap items-center gap-2">
           {TABS.map(tab => (
