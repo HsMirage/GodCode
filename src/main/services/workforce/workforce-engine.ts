@@ -82,9 +82,8 @@ export class WorkforceEngine {
       apiKey = fallback.apiKey || ''
 
       // Default defaults for unknown providers or fallback
-      if (selectedProvider === 'openai') selectedModel = 'gpt-4o'
-      else if (selectedProvider === 'google') selectedModel = 'gemini-1.5-pro'
-      else selectedModel = 'claude-3-5-sonnet-20240620'
+      if (selectedProvider === 'openai-compatible') selectedModel = 'gpt-4o'
+      else selectedModel = 'gpt-4o'
     }
 
     this.logger.info('Selected model for decomposition', {

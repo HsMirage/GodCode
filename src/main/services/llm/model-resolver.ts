@@ -147,26 +147,22 @@ export function resolveModelWithFallback(
 export const DEFAULT_FALLBACK_CHAINS = {
   // Primary orchestrator - needs best reasoning
   orchestrator: [
-    { model: 'claude-3-opus-20240229', providers: ['anthropic'] },
-    { model: 'gpt-4-turbo-preview', providers: ['openai'] },
-    { model: 'gemini-1.5-pro', providers: ['google'] }
+    { model: 'claude-3-5-sonnet-20241022', providers: ['openai-compatible'] },
+    { model: 'gpt-4o', providers: ['openai-compatible'] }
   ],
   // Fast tasks - prioritize speed
   quick: [
-    { model: 'gpt-4o-mini', providers: ['openai'] },
-    { model: 'claude-3-haiku-20240307', providers: ['anthropic'] },
-    { model: 'gemini-1.5-flash', providers: ['google'] }
+    { model: 'gpt-4o-mini', providers: ['openai-compatible'] },
+    { model: 'claude-3-haiku-20240307', providers: ['openai-compatible'] }
   ],
   // Visual/frontend tasks
   visual: [
-    { model: 'gemini-1.5-pro', providers: ['google'] },
-    { model: 'gpt-4-turbo-preview', providers: ['openai'] },
-    { model: 'claude-3-sonnet-20240229', providers: ['anthropic'] }
+    { model: 'gpt-4o', providers: ['openai-compatible'] },
+    { model: 'claude-3-5-sonnet-20241022', providers: ['openai-compatible'] }
   ],
   // Code generation
   coding: [
-    { model: 'claude-3-5-sonnet-20241022', providers: ['anthropic'] },
-    { model: 'gpt-4-turbo-preview', providers: ['openai'] },
-    { model: 'gemini-1.5-pro', providers: ['google'] }
+    { model: 'claude-3-5-sonnet-20241022', providers: ['openai-compatible'] },
+    { model: 'gpt-4o', providers: ['openai-compatible'] }
   ]
 } as const

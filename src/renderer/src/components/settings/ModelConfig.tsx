@@ -12,9 +12,7 @@ interface ProviderConfig {
 
 export function ModelConfig() {
   const [configs, setConfigs] = useState<ProviderConfig[]>([
-    { id: '1', provider: 'openai', apiKey: '', model: 'gpt-4-turbo' },
-    { id: '2', provider: 'anthropic', apiKey: '', model: 'claude-3-opus' },
-    { id: '3', provider: 'google', apiKey: '', model: 'gemini-1.5-pro' }
+    { id: '1', provider: 'openai-compatible', apiKey: '', model: 'gpt-4o' }
   ])
 
   const [testingId, setTestingId] = useState<string | null>(null)

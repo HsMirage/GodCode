@@ -22,7 +22,22 @@ const mockApiKeyStore: any[] = []
 
 const prismaMock = {
   apiKey: {
+    create: vi.fn(async ({ data }: any) => {
+      const entry = { id: uuid(), ...data, createdAt: new Date(), updatedAt: new Date() }
+      mockApiKeyStore.push(entry)
+      return entry
+    }),
+    update: vi.fn(async ({ where, data }: any) => {
+      const index = mockApiKeyStore.findIndex(item => item.id === where.id)
+      if (index >= 0) {
+        const existing = mockApiKeyStore[index]
+        Object.assign(existing, data, { updatedAt: new Date() })
+        return existing
+      }
+      throw new Error('Record to update does not exist.')
+    }),
     upsert: vi.fn(async ({ where, create, update }: any) => {
+      // Not used anymore in new implementation but kept for completeness
       const existingIndex = mockApiKeyStore.findIndex(item => item.provider === where.provider)
       if (existingIndex >= 0) {
         const existing = mockApiKeyStore[existingIndex]
@@ -35,10 +50,15 @@ const prismaMock = {
       }
     }),
     findUnique: vi.fn(async ({ where }: any) => {
-      return mockApiKeyStore.find(item => item.provider === where.provider) || null
+      return (
+        mockApiKeyStore.find(item => item.provider === where.provider || item.id === where.id) ||
+        null
+      )
     }),
     delete: vi.fn(async ({ where }: any) => {
-      const index = mockApiKeyStore.findIndex(item => item.provider === where.provider)
+      const index = mockApiKeyStore.findIndex(
+        item => item.id === where.id || item.provider === where.provider
+      )
       if (index >= 0) {
         const deleted = mockApiKeyStore[index]
         mockApiKeyStore.splice(index, 1)
@@ -84,127 +104,134 @@ describe('KeychainService', () => {
 
   describe('storeApiKey', () => {
     it('should encrypt and store a new API key', async () => {
-      const provider = 'openai'
-      const key = 'sk-123456'
+      const data = {
+        label: 'My Key',
+        baseURL: 'https://api.example.com',
+        apiKey: 'sk-123456',
+        provider: 'custom'
+      }
 
-      await keychain.storeApiKey(provider, key)
+      await keychain.storeApiKey(data)
 
-      expect(mockSecureStorage.encrypt).toHaveBeenCalledWith(key)
-      expect(prismaMock.apiKey.upsert).toHaveBeenCalledWith(
+      expect(mockSecureStorage.encrypt).toHaveBeenCalledWith(data.apiKey)
+      expect(prismaMock.apiKey.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { provider },
-          create: expect.objectContaining({
-            provider,
-            encryptedKey: `encrypted_${key}`
+          data: expect.objectContaining({
+            label: data.label,
+            baseURL: data.baseURL,
+            provider: data.provider,
+            encryptedKey: `encrypted_${data.apiKey}`
           })
         })
       )
     })
 
-    it('should update existing API key (upsert)', async () => {
-      const provider = 'openai'
+    it('should update existing API key', async () => {
+      const id = 'existing-id'
       const oldKey = 'sk-old'
       const newKey = 'sk-new'
 
       // Pre-populate
       mockApiKeyStore.push({
-        id: '1',
-        provider,
+        id,
+        label: 'Old Label',
+        baseURL: 'https://old.com',
+        provider: 'custom',
         encryptedKey: `encrypted_${oldKey}`,
         createdAt: new Date(),
         updatedAt: new Date()
       })
 
-      await keychain.storeApiKey(provider, newKey)
+      const updateData = {
+        id,
+        label: 'New Label',
+        baseURL: 'https://new.com',
+        apiKey: newKey,
+        provider: 'custom'
+      }
+
+      await keychain.storeApiKey(updateData)
 
       expect(mockSecureStorage.encrypt).toHaveBeenCalledWith(newKey)
-      expect(prismaMock.apiKey.upsert).toHaveBeenCalled()
-
-      // Verify store updated
-      const stored = mockApiKeyStore.find(k => k.provider === provider)
-      expect(stored.encryptedKey).toBe(`encrypted_${newKey}`)
+      expect(prismaMock.apiKey.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id },
+          data: expect.objectContaining({
+            label: updateData.label,
+            baseURL: updateData.baseURL,
+            encryptedKey: `encrypted_${newKey}`
+          })
+        })
+      )
     })
 
     it('should throw error if inputs are missing', async () => {
-      await expect(keychain.storeApiKey('', 'key')).rejects.toThrow()
-      await expect(keychain.storeApiKey('provider', '')).rejects.toThrow()
+      await expect(
+        keychain.storeApiKey({ label: 'test', baseURL: '', apiKey: 'key' })
+      ).rejects.toThrow()
+      await expect(
+        keychain.storeApiKey({ label: 'test', baseURL: 'url', apiKey: '' })
+      ).rejects.toThrow()
     })
   })
 
-  describe('getApiKey', () => {
-    it('should retrieve and decrypt API key', async () => {
-      const provider = 'anthropic'
-      const key = 'sk-ant-123'
+  describe('getAllApiKeys', () => {
+    it('should retrieve and decrypt all API keys', async () => {
+      const key1 = 'sk-1'
+      const key2 = 'sk-2'
 
-      mockApiKeyStore.push({
-        id: '1',
-        provider,
-        encryptedKey: `encrypted_${key}`,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      })
+      mockApiKeyStore.push(
+        {
+          id: '1',
+          label: 'Key 1',
+          baseURL: 'url1',
+          provider: 'custom',
+          encryptedKey: `encrypted_${key1}`,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        },
+        {
+          id: '2',
+          label: 'Key 2',
+          baseURL: 'url2',
+          provider: 'custom',
+          encryptedKey: `encrypted_${key2}`,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }
+      )
 
-      const result = await keychain.getApiKey(provider)
+      const result = await keychain.getAllApiKeys()
 
-      expect(prismaMock.apiKey.findUnique).toHaveBeenCalledWith({ where: { provider } })
-      expect(mockSecureStorage.decrypt).toHaveBeenCalledWith(`encrypted_${key}`)
-      expect(result).toBe(key)
-    })
-
-    it('should return null if key not found', async () => {
-      const result = await keychain.getApiKey('nonexistent')
-      expect(result).toBeNull()
+      expect(result).toHaveLength(2)
+      expect(result[0].apiKey).toBe(key1)
+      expect(result[1].apiKey).toBe(key2)
+      expect(mockSecureStorage.decrypt).toHaveBeenCalledTimes(2)
     })
   })
 
   describe('deleteApiKey', () => {
-    it('should delete API key', async () => {
-      const provider = 'openai'
+    it('should delete API key by ID', async () => {
+      const id = 'delete-me'
       mockApiKeyStore.push({
-        id: '1',
-        provider,
+        id,
+        label: 'Key',
+        baseURL: 'url',
+        provider: 'custom',
         encryptedKey: 'enc_key',
         createdAt: new Date(),
         updatedAt: new Date()
       })
 
-      await keychain.deleteApiKey(provider)
+      await keychain.deleteApiKey(id)
 
-      expect(prismaMock.apiKey.delete).toHaveBeenCalledWith({ where: { provider } })
+      expect(prismaMock.apiKey.delete).toHaveBeenCalledWith({ where: { id } })
       expect(mockApiKeyStore.length).toBe(0)
     })
 
     it('should handle non-existent key gracefully', async () => {
-      // Should not throw
       await keychain.deleteApiKey('nonexistent')
       expect(prismaMock.apiKey.delete).toHaveBeenCalled()
-    })
-  })
-
-  describe('listProviders', () => {
-    it('should list all providers', async () => {
-      mockApiKeyStore.push(
-        { id: '1', provider: 'openai', encryptedKey: 'k1' },
-        { id: '2', provider: 'anthropic', encryptedKey: 'k2' }
-      )
-
-      const providers = await keychain.listProviders()
-
-      expect(providers).toEqual(['openai', 'anthropic']) // Mock implementation returns filtered array
-      expect(prismaMock.apiKey.findMany).toHaveBeenCalled()
-    })
-  })
-
-  describe('hasApiKey', () => {
-    it('should return true if key exists', async () => {
-      mockApiKeyStore.push({ id: '1', provider: 'openai', encryptedKey: 'k1' })
-      const result = await keychain.hasApiKey('openai')
-      expect(result).toBe(true)
-    })
-
-    it('should return false if key does not exist', async () => {
-      const result = await keychain.hasApiKey('gemini')
-      expect(result).toBe(false)
     })
   })
 })

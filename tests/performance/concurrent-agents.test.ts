@@ -229,7 +229,12 @@ describe('Performance: Concurrent Agent Execution', () => {
     spaceId = space.id
 
     await prisma.model.create({
-      data: { provider: 'anthropic', modelName: 'claude-3-5-sonnet', apiKey: 'test', config: {} }
+      data: {
+        provider: 'openai-compatible',
+        modelName: 'claude-3-5-sonnet',
+        apiKey: 'test',
+        config: {}
+      }
     })
 
     const session = await prisma.session.create({

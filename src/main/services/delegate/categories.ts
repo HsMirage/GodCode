@@ -22,7 +22,7 @@ export const categories: Record<string, CategoryConfig> = {
     temperature: 0.3
   },
   'visual-engineering': {
-    model: 'gemini-pro',
+    model: 'gpt-4o',
     temperature: 0.7
   },
   ultrabrain: {

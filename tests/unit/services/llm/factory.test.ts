@@ -1,38 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createLLMAdapter } from '@/main/services/llm/factory'
-import { AnthropicAdapter } from '@/main/services/llm/anthropic.adapter'
-import { OpenAIAdapter } from '@/main/services/llm/openai.adapter'
-import { GeminiAdapter } from '@/main/services/llm/gemini.adapter'
 import { OpenAICompatAdapter } from '@/main/services/llm/openai-compat.adapter'
 
-// Mock the adapter classes
-vi.mock('@/main/services/llm/anthropic.adapter')
-vi.mock('@/main/services/llm/openai.adapter')
-vi.mock('@/main/services/llm/gemini.adapter')
 vi.mock('@/main/services/llm/openai-compat.adapter')
 
 describe('LLM Factory', () => {
   const apiKey = 'test-key'
-
-  it('should create AnthropicAdapter', () => {
-    createLLMAdapter('anthropic', { apiKey })
-    expect(AnthropicAdapter).toHaveBeenCalledWith(apiKey)
-  })
-
-  it('should create OpenAIAdapter', () => {
-    createLLMAdapter('openai', { apiKey })
-    expect(OpenAIAdapter).toHaveBeenCalledWith(apiKey)
-  })
-
-  it('should create GeminiAdapter for "gemini"', () => {
-    createLLMAdapter('gemini', { apiKey })
-    expect(GeminiAdapter).toHaveBeenCalledWith(apiKey)
-  })
-
-  it('should create GeminiAdapter for "google"', () => {
-    createLLMAdapter('google', { apiKey })
-    expect(GeminiAdapter).toHaveBeenCalledWith(apiKey)
-  })
 
   it('should create OpenAICompatAdapter', () => {
     const baseURL = 'https://local-model.com/v1'
@@ -42,18 +15,27 @@ describe('LLM Factory', () => {
 
   it('should throw error for OpenAICompatAdapter without baseURL', () => {
     expect(() => createLLMAdapter('openai-compat', { apiKey })).toThrow(
-      'baseURL required for openai-compat provider'
+      'baseURL is required for API adapter'
     )
   })
 
-  it('should throw error for unsupported provider', () => {
-    expect(() => createLLMAdapter('unsupported', { apiKey })).toThrow(
-      'Unsupported LLM provider: unsupported'
-    )
+  it('should be tolerant to provider string (always uses OpenAICompatAdapter if not mock)', () => {
+    const baseURL = 'https://example.com'
+    createLLMAdapter('ANTHROPIC', { apiKey, baseURL })
+    expect(OpenAICompatAdapter).toHaveBeenCalledWith(apiKey, baseURL)
   })
 
-  it('should be case insensitive', () => {
-    createLLMAdapter('ANTHROPIC', { apiKey })
-    expect(AnthropicAdapter).toHaveBeenCalledWith(apiKey)
+  it('should create OpenAICompatAdapter for legacy providers with default URLs', () => {
+    createLLMAdapter('anthropic', { apiKey })
+    expect(OpenAICompatAdapter).toHaveBeenCalledWith(apiKey, 'https://api.anthropic.com/v1')
+
+    createLLMAdapter('openai', { apiKey })
+    expect(OpenAICompatAdapter).toHaveBeenCalledWith(apiKey, 'https://api.openai.com/v1')
+
+    createLLMAdapter('google', { apiKey })
+    expect(OpenAICompatAdapter).toHaveBeenCalledWith(
+      apiKey,
+      'https://generativelanguage.googleapis.com/v1beta/openai'
+    )
   })
 })

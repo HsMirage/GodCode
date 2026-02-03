@@ -63,7 +63,7 @@ const MOCK_AGENTS: Agent[] = [
     status: 'idle',
     tasksCompleted: 8,
     tokensUsed: 15000,
-    model: 'gemini-pro'
+    model: 'gpt-4o'
   }
 ]
 

@@ -77,9 +77,9 @@ describe('Workforce Engine Integration', () => {
     mocks.prisma.space.findFirst.mockResolvedValue({ id: 'space_123' })
     mocks.prisma.model.findFirst.mockResolvedValue({
       id: 'model_123',
-      provider: 'anthropic',
+      provider: 'openai-compatible',
       apiKey: 'test-key',
-      model: 'claude-3-5-sonnet-20240620'
+      model: 'gpt-4o'
     })
 
     mocks.prisma.task.create.mockImplementation((args: any) =>

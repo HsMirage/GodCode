@@ -190,11 +190,8 @@ export class DelegateEngine {
     this.logger.info('Task cancelled', { taskId })
   }
 
-  private getProviderFromModel(model: string): string {
-    if (model.startsWith('claude')) return 'anthropic'
-    if (model.startsWith('gpt')) return 'openai'
-    if (model.includes('gemini')) return 'google'
-    return 'anthropic'
+  private getProviderFromModel(_model: string): string {
+    return 'openai-compatible'
   }
 
   private async getModelByProvider(provider: string) {
