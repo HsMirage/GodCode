@@ -1,25 +1,16 @@
-import { useState } from 'react'
-import {
-  Bot,
-  Globe,
-  KeyRound,
-  Save,
-  Plus,
-  TextCursorInput,
-  Trash2
-} from 'lucide-react'
-
-type ModelProvider = 'anthropic' | 'openai' | 'google' | 'ollama' | 'custom'
+import { useState, useEffect } from 'react'
+import { Bot, Globe, KeyRound, Save, Plus, TextCursorInput, Trash2 } from 'lucide-react'
+import { cn } from '../utils'
 
 export interface ModelConfigFormValues {
-  provider: ModelProvider
+  provider: string
   modelName: string
   apiKey: string
   baseURL: string
 }
 
 export interface ModelConfigFormProps {
-  initialProvider?: ModelProvider
+  initialProvider?: string
   initialModelName?: string
   initialApiKey?: string
   initialBaseURL?: string
@@ -35,18 +26,14 @@ const panelClass = [
 
 const fieldLabelClass = 'grid gap-2 text-sm text-slate-200'
 
-const fieldTitleClass =
-  'flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-slate-500'
+const fieldTitleClass = 'flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-slate-500'
 
 const headerIconClass = [
   'flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800/70',
   'bg-slate-950/70 text-sky-300 shadow-[0_0_18px_rgba(56,189,248,0.16)]'
 ].join(' ')
 
-const headerRowClass = [
-  'flex items-center gap-3 border-b border-slate-900/70',
-  'pb-4'
-].join(' ')
+const headerRowClass = ['flex items-center gap-3 border-b border-slate-900/70', 'pb-4'].join(' ')
 
 const caretClass = [
   'pointer-events-none absolute right-3 top-1/2 -translate-y-1/2',
@@ -79,8 +66,13 @@ const dangerButtonClass = [
   'hover:border-rose-400/60 hover:bg-rose-500/20'
 ].join(' ')
 
+interface ApiKeyOption {
+  id: string
+  label: string
+  baseURL: string
+}
+
 export function ModelConfigForm({
-  initialProvider = 'anthropic',
   initialModelName = '',
   initialApiKey = '',
   initialBaseURL = '',
@@ -88,51 +80,89 @@ export function ModelConfigForm({
   onSave,
   onDelete
 }: ModelConfigFormProps) {
-  const [provider, setProvider] = useState<ModelProvider>(initialProvider)
+  const provider = 'openai-compat'
   const [modelName, setModelName] = useState(initialModelName)
-  const [apiKey, setApiKey] = useState(initialApiKey)
+  const [selectedKeyId, setSelectedKeyId] = useState<string>(initialApiKey)
   const [baseURL, setBaseURL] = useState(initialBaseURL)
+
+  const [apiKeys, setApiKeys] = useState<ApiKeyOption[]>([])
+
+  useEffect(() => {
+    window.codeall
+      .invoke('keychain:list')
+      .then(keys => {
+        setApiKeys(keys)
+
+        if (initialApiKey) {
+          const foundKey = keys.find(k => k.id === initialApiKey)
+          if (foundKey) {
+            setSelectedKeyId(foundKey.id)
+            setBaseURL(foundKey.baseURL)
+          }
+        }
+      })
+      .catch(err => {
+        console.error('Failed to load API keys:', err)
+      })
+  }, [initialApiKey])
 
   const values: ModelConfigFormValues = {
     provider,
     modelName,
-    apiKey,
+    apiKey: selectedKeyId,
     baseURL
+  }
+
+  const handleKeyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newKeyId = e.target.value
+    setSelectedKeyId(newKeyId)
+    const key = apiKeys.find(k => k.id === newKeyId)
+    if (key) {
+      setBaseURL(key.baseURL)
+    } else {
+      setBaseURL('')
+    }
   }
 
   return (
     <section className={panelClass}>
       <div className={headerRowClass}>
         <div className={headerIconClass}>
-          <Bot className='h-5 w-5' />
+          <Bot className="h-5 w-5" />
         </div>
         <div>
-          <h2 className='text-base font-semibold tracking-wide text-slate-100'>
-            模型配置
-          </h2>
-          <p className='text-xs text-slate-400'>管理与连接你常用的 LLM 提供商</p>
+          <h2 className="text-base font-semibold tracking-wide text-slate-100">模型配置</h2>
+          <p className="text-xs text-slate-400">配置模型名称并关联 API 密钥</p>
         </div>
       </div>
 
-      <div className='mt-5 grid gap-4'>
+      <div className="mt-5 grid gap-4">
         <label className={fieldLabelClass}>
           <span className={fieldTitleClass}>
-            <Bot className='h-4 w-4 text-slate-400' />
-            提供商
+            <TextCursorInput className="h-4 w-4 text-slate-400" />
+            模型名称
           </span>
-          <div className='relative'>
-            <select
-              className={selectClass}
-              value={provider}
-              onChange={(event) =>
-                setProvider(event.target.value as ModelProvider)
-              }
-            >
-              <option value='anthropic'>Anthropic</option>
-              <option value='openai'>OpenAI</option>
-              <option value='google'>Google</option>
-              <option value='ollama'>Ollama</option>
-              <option value='custom'>Custom</option>
+          <input
+            className={inputClass}
+            placeholder="claude-3-5-sonnet"
+            value={modelName}
+            onChange={event => setModelName(event.target.value)}
+          />
+        </label>
+
+        <label className={fieldLabelClass}>
+          <span className={fieldTitleClass}>
+            <KeyRound className="h-4 w-4 text-slate-400" />
+            API Key
+          </span>
+          <div className="relative">
+            <select className={selectClass} value={selectedKeyId} onChange={handleKeyChange}>
+              <option value="">选择 API 密钥...</option>
+              {apiKeys.map(k => (
+                <option key={k.id} value={k.id}>
+                  {k.label || k.id}
+                </option>
+              ))}
             </select>
             <span className={caretClass}>▾</span>
           </div>
@@ -140,69 +170,30 @@ export function ModelConfigForm({
 
         <label className={fieldLabelClass}>
           <span className={fieldTitleClass}>
-            <TextCursorInput className='h-4 w-4 text-slate-400' />
-            模型名称
-          </span>
-          <input
-            className={inputClass}
-            placeholder='claude-3-5-sonnet'
-            value={modelName}
-            onChange={(event) => setModelName(event.target.value)}
-          />
-        </label>
-
-        <label className={fieldLabelClass}>
-          <span className={fieldTitleClass}>
-            <KeyRound className='h-4 w-4 text-slate-400' />
-            API Key
-          </span>
-          <input
-            className={inputClass}
-            placeholder='sk-...'
-            type='password'
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-          />
-        </label>
-
-        <label className={fieldLabelClass}>
-          <span className={fieldTitleClass}>
-            <Globe className='h-4 w-4 text-slate-400' />
+            <Globe className="h-4 w-4 text-slate-400" />
             Base URL
           </span>
           <input
-            className={inputClass}
-            placeholder='https://api.anthropic.com'
+            className={cn(inputClass, 'bg-slate-900/50 cursor-not-allowed text-slate-400')}
+            placeholder="https://api.openai.com/v1"
             value={baseURL}
-            onChange={(event) => setBaseURL(event.target.value)}
+            readOnly
           />
-          <span className='text-xs text-slate-500'>可选，仅用于自定义端点</span>
+          <span className="text-xs text-slate-500">由所选 API 密钥决定 (只读)</span>
         </label>
       </div>
 
-      <div className='mt-6 flex flex-wrap gap-3'>
-        <button
-          className={primaryButtonClass}
-          type='button'
-          onClick={() => onAdd?.(values)}
-        >
-          <Plus className='h-4 w-4' />
+      <div className="mt-6 flex flex-wrap gap-3">
+        <button className={primaryButtonClass} type="button" onClick={() => onAdd?.(values)}>
+          <Plus className="h-4 w-4" />
           添加模型
         </button>
-        <button
-          className={primaryButtonClass}
-          type='button'
-          onClick={() => onSave?.(values)}
-        >
-          <Save className='h-4 w-4' />
+        <button className={primaryButtonClass} type="button" onClick={() => onSave?.(values)}>
+          <Save className="h-4 w-4" />
           保存
         </button>
-        <button
-          className={dangerButtonClass}
-          type='button'
-          onClick={() => onDelete?.()}
-        >
-          <Trash2 className='h-4 w-4' />
+        <button className={dangerButtonClass} type="button" onClick={() => onDelete?.()}>
+          <Trash2 className="h-4 w-4" />
           删除
         </button>
       </div>
