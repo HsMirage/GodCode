@@ -4,7 +4,7 @@ import { useConfigStore } from '../store/config.store'
 import { ModelConfigForm, ModelConfigFormValues } from '../components/ModelConfigForm'
 import { DataManagement } from '../components/settings/DataManagement'
 import type { Model } from '@renderer/types/domain'
-import { ArrowLeft, Check, AlertTriangle } from 'lucide-react'
+import { Check, AlertTriangle } from 'lucide-react'
 
 type Strategy = 'delegate' | 'workforce' | 'direct'
 
@@ -297,7 +297,7 @@ export function SettingsPage() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id as 'llm' | 'keys' | 'rules')}
+              onClick={() => setActiveTab(tab.id as 'llm' | 'keys' | 'rules' | 'data')}
               className={[
                 'rounded-xl px-4 py-2 text-sm font-semibold transition',
                 'border border-transparent',

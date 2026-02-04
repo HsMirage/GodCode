@@ -20,7 +20,9 @@ export async function handleModelCreate(
     throw new Error(`Validation failed: ${validation.error.message}`)
   }
 
-  const prisma = DatabaseService.getInstance().getClient()
+  const dbService = DatabaseService.getInstance()
+  await dbService.init()
+  const prisma = dbService.getClient()
   const secureStorage = SecureStorageService.getInstance()
 
   // Encrypt API key before storage
@@ -44,7 +46,9 @@ export async function handleModelCreate(
 }
 
 export async function handleModelList(_event: IpcMainInvokeEvent): Promise<PrismaModel[]> {
-  const prisma = DatabaseService.getInstance().getClient()
+  const dbService = DatabaseService.getInstance()
+  await dbService.init()
+  const prisma = dbService.getClient()
   const secureStorage = SecureStorageService.getInstance()
   const models = await prisma.model.findMany()
 
@@ -63,7 +67,9 @@ export async function handleModelUpdate(
     throw new Error(`Validation failed: ${validation.error.message}`)
   }
 
-  const prisma = DatabaseService.getInstance().getClient()
+  const dbService = DatabaseService.getInstance()
+  await dbService.init()
+  const prisma = dbService.getClient()
   const secureStorage = SecureStorageService.getInstance()
   const { id, data } = input
 
@@ -98,13 +104,17 @@ export async function handleModelDelete(
     throw new Error('Invalid model ID')
   }
 
-  const prisma = DatabaseService.getInstance().getClient()
+  const dbService = DatabaseService.getInstance()
+  await dbService.init()
+  const prisma = dbService.getClient()
   const deletedRecord = await prisma.model.delete({ where: { id } })
   return deletedRecord
 }
 
 export async function handleModelGetApiKey(id: DomainModel['id']): Promise<string | null> {
-  const prisma = DatabaseService.getInstance().getClient()
+  const dbService = DatabaseService.getInstance()
+  await dbService.init()
+  const prisma = dbService.getClient()
   const secureStorage = SecureStorageService.getInstance()
 
   const model = await prisma.model.findUnique({ where: { id } })
