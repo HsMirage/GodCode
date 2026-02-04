@@ -22,7 +22,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   error: null,
 
   loadArtifacts: async (sessionId: string) => {
-    if (!sessionId) return
+    if (!sessionId || !window.codeall) return
     set({ isLoading: true, error: null })
     try {
       const result = await window.codeall.invoke('artifact:list', sessionId, false)
@@ -45,6 +45,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
         return
       }
 
+      if (!window.codeall) return
       set({ isLoading: true })
       const fullArtifact = (await window.codeall.invoke('artifact:get', artifact.id)) as Artifact
 
@@ -62,6 +63,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   clearSelection: () => set({ selectedArtifact: null }),
 
   downloadArtifact: async (artifact: Artifact, spaceId: string) => {
+    if (!window.codeall) return
     try {
       const space = (await window.codeall.invoke('space:get', spaceId)) as Space
       if (!space || !space.workDir) throw new Error('Space not found')
@@ -74,6 +76,7 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   },
 
   deleteArtifact: async (artifact: Artifact) => {
+    if (!window.codeall) return
     try {
       await window.codeall.invoke('artifact:delete', artifact.id)
       set(state => ({

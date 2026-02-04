@@ -14,6 +14,12 @@ export function BrowserShell() {
 
   // Initialize browser view
   useEffect(() => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      console.warn('[BrowserShell] window.codeall not available, browser will be disabled')
+      return
+    }
+
     const initBrowser = async () => {
       // Create browser view
       await window.codeall.invoke('browser:create', { viewId, url: 'https://google.com' })
@@ -35,16 +41,16 @@ export function BrowserShell() {
 
     return () => {
       cleanup.then(remove => remove && remove())
-      window.codeall.invoke('browser:destroy', { viewId })
+      window.codeall?.invoke('browser:destroy', { viewId })
     }
   }, [setBrowserUrl, setBrowserNavState])
 
   // Handle Resize
   useEffect(() => {
-    if (!browserRef.current) return
+    if (!browserRef.current || !window.codeall) return
 
     const updateBounds = () => {
-      if (!browserRef.current) return
+      if (!browserRef.current || !window.codeall) return
       const rect = browserRef.current.getBoundingClientRect()
       window.codeall.invoke('browser:show', {
         viewId,
@@ -68,30 +74,30 @@ export function BrowserShell() {
 
   // Actions
   const handleNavigate = useCallback((url: string) => {
-    window.codeall.invoke('browser:navigate', { viewId, url })
+    window.codeall?.invoke('browser:navigate', { viewId, url })
   }, [])
 
-  const handleBack = useCallback(() => window.codeall.invoke('browser:go-back', { viewId }), [])
+  const handleBack = useCallback(() => window.codeall?.invoke('browser:go-back', { viewId }), [])
   const handleForward = useCallback(
-    () => window.codeall.invoke('browser:go-forward', { viewId }),
+    () => window.codeall?.invoke('browser:go-forward', { viewId }),
     []
   )
-  const handleReload = useCallback(() => window.codeall.invoke('browser:reload', { viewId }), [])
-  const handleStop = useCallback(() => window.codeall.invoke('browser:stop', { viewId }), [])
+  const handleReload = useCallback(() => window.codeall?.invoke('browser:reload', { viewId }), [])
+  const handleStop = useCallback(() => window.codeall?.invoke('browser:stop', { viewId }), [])
 
   const handleScreenshot = useCallback(async () => {
-    const result = await window.codeall.invoke('browser:capture', { viewId })
+    const result = await window.codeall?.invoke('browser:capture', { viewId })
     console.log('Screenshot taken', result)
     // TODO: Show preview or save
   }, [])
 
   const handleToggleDevTools = useCallback(
-    () => window.codeall.invoke('browser:toggle-devtools', { viewId }),
+    () => window.codeall?.invoke('browser:toggle-devtools', { viewId }),
     []
   )
 
   const handleZoom = useCallback((level: number) => {
-    window.codeall.invoke('browser:zoom', { viewId, level })
+    window.codeall?.invoke('browser:zoom', { viewId, level })
     setZoomLevel(level)
   }, [])
 

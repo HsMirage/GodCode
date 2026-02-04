@@ -9,7 +9,10 @@ const isDevelopment = process.env.NODE_ENV === 'development' || !!process.env.VI
 const consoleFormat = winston.format.combine(
   winston.format.colorize(),
   winston.format.timestamp(),
-  winston.format.printf(({ level, message, timestamp }) => `${timestamp} ${level}: ${message}`)
+  winston.format.printf(({ level, message, timestamp, ...rest }) => {
+    const extra = Object.keys(rest).length > 0 ? ` ${JSON.stringify(rest)}` : ''
+    return `${timestamp} ${level}: ${message}${extra}`
+  })
 )
 
 const fileFormat = winston.format.combine(

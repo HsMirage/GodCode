@@ -54,6 +54,11 @@ export function AuditLogViewer() {
 
   // Load data
   const fetchLogs = async () => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      console.warn('[AuditLogViewer] window.codeall not available')
+      return
+    }
     setLoading(true)
     try {
       // Build filter object
@@ -84,6 +89,7 @@ export function AuditLogViewer() {
   }, [page, filter]) // Re-fetch on page/filter change
 
   const handleExport = async (format: 'json' | 'csv') => {
+    if (!window.codeall) return
     try {
       const result = (await window.codeall.invoke('audit-log:export', format, {
         ...filter,

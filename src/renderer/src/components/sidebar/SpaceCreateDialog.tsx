@@ -23,6 +23,7 @@ export function SpaceCreateDialog({ isOpen, onClose, onSuccess }: SpaceCreateDia
   const [loading, setLoading] = useState(false)
 
   const handleSelectFolder = async () => {
+    if (!window.codeall) return
     const result = (await window.codeall.invoke('dialog:select-folder')) as SelectFolderResult
     if (result.success && result.data) {
       setWorkDir(result.data)
@@ -30,7 +31,7 @@ export function SpaceCreateDialog({ isOpen, onClose, onSuccess }: SpaceCreateDia
   }
 
   const handleCreate = async () => {
-    if (!name.trim() || !workDir) {
+    if (!name.trim() || !workDir || !window.codeall) {
       return
     }
 

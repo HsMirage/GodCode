@@ -25,6 +25,8 @@ export function SessionRecoveryPrompt() {
 
   useEffect(() => {
     const checkRecovery = async () => {
+      // Skip if not running in Electron environment
+      if (!window.codeall) return
       try {
         const info = (await window.codeall.invoke('session:check-recovery')) as RecoveryInfo
         if (info && info.hasRecoverable && info.sessions.length > 0) {
@@ -40,7 +42,7 @@ export function SessionRecoveryPrompt() {
   }, [])
 
   const handleRecover = async () => {
-    if (!recoveryInfo?.sessions[0]) return
+    if (!recoveryInfo?.sessions[0] || !window.codeall) return
 
     setIsRecovering(true)
     const session = recoveryInfo.sessions[0]

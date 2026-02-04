@@ -108,6 +108,13 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
   }, [])
 
   useEffect(() => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      console.warn('[WorkflowView] window.codeall not available')
+      setIsLoading(false)
+      return
+    }
+
     const loadTasks = async () => {
       setIsLoading(true)
       try {
@@ -126,6 +133,11 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
   }, [sessionId, convertTasksToFlow, setNodes, setEdges])
 
   useEffect(() => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      return
+    }
+
     const handleStatusChange = (event: { taskId: string; status: Task['status'] }) => {
       setNodes(nds =>
         nds.map(node => {

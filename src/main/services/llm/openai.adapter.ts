@@ -202,6 +202,16 @@ export class OpenAIAdapter implements LLMAdapter {
     const model = config.model || this.model
     const tools = getOpenAITools()
 
+    // Debug: 打印请求参数
+    logger.info('[OpenAIAdapter] streamMessage called', {
+      model,
+      configModel: config.model,
+      defaultModel: this.model,
+      baseURL: this.client.baseURL,
+      fullEndpoint: `${this.client.baseURL}/chat/completions`,
+      messageCount: messages.length
+    })
+
     // Register browser tools with execution service
     toolExecutionService.registerBrowserTools(allTools)
 

@@ -25,6 +25,12 @@ export function ChatPage() {
   const { selectedAgentId } = useAgentStore()
 
   useEffect(() => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      console.warn('[ChatPage] window.codeall not available, chat will be disabled')
+      return
+    }
+
     const initializeSession = async () => {
       try {
         const session = await window.codeall.invoke('session:get-or-create-default')
@@ -62,6 +68,11 @@ export function ChatPage() {
   }, [])
 
   useEffect(() => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      return
+    }
+
     const removeListener = window.codeall.on('message:stream-chunk', ({ content, done }) => {
       if (done) {
         setMessages(prev => [
@@ -86,7 +97,7 @@ export function ChatPage() {
   }, [streamingContent])
 
   const handleSend = async (content: string) => {
-    if (!sessionId) return
+    if (!sessionId || !window.codeall) return
 
     const userMessage: Message = {
       id: Date.now().toString(),

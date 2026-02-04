@@ -92,6 +92,11 @@ export function SettingsPage() {
 
   useEffect(() => {
     async function fetchModels() {
+      // Skip if not running in Electron environment
+      if (!window.codeall) {
+        console.warn('[SettingsPage] window.codeall not available')
+        return
+      }
       try {
         const data = (await window.codeall.invoke('model:list')) as Model[]
         loadModels(data)
@@ -104,6 +109,10 @@ export function SettingsPage() {
 
   useEffect(() => {
     async function fetchRules() {
+      // Skip if not running in Electron environment
+      if (!window.codeall) {
+        return
+      }
       try {
         const data = await window.codeall.invoke('router:get-rules')
         const converted = data.map(r => ({
@@ -119,6 +128,7 @@ export function SettingsPage() {
   }, [])
 
   const handleAdd = async (values: ModelConfigFormValues) => {
+    if (!window.codeall) return
     try {
       await window.codeall.invoke('model:create', values)
       const data = (await window.codeall.invoke('model:list')) as Model[]
@@ -131,6 +141,7 @@ export function SettingsPage() {
   }
 
   const handleSave = async (values: ModelConfigFormValues) => {
+    if (!window.codeall) return
     try {
       const model = models[0]
       if (model) {
@@ -149,6 +160,7 @@ export function SettingsPage() {
   }
 
   const handleDelete = async () => {
+    if (!window.codeall) return
     try {
       const model = models[0]
       if (model) {
@@ -238,6 +250,7 @@ export function SettingsPage() {
   }
 
   const saveRulesToBackend = async (updatedRules: RoutingRule[]) => {
+    if (!window.codeall) return
     try {
       const serialized = updatedRules.map(r => ({
         pattern: r.pattern.source,

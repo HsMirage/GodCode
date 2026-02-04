@@ -46,6 +46,11 @@ export function DataManagement() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const fetchBackups = async () => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      console.warn('[DataManagement] window.codeall not available')
+      return
+    }
     try {
       setLoading(true)
       const data = (await window.codeall.invoke('backup:list')) as BackupMetadata[]
@@ -76,6 +81,7 @@ export function DataManagement() {
   }, [message])
 
   const handleCreateBackup = async () => {
+    if (!window.codeall) return
     try {
       setProcessing('backup')
       await window.codeall.invoke('backup:create')
@@ -90,6 +96,7 @@ export function DataManagement() {
   }
 
   const handleRestore = async (path: string) => {
+    if (!window.codeall) return
     try {
       setProcessing('restore')
       await window.codeall.invoke('restore:from-file', path)
@@ -105,6 +112,7 @@ export function DataManagement() {
   }
 
   const handleDelete = async (filename: string) => {
+    if (!window.codeall) return
     try {
       setProcessing('delete')
       await window.codeall.invoke('backup:delete', filename)

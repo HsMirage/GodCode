@@ -12,6 +12,11 @@ export function SpaceList() {
 
   useEffect(() => {
     const loadSpaces = async () => {
+      // Skip if not running in Electron environment
+      if (!window.codeall) {
+        console.warn('[SpaceList] window.codeall not available')
+        return
+      }
       const result = (await window.codeall.invoke('space:list')) as SpaceListResult
       if (result.success) {
         setSpaces(result.data)

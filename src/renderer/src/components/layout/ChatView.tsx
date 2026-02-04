@@ -14,6 +14,12 @@ export function ChatView() {
   const [streamingContent, setStreamingContent] = useState('')
 
   useEffect(() => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      console.warn('[ChatView] window.codeall not available, chat will be disabled')
+      return
+    }
+
     const initializeSession = async () => {
       try {
         const session = await window.codeall.invoke('session:get-or-create-default')
@@ -51,6 +57,11 @@ export function ChatView() {
   }, [])
 
   useEffect(() => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      return
+    }
+
     const removeListener = window.codeall.on(
       'message:stream-chunk',
       ({ content, done }: { content: string; done: boolean }) => {
@@ -81,7 +92,7 @@ export function ChatView() {
   }, [])
 
   const handleSend = async (content: string) => {
-    if (!sessionId) return
+    if (!sessionId || !window.codeall) return
 
     const userMessage: Message = {
       id: Date.now().toString(),

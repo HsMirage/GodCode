@@ -40,7 +40,7 @@ export function SessionResumeIndicator({ sessionId }: SessionResumeIndicatorProp
     let mounted = true
 
     const checkStatus = async () => {
-      if (!sessionId) return
+      if (!sessionId || !window.codeall) return
       try {
         const result = await window.codeall.invoke('task-continuation:get-status', sessionId)
         if (mounted) {
@@ -61,7 +61,7 @@ export function SessionResumeIndicator({ sessionId }: SessionResumeIndicatorProp
   }, [sessionId])
 
   const handleResume = async () => {
-    if (!sessionId || !status?.shouldContinue) return
+    if (!sessionId || !status?.shouldContinue || !window.codeall) return
 
     setIsLoading(true)
     try {

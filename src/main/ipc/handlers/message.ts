@@ -7,6 +7,7 @@ import { createLLMAdapter } from '@/main/services/llm/factory'
 import { costTracker } from '@/main/services/llm/cost-tracker'
 import { LoggerService } from '@/main/services/logger'
 import { SmartRouter, type RouteResult } from '@/main/services/router/smart-router'
+import { SecureStorageService } from '@/main/services/secure-storage.service'
 
 type MessageSendInput = {
   sessionId: string
@@ -72,6 +73,15 @@ export async function handleMessageSend(
       const resolvedModel =
         model ?? (isE2ETest ? { provider: 'mock', apiKey: 'mock', config: {} } : null)
 
+      // Debug: 打印从数据库读取的模型配置
+      logger.info('[handleMessageSend] Model from database', {
+        hasModel: !!model,
+        provider: model?.provider,
+        modelName: model?.modelName,
+        baseURL: model?.baseURL,
+        hasApiKey: !!model?.apiKey
+      })
+
       if (!resolvedModel) {
         throw new Error('No active model configured')
       }
@@ -82,8 +92,15 @@ export async function handleMessageSend(
         }
       }
 
+      // Decrypt API key before use
+      const secureStorage = SecureStorageService.getInstance()
+      const decryptedApiKey = resolvedModel.apiKey
+        ? secureStorage.decrypt(resolvedModel.apiKey)
+        : 'mock'
+
       const adapter = createLLMAdapter(resolvedModel.provider, {
-        apiKey: resolvedModel.apiKey ?? 'mock'
+        apiKey: decryptedApiKey,
+        baseURL: resolvedModel.baseURL ?? undefined
       })
 
       const history = await prisma.message.findMany({
@@ -91,7 +108,19 @@ export async function handleMessageSend(
         orderBy: { createdAt: 'asc' }
       })
 
-      const llmConfig = toLLMConfig(resolvedModel.config)
+      const baseConfig = toLLMConfig(resolvedModel.config)
+      // 确保使用用户配置的模型名称
+      const llmConfig = {
+        ...baseConfig,
+        model: 'modelName' in resolvedModel ? resolvedModel.modelName : baseConfig.model
+      }
+
+      // Debug: 打印最终的 LLM 配置
+      logger.info('[handleMessageSend] Final LLM config', {
+        model: llmConfig.model,
+        baseConfig
+      })
+
       const domainMessages = toDomainMessages(history)
 
       for await (const chunk of adapter.streamMessage(domainMessages, llmConfig)) {

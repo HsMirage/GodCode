@@ -20,7 +20,7 @@ export function UpdateToast() {
         icon: <CheckCircle className="h-5 w-5 text-green-400" />,
         action: {
           label: 'Install',
-          onClick: () => window.codeall.invoke('updater:quit-and-install')
+          onClick: () => window.codeall?.invoke('updater:quit-and-install')
         }
       })
     }

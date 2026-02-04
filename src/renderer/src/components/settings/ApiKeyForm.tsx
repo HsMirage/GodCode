@@ -23,6 +23,11 @@ export function ApiKeyForm() {
   const [showForm, setShowForm] = useState(false)
 
   const loadKeys = useCallback(async () => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      console.warn('[ApiKeyForm] window.codeall not available')
+      return
+    }
     try {
       const loadedKeys = (await window.codeall.invoke('keychain:list')) as ApiKeyEntry[]
       setKeys(loadedKeys)
@@ -52,7 +57,7 @@ export function ApiKeyForm() {
   }
 
   const handleSave = async () => {
-    if (!formBaseURL || !formApiKey) {
+    if (!formBaseURL || !formApiKey || !window.codeall) {
       return
     }
 
@@ -84,6 +89,7 @@ export function ApiKeyForm() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this API Key?')) return
+    if (!window.codeall) return
 
     setLoading(prev => ({ ...prev, [id]: true }))
     try {

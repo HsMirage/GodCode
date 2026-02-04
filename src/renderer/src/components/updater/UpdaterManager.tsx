@@ -7,6 +7,12 @@ export function UpdaterManager() {
   const { setStatus, setUpdateInfo, setProgress, setError } = useUpdaterStore()
 
   useEffect(() => {
+    // Skip if not running in Electron environment
+    if (!window.codeall) {
+      console.warn('[UpdaterManager] window.codeall not available, skipping updater events')
+      return
+    }
+
     // Listen for updater events
     const unsubChecking = window.codeall.on('updater:checking-for-update', () => {
       setStatus('checking')

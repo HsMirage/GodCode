@@ -52,9 +52,9 @@ const DEFAULT_RULES: RoutingRule[] = [
     strategy: 'workforce'
   },
   {
+    // 默认使用 direct 策略，直接使用用户配置的模型
     pattern: /.*/i,
-    strategy: 'delegate',
-    category: 'quick'
+    strategy: 'direct'
   }
 ]
 

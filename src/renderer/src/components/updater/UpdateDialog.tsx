@@ -10,12 +10,12 @@ export function UpdateDialog() {
   const isOpen = status === 'available' || status === 'downloading' || status === 'downloaded'
 
   const handleDownload = () => {
-    window.codeall.invoke('updater:download-update')
+    window.codeall?.invoke('updater:download-update')
     setStatus('downloading')
   }
 
   const handleInstall = () => {
-    window.codeall.invoke('updater:quit-and-install')
+    window.codeall?.invoke('updater:quit-and-install')
   }
 
   const handleClose = () => {
