@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
 import path from 'path'
 import pkg from 'electron-updater'
 const { autoUpdater } = pkg
@@ -35,6 +35,7 @@ if (!gotTheLock) {
   app.whenReady().then(async () => {
     logger.info('Application starting')
 
+    Menu.setApplicationMenu(null)
     mainWindow = createWindow()
     registerIpcHandlers(mainWindow)
     if (mainWindow) initAutoUpdater(mainWindow)
@@ -137,6 +138,7 @@ function createWindow() {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/preload.cjs'),
       contextIsolation: true,

@@ -26,6 +26,7 @@ export class KeychainService {
     provider?: string
   }): Promise<void> {
     try {
+      await DatabaseService.getInstance().init()
       const { id, label, baseURL, apiKey, provider } = data
 
       if (!baseURL || !apiKey) {
@@ -77,6 +78,7 @@ export class KeychainService {
     Array<{ id: string; label: string | null; baseURL: string; apiKey: string; provider: string }>
   > {
     try {
+      await DatabaseService.getInstance().init()
       const prisma = DatabaseService.getInstance().getClient()
       const records = await prisma.apiKey.findMany({
         orderBy: { createdAt: 'desc' }
@@ -111,6 +113,7 @@ export class KeychainService {
    */
   async deleteApiKey(id: string): Promise<void> {
     try {
+      await DatabaseService.getInstance().init()
       const prisma = DatabaseService.getInstance().getClient()
       try {
         await prisma.apiKey.delete({
