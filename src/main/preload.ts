@@ -65,6 +65,11 @@ const ALLOWED_CHANNELS = [
   'updater:update-downloaded',
   'router:get-rules',
   'router:save-rules',
+  // Keychain Operations
+  'keychain:set-password',
+  'keychain:get-password',
+  'keychain:delete-password',
+  'keychain:list',
   'backup:list',
   'backup:create',
   'backup:delete',

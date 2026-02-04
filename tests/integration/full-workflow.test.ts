@@ -254,7 +254,7 @@ describe('Full Workflow Integration', () => {
 
     const model1 = await prisma.model.create({
       data: {
-        provider: 'anthropic',
+        provider: 'openai-compatible',
         modelName: 'claude-3-5-sonnet-20240620',
         apiKey: 'sk-ant-test-key',
         config: {}
@@ -264,7 +264,7 @@ describe('Full Workflow Integration', () => {
 
     const model2 = await prisma.model.create({
       data: {
-        provider: 'openai',
+        provider: 'openai-compatible',
         modelName: 'gpt-4o',
         apiKey: 'sk-proj-test-key',
         config: {}

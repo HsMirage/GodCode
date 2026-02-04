@@ -16,12 +16,27 @@ interface CodeAllAPI {
   invoke(channel: 'ping'): Promise<string>
   invoke(
     channel: 'model:create',
-    data: { name: string; provider: string; apiKey: string; config?: Record<string, unknown> }
+    data: {
+      provider: string
+      modelName: string
+      apiKey?: string
+      baseURL?: string | null
+      config?: Record<string, unknown>
+    }
   ): Promise<Model>
   invoke(channel: 'model:list'): Promise<Model[]>
   invoke(
     channel: 'model:update',
-    data: { id: string; name?: string; apiKey?: string; config?: Record<string, unknown> }
+    data: {
+      id: string
+      data: {
+        provider?: string
+        modelName?: string
+        apiKey?: string
+        baseURL?: string | null
+        config?: Record<string, unknown>
+      }
+    }
   ): Promise<Model>
   invoke(channel: 'model:delete', id: string): Promise<void>
   invoke(channel: 'session:create', data: { spaceId: string; title?: string }): Promise<Session>
@@ -48,6 +63,19 @@ interface CodeAllAPI {
     filePath: string,
     sessionId: string
   ): Promise<{ success: boolean; content?: string; error?: string }>
+  invoke(
+    channel: 'keychain:list'
+  ): Promise<
+    { id: string; label: string | null; baseURL: string; apiKey: string; provider: string }[]
+  >
+  invoke(
+    channel: 'keychain:set-password',
+    data: { id?: string; label?: string; baseURL: string; apiKey: string; provider?: string }
+  ): Promise<void>
+  invoke(
+    channel: 'keychain:delete-password',
+    data: { service: string; account: string; id?: string }
+  ): Promise<boolean>
 
   // Browser Channels
   invoke(

@@ -67,9 +67,11 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  perMachine: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
   shortcutName: CodeAll
   createDesktopShortcut: always
   createStartMenuShortcut: true
-publish:
-  provider: generic
-  url: '${env.CODEALL_UPDATE_URL}'
+  include: build/installer.nsh
+publish: null

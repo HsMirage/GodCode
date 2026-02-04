@@ -6,7 +6,7 @@ export interface ModelConfigFormValues {
   provider: string
   modelName: string
   apiKey: string
-  baseURL: string
+  baseURL?: string | null
 }
 
 export interface ModelConfigFormProps {
@@ -68,8 +68,10 @@ const dangerButtonClass = [
 
 interface ApiKeyOption {
   id: string
-  label: string
+  label: string | null
   baseURL: string
+  apiKey: string
+  provider: string
 }
 
 export function ModelConfigForm({
@@ -80,9 +82,10 @@ export function ModelConfigForm({
   onSave,
   onDelete
 }: ModelConfigFormProps) {
-  const provider = 'openai-compat'
+  const provider = 'openai-compatible'
   const [modelName, setModelName] = useState(initialModelName)
   const [selectedKeyId, setSelectedKeyId] = useState<string>(initialApiKey)
+  const [apiKey, setApiKey] = useState<string>('')
   const [baseURL, setBaseURL] = useState(initialBaseURL)
 
   const [apiKeys, setApiKeys] = useState<ApiKeyOption[]>([])
@@ -98,6 +101,7 @@ export function ModelConfigForm({
           if (foundKey) {
             setSelectedKeyId(foundKey.id)
             setBaseURL(foundKey.baseURL)
+            setApiKey(foundKey.apiKey)
           }
         }
       })
@@ -108,9 +112,9 @@ export function ModelConfigForm({
 
   const values: ModelConfigFormValues = {
     provider,
-    modelName,
-    apiKey: selectedKeyId,
-    baseURL
+    modelName: modelName.trim(),
+    apiKey,
+    baseURL: baseURL ? baseURL : null
   }
 
   const handleKeyChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -119,10 +123,25 @@ export function ModelConfigForm({
     const key = apiKeys.find(k => k.id === newKeyId)
     if (key) {
       setBaseURL(key.baseURL)
+      setApiKey(key.apiKey)
     } else {
       setBaseURL('')
+      setApiKey('')
     }
   }
+
+  const baseUrlIsValid = (() => {
+    if (!values.baseURL) return false
+    try {
+      // eslint-disable-next-line no-new
+      new URL(values.baseURL)
+      return true
+    } catch {
+      return false
+    }
+  })()
+
+  const canSubmit = Boolean(values.modelName) && baseUrlIsValid && Boolean(values.apiKey)
 
   return (
     <section className={panelClass}>
@@ -180,15 +199,30 @@ export function ModelConfigForm({
             readOnly
           />
           <span className="text-xs text-slate-500">由所选 API 密钥决定 (只读)</span>
+          {values.baseURL && !baseUrlIsValid ? (
+            <span className="text-xs text-rose-300">
+              Base URL 无效，请到「API密钥」里编辑该密钥
+            </span>
+          ) : null}
         </label>
       </div>
 
       <div className="mt-6 flex flex-wrap gap-3">
-        <button className={primaryButtonClass} type="button" onClick={() => onAdd?.(values)}>
+        <button
+          className={primaryButtonClass}
+          type="button"
+          disabled={!canSubmit}
+          onClick={() => onAdd?.(values)}
+        >
           <Plus className="h-4 w-4" />
           添加模型
         </button>
-        <button className={primaryButtonClass} type="button" onClick={() => onSave?.(values)}>
+        <button
+          className={primaryButtonClass}
+          type="button"
+          disabled={!canSubmit}
+          onClick={() => onSave?.(values)}
+        >
           <Save className="h-4 w-4" />
           保存
         </button>

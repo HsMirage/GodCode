@@ -37,7 +37,8 @@ import { registerBackupHandlers } from './handlers/backup'
 import {
   handleKeychainDeletePassword,
   handleKeychainGetPassword,
-  handleKeychainSetPassword
+  handleKeychainSetPassword,
+  handleKeychainList
 } from './handlers/keychain'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
@@ -97,4 +98,5 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('keychain:set-password', handleKeychainSetPassword)
   ipcMain.handle('keychain:get-password', handleKeychainGetPassword)
   ipcMain.handle('keychain:delete-password', handleKeychainDeletePassword)
+  ipcMain.handle('keychain:list', handleKeychainList)
 }
