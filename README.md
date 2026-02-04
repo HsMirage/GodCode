@@ -10,7 +10,7 @@ Built with Electron and React, CodeAll serves as a robust workforce engine that 
 
 ## 🚀 Key Features
 
-- **Multi-LLM Orchestration**: Simultaneously leverage industry-leading models including Anthropic (Claude), OpenAI (GPT-4), and Google Gemini.
+- **Multi-Model Orchestration**: Connect any OpenAI-compatible API (self-hosted or SaaS) and register custom models via Base URL + API key.
 - **Workforce Engine**: Automatically decomposes complex requests into a Directed Acyclic Graph (DAG) of tasks executed by specialized agents.
 - **AI-Controlled Browser**: Integrated browser environment allowing agents to perform documentation research, web automation, and E2E testing using Playwright.
 - **Workspace Isolation**: Manage distinct projects in isolated "Spaces" mapped directly to your local file system with real-time file tree synchronization.
@@ -61,6 +61,8 @@ Built with Electron and React, CodeAll serves as a robust workforce engine that 
   ```bash
   pnpm dev
   ```
+
+> **Model Access**: CodeAll accepts any OpenAI-compatible endpoint. Configure a Base URL + API key in Settings and register your custom model name.
 
 - **Web Server Mode** (Linux/Remote) [Planned]:
   ```bash
