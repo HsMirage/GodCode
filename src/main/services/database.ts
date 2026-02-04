@@ -689,8 +689,13 @@ export class DatabaseService {
         lastConnectError = error
         const message = error instanceof Error ? error.message : String(error)
 
-        // Common transient error while postgres is still starting
-        if (/database system is starting up/i.test(message) || /starting up/i.test(message)) {
+        // Common transient errors while postgres is still starting or recovering
+        if (
+          /database system is starting up/i.test(message) ||
+          /starting up/i.test(message) ||
+          /database system is in recovery mode/i.test(message) ||
+          /the database system is in recovery/i.test(message)
+        ) {
           const delay = Math.min(2000, 200 + attempt * 150)
           console.warn(
             `[Database] Prisma connect retry ${attempt}/${maxConnectAttempts} in ${delay}ms: ${message}`
