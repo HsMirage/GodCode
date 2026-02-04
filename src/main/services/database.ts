@@ -669,10 +669,28 @@ export class DatabaseService {
     }
 
     console.log('[Database] Phase 5: Connecting Prisma...')
-    // Dynamic import for ESM/CommonJS compatibility
+
+    // Use createRequire to robustly load Prisma Client in both dev and prod
+    const { createRequire } = await import('module')
+    const require = createRequire(import.meta.url)
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const prismaModule = (await import('@prisma/client')) as any
-    const PrismaClient = prismaModule.PrismaClient || prismaModule.default?.PrismaClient
+    let PrismaClient: any
+    try {
+      const prismaModule = require('@prisma/client')
+      PrismaClient = prismaModule.PrismaClient || prismaModule.default?.PrismaClient
+    } catch (e) {
+      console.warn('[Database] Failed to require @prisma/client, trying import:', e)
+      // Fallback to import if require fails
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const prismaModule = (await import('@prisma/client')) as any
+      PrismaClient = prismaModule.PrismaClient || prismaModule.default?.PrismaClient
+    }
+
+    if (!PrismaClient) {
+        throw new Error('Failed to load PrismaClient from @prisma/client')
+    }
+
     prismaClient = new PrismaClient()
 
     // PostgreSQL may still be starting up even after pg_ctl reports "server started".
