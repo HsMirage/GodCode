@@ -1,0 +1,46 @@
+{
+  "name": "codeall",
+  "version": "1.0.0",
+  "description": "Multi-LLM collaborative programming platform",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "author": "CodeAll Team",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
+    "@electron-toolkit/preload": "^3.0.0",
+    "@electron-toolkit/utils": "^3.0.0",
+    "@embedded-postgres/linux-x64": "18.1.0-beta.16",
+    "@embedded-postgres/windows-x64": "18.1.0-beta.16",
+    "@google/generative-ai": "^0.24.1",
+    "@prisma/client": "^6.19.2",
+    "@xyflow/react": "^12.10.0",
+    "clsx": "^2.1.0",
+    "electron-updater": "^6.6.2",
+    "embedded-postgres": "18.1.0-beta.16",
+    "lucide-react": "^0.563.0",
+    "openai": "^6.16.0",
+    "prism-react-renderer": "^2.4.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-json-view": "^1.21.3",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.13.0",
+    "uuid": "^13.0.0",
+    "winston": "^3.11.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "zod": "^3.24.1",
+    "zustand": "^4.5.0"
+  },
+  "packageManager": "pnpm@10.11.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@embedded-postgres/windows-x64",
+      "@prisma/client",
+      "@prisma/engines",
+      "electron",
+      "esbuild",
+      "prisma"
+    ]
+  }
+}
