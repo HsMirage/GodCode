@@ -7,22 +7,10 @@ import { toolRegistry } from './tool-registry'
 import { fileReadTool } from './builtin/file-read'
 import { fileWriteTool } from './builtin/file-write'
 import { fileListTool } from './builtin/file-list'
-import {
-  browserNavigateTool,
-  browserClickTool,
-  browserFillTool,
-  browserSnapshotTool,
-  browserScreenshotTool,
-  browserExtractTool
-} from './builtin/browser-tools'
 
+// Register file operation tools only
+// Browser tools are dynamically registered via toolExecutionService.registerBrowserTools()
+// to avoid duplicate tool declarations
 toolRegistry.register(fileReadTool)
 toolRegistry.register(fileWriteTool)
 toolRegistry.register(fileListTool)
-
-toolRegistry.register(browserNavigateTool)
-toolRegistry.register(browserClickTool)
-toolRegistry.register(browserFillTool)
-toolRegistry.register(browserSnapshotTool)
-toolRegistry.register(browserScreenshotTool)
-toolRegistry.register(browserExtractTool)
