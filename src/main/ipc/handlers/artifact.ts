@@ -4,6 +4,7 @@ import path from 'path'
 import { PathValidator } from '@/shared/path-validator'
 import { AuditLogService } from '../../services/audit-log.service'
 import { DatabaseService } from '../../services/database'
+import { ArtifactService } from '../../services/artifact.service'
 
 export function registerArtifactHandlers(): void {
   const auditLogService = AuditLogService.getInstance()
@@ -184,34 +185,52 @@ export function registerArtifactHandlers(): void {
   })
 
   // 3. artifact:list
-  ipcMain.handle('artifact:list', async (_, sessionId: string, includeContent = false) => {
-    try {
-      const db = DatabaseService.getInstance().getClient()
-      const select = includeContent
-        ? undefined
-        : {
-            id: true,
-            sessionId: true,
-            taskId: true,
-            type: true,
-            path: true,
-            size: true,
-            createdAt: true,
-            updatedAt: true,
-            content: false
-          }
+  ipcMain.handle(
+    'artifact:list',
+    async (
+      _,
+      input: string | { sessionId: string; includeContent?: boolean },
+      includeContentArg = false
+    ) => {
+      try {
+        const db = DatabaseService.getInstance().getClient()
 
-      const artifacts = await db.artifact.findMany({
-        where: { sessionId },
-        select: select,
-        orderBy: { createdAt: 'asc' }
-      })
-      return artifacts
-    } catch (error) {
-      console.error('Failed to list artifacts:', error)
-      return []
+        const sessionId = typeof input === 'string' ? input : input?.sessionId
+        const includeContent =
+          typeof input === 'string' ? includeContentArg : Boolean(input?.includeContent)
+
+        if (!sessionId) {
+          return []
+        }
+
+        const select = includeContent
+          ? undefined
+          : {
+              id: true,
+              sessionId: true,
+              taskId: true,
+              type: true,
+              path: true,
+              size: true,
+              changeType: true,
+              accepted: true,
+              createdAt: true,
+              updatedAt: true,
+              content: false
+            }
+
+        const artifacts = await db.artifact.findMany({
+          where: { sessionId },
+          select: select,
+          orderBy: { createdAt: 'asc' }
+        })
+        return artifacts
+      } catch (error) {
+        console.error('Failed to list artifacts:', error)
+        return []
+      }
     }
-  })
+  )
 
   // 4. artifact:get
   ipcMain.handle('artifact:get', async (_, artifactId: string) => {
@@ -229,6 +248,52 @@ export function registerArtifactHandlers(): void {
     } catch (error) {
       console.error(`Failed to get artifact ${artifactId}:`, error)
       throw error
+    }
+  })
+
+  // 5. artifact:get-diff
+  ipcMain.handle('artifact:get-diff', async (_, artifactId: string) => {
+    try {
+      const artifactService = ArtifactService.getInstance()
+      return await artifactService.getDiff(artifactId)
+    } catch (error) {
+      console.error(`Failed to get artifact diff ${artifactId}:`, error)
+      return null
+    }
+  })
+
+  // 6. artifact:accept
+  ipcMain.handle('artifact:accept', async (_, artifactId: string) => {
+    try {
+      const artifactService = ArtifactService.getInstance()
+      await artifactService.acceptArtifact(artifactId)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
+  // 7. artifact:revert
+  ipcMain.handle(
+    'artifact:revert',
+    async (_, { artifactId, workDir }: { artifactId: string; workDir: string }) => {
+      try {
+        const artifactService = ArtifactService.getInstance()
+        return await artifactService.revertArtifact(artifactId, workDir)
+      } catch (error) {
+        return { success: false, error: (error as Error).message }
+      }
+    }
+  )
+
+  // 8. artifact:stats
+  ipcMain.handle('artifact:stats', async (_, sessionId: string) => {
+    try {
+      const artifactService = ArtifactService.getInstance()
+      return await artifactService.getSessionStats(sessionId)
+    } catch (error) {
+      console.error(`Failed to get artifact stats:`, error)
+      return { total: 0, created: 0, modified: 0, deleted: 0, accepted: 0, pending: 0 }
     }
   })
 }

@@ -5,9 +5,16 @@ import type { ToolExecutionContext } from '@/main/services/tools/tool.interface'
 import fs from 'fs/promises'
 
 vi.mock('fs/promises')
+vi.mock('@/main/services/artifact.service', () => ({
+  ArtifactService: {
+    getInstance: () => ({
+      createArtifact: vi.fn().mockResolvedValue({ id: 'test-artifact-id' })
+    })
+  }
+}))
 
 describe('fileWriteTool', () => {
-  const workspaceDir = '/test/workspace'
+  const workspaceDir = path.resolve('test-workspace')
   const context: ToolExecutionContext = {
     workspaceDir,
     sessionId: 'test-session'
@@ -15,11 +22,14 @@ describe('fileWriteTool', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    // 默认模拟“文件不存在”，让 file_write 走 created 分支
+    vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'))
   })
 
   it('should write to a file successfully', async () => {
     const content = 'New content'
     vi.mocked(fs.mkdir).mockResolvedValue(undefined)
+    vi.mocked(fs.readFile).mockRejectedValue(new Error('ENOENT'))
     vi.mocked(fs.writeFile).mockResolvedValue(undefined)
 
     const result = await fileWriteTool.execute({ path: 'output.txt', content }, context)
@@ -28,7 +38,8 @@ describe('fileWriteTool', () => {
     expect(result.output).toContain('File written successfully')
     expect(result.metadata).toEqual({
       path: 'output.txt',
-      size: content.length
+      size: Buffer.byteLength(content, 'utf8'),
+      changeType: 'created'
     })
 
     const targetPath = path.resolve(workspaceDir, 'output.txt')
@@ -37,7 +48,10 @@ describe('fileWriteTool', () => {
   })
 
   it('should prevent writing outside workspace', async () => {
-    const result = await fileWriteTool.execute({ path: '../hack.txt', content: 'payload' }, context)
+    const result = await fileWriteTool.execute(
+      { path: path.join('..', 'hack.txt'), content: 'payload' },
+      context
+    )
 
     expect(result.success).toBe(false)
     expect(result.error).toContain('Access denied')
@@ -48,7 +62,7 @@ describe('fileWriteTool', () => {
     vi.mocked(fs.mkdir).mockRejectedValue(new Error('Permission denied'))
 
     const result = await fileWriteTool.execute(
-      { path: 'protected/file.txt', content: 'test' },
+      { path: path.join('protected', 'file.txt'), content: 'test' },
       context
     )
 
