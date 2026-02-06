@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ApiKeyForm } from '../components/settings/ApiKeyForm'
+import { AgentBindingPanel } from '../components/settings/AgentBindingPanel'
 import { useConfigStore } from '../store/config.store'
 import { ModelConfigForm, ModelConfigFormValues } from '../components/ModelConfigForm'
 import { DataManagement } from '../components/settings/DataManagement'
@@ -14,6 +15,8 @@ interface RoutingRule {
   category?: string
   subagent?: string
   model?: string
+  baseURL?: string
+  apiKey?: string
 }
 
 interface RuleDraft {
@@ -22,6 +25,8 @@ interface RuleDraft {
   category: string
   subagent: string
   model: string
+  baseURL: string
+  apiKey: string
 }
 
 const DEFAULT_RULES: RoutingRule[] = [
@@ -59,6 +64,7 @@ const panelClass = [
 
 const TABS = [
   { id: 'llm', label: 'LLM配置' },
+  { id: 'agents', label: '智能体' },
   { id: 'keys', label: 'API密钥' },
   { id: 'rules', label: '路由规则' },
   { id: 'data', label: '数据管理' }
@@ -66,7 +72,7 @@ const TABS = [
 
 export function SettingsPage() {
   const { models, loadModels } = useConfigStore()
-  const [activeTab, setActiveTab] = useState<'llm' | 'keys' | 'rules' | 'data'>('llm')
+  const [activeTab, setActiveTab] = useState<'llm' | 'agents' | 'keys' | 'rules' | 'data'>('llm')
   const [rules, setRules] = useState<RoutingRule[]>(DEFAULT_RULES)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -87,7 +93,9 @@ export function SettingsPage() {
     strategy: 'delegate',
     category: 'quick',
     subagent: 'oracle',
-    model: ''
+    model: '',
+    baseURL: '',
+    apiKey: ''
   })
 
   useEffect(() => {
@@ -183,7 +191,9 @@ export function SettingsPage() {
         strategy: rule.strategy,
         category: rule.category ?? 'quick',
         subagent: rule.subagent ?? 'oracle',
-        model: rule.model ?? ''
+        model: rule.model ?? '',
+        baseURL: rule.baseURL ?? '',
+        apiKey: rule.apiKey ?? ''
       })
       return
     }
@@ -193,7 +203,9 @@ export function SettingsPage() {
       strategy: 'delegate',
       category: 'quick',
       subagent: 'oracle',
-      model: ''
+      model: '',
+      baseURL: '',
+      apiKey: ''
     })
   }
 
@@ -232,6 +244,8 @@ export function SettingsPage() {
       pattern: compiled,
       strategy: draft.strategy,
       model: draft.model || undefined,
+      baseURL: draft.baseURL || undefined,
+      apiKey: draft.apiKey || undefined,
       category: draft.strategy === 'delegate' ? draft.category : undefined,
       subagent: draft.strategy === 'delegate' ? draft.subagent : undefined
     }
@@ -257,7 +271,9 @@ export function SettingsPage() {
         strategy: r.strategy,
         category: r.category,
         subagent: r.subagent,
-        model: r.model
+        model: r.model,
+        baseURL: r.baseURL,
+        apiKey: r.apiKey
       }))
       await window.codeall.invoke('router:save-rules', serialized)
     } catch (error) {
@@ -310,7 +326,7 @@ export function SettingsPage() {
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveTab(tab.id as 'llm' | 'keys' | 'rules' | 'data')}
+              onClick={() => setActiveTab(tab.id as 'llm' | 'agents' | 'keys' | 'rules' | 'data')}
               className={[
                 'rounded-xl px-4 py-2 text-sm font-semibold transition',
                 'border border-transparent',
@@ -337,6 +353,16 @@ export function SettingsPage() {
             </div>
           </div>
           <ModelConfigForm onAdd={handleAdd} onSave={handleSave} onDelete={handleDelete} />
+        </div>
+      ) : null}
+
+      {activeTab === 'agents' ? (
+        <div className={`${panelClass} p-6`}>
+          <div className="mb-6">
+            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Agent Studio</p>
+            <h2 className="mt-2 text-xl font-semibold text-white">智能体配置</h2>
+          </div>
+          <AgentBindingPanel />
         </div>
       ) : null}
 
@@ -529,6 +555,33 @@ export function SettingsPage() {
                   placeholder="可选，用于覆盖模型"
                 />
               </label>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2 text-sm text-slate-300">
+                  <span>Base URL</span>
+                  <input
+                    value={draft.baseURL}
+                    onChange={event =>
+                      setDraft(current => ({ ...current, baseURL: event.target.value }))
+                    }
+                    className="w-full rounded-xl border border-slate-800/70 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 focus:border-slate-500/80 focus:outline-none"
+                    placeholder="可选，自定义 API 地址"
+                  />
+                </label>
+
+                <label className="space-y-2 text-sm text-slate-300">
+                  <span>API Key</span>
+                  <input
+                    type="password"
+                    value={draft.apiKey}
+                    onChange={event =>
+                      setDraft(current => ({ ...current, apiKey: event.target.value }))
+                    }
+                    className="w-full rounded-xl border border-slate-800/70 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 focus:border-slate-500/80 focus:outline-none"
+                    placeholder="可选，自定义 API 密钥"
+                  />
+                </label>
+              </div>
 
               {formError ? (
                 <div className="rounded-xl border border-rose-400/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">

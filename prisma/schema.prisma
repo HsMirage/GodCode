@@ -75,52 +75,101 @@ model Task {
   @@index([type])
 }
 
-// Artifact表
+// Artifact表 - 产物记录
 model Artifact {
-  id        String   @id @default(uuid())
-  sessionId String
-  session   Session  @relation(fields: [sessionId], references: [id])
-  taskId    String?
-  type      String
-  path      String
-  content   String?  @db.Text
-  size      Int
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid())
+  sessionId  String
+  session    Session  @relation(fields: [sessionId], references: [id])
+  taskId     String?
+  type       String   // "code" | "file" | "image" | "data"
+  path       String   // 文件路径
+  content    String?  @db.Text
+  size       Int
+  changeType String   @default("created") // "created" | "modified" | "deleted"
+  diff       String?  @db.Text // diff 内容
+  accepted   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([sessionId])
   @@index([taskId])
   @@index([type])
+  @@index([changeType])
+  @@index([accepted])
 }
 
-// Run表
+// Run表 - Agent 执行记录
 model Run {
   id          String   @id @default(uuid())
   taskId      String
   task        Task     @relation(fields: [taskId], references: [id])
-  status      String
-  logs        Json     @default("[]")
+  agentCode   String?  // Agent 代码，如 "qianliyan" | "diting"
+  status      String   // "running" | "completed" | "failed"
+  logs        Json     @default("[]") // 执行日志数组
   tokenUsage  Json?
   cost        Float?
   startedAt   DateTime @default(now())
   completedAt DateTime?
 
   @@index([taskId])
+  @@index([agentCode])
   @@index([status])
 }
 
 // Model表
 model Model {
-  id        String   @id @default(uuid())
-  provider  String
-  modelName String
-  apiKey    String?
-  baseURL   String?
-  config    Json     @default("{}")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id               String            @id @default(uuid())
+  provider         String
+  modelName        String
+  apiKey           String?
+  baseURL          String?
+  contextSize      Int               @default(32) // 上下文大小，单位：K
+  config           Json              @default("{}")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  agentBindings    AgentBinding[]
+  categoryBindings CategoryBinding[]
 
   @@index([provider, modelName])
+}
+
+// AgentBinding表 - 智能体绑定配置
+model AgentBinding {
+  id           String   @id @default(uuid())
+  agentCode    String   @unique // "fuxi" | "haotian" | "kuafu" | ...
+  agentName    String            // "伏羲(FuXi)"
+  agentType    String            // "primary" | "subagent"
+  description  String?           // 职责描述
+  modelId      String?           // 关联到 Model 表
+  model        Model?   @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  temperature  Float    @default(0.5)
+  tools        String[] // 可用工具列表
+  systemPrompt String?  @db.Text // 系统提示词覆盖
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([agentCode])
+  @@index([agentType])
+  @@index([enabled])
+}
+
+// CategoryBinding表 - 任务类别绑定配置
+model CategoryBinding {
+  id           String   @id @default(uuid())
+  categoryCode String   @unique // "zhinu" | "cangjie" | "tianbing" | ...
+  categoryName String            // "织女(ZhiNv)"
+  description  String?           // 用途描述
+  modelId      String?
+  model        Model?   @relation(fields: [modelId], references: [id], onDelete: SetNull)
+  temperature  Float    @default(0.5)
+  systemPrompt String?  @db.Text // 系统提示词覆盖
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([categoryCode])
+  @@index([enabled])
 }
 
 // ApiKey表
