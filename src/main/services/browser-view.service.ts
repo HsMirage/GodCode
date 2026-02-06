@@ -301,6 +301,10 @@ class BrowserViewManager {
     return this.states.get(viewId) || null
   }
 
+  getAllStates(): BrowserViewState[] {
+    return Array.from(this.states.values())
+  }
+
   destroy(viewId: string) {
     const view = this.views.get(viewId)
     if (!view) return

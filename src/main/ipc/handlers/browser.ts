@@ -137,6 +137,16 @@ export function registerBrowserHandlers(mainWindow: BrowserWindow | null) {
     }
   })
 
+  ipcMain.handle('browser:list-tabs', async () => {
+    try {
+      const states = browserViewManager.getAllStates()
+      return { success: true, data: states }
+    } catch (error) {
+      console.error('[Browser IPC] ListTabs failed:', error)
+      return { success: false, error: (error as Error).message }
+    }
+  })
+
   ipcMain.handle('browser:capture', async (_event, { viewId }: { viewId: string }) => {
     try {
       const dataUrl = await browserViewManager.capture(viewId)
