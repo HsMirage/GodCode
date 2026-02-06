@@ -4,6 +4,7 @@ import pkg from 'electron-updater'
 const { autoUpdater } = pkg
 import { registerIpcHandlers } from './ipc'
 import { DatabaseService } from './services/database'
+import { BindingService } from './services/binding.service'
 import { processCleanupService } from './services/process-cleanup.service'
 import { browserViewManager } from './services/browser-view.service'
 import { logger } from '../shared/logger'
@@ -49,6 +50,11 @@ if (!gotTheLock) {
         logger.info('Database initialization started')
         await db.init()
         logger.info('Database initialization completed')
+
+        // Initialize default agent and category bindings
+        const bindingService = BindingService.getInstance()
+        await bindingService.initializeDefaults()
+        logger.info('Agent and category bindings initialized')
       } catch (error) {
         logger.error('Database initialization failed:', error)
         const locale = app.getLocale()

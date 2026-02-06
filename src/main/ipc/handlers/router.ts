@@ -10,6 +10,8 @@ interface RoutingRule {
   category?: string
   subagent?: string
   model?: string
+  baseURL?: string
+  apiKey?: string
 }
 
 const DEFAULT_RULES: RoutingRule[] = [

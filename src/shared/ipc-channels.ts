@@ -122,7 +122,30 @@ export const INVOKE_CHANNELS = {
   BACKUP_LIST: 'backup:list',
   BACKUP_CREATE: 'backup:create',
   BACKUP_DELETE: 'backup:delete',
-  RESTORE_FROM_FILE: 'restore:from-file'
+  RESTORE_FROM_FILE: 'restore:from-file',
+
+  // Agent Binding Operations
+  AGENT_BINDING_LIST: 'agent-binding:list',
+  AGENT_BINDING_GET: 'agent-binding:get',
+  AGENT_BINDING_UPDATE: 'agent-binding:update',
+  AGENT_BINDING_RESET: 'agent-binding:reset',
+
+  // Category Binding Operations
+  CATEGORY_BINDING_LIST: 'category-binding:list',
+  CATEGORY_BINDING_GET: 'category-binding:get',
+  CATEGORY_BINDING_UPDATE: 'category-binding:update',
+  CATEGORY_BINDING_RESET: 'category-binding:reset',
+
+  // Agent Run Operations
+  AGENT_RUN_LIST: 'agent-run:list',
+  AGENT_RUN_GET: 'agent-run:get',
+  AGENT_RUN_GET_LOGS: 'agent-run:get-logs',
+
+  // Enhanced Artifact Operations
+  ARTIFACT_GET_DIFF: 'artifact:get-diff',
+  ARTIFACT_ACCEPT: 'artifact:accept',
+  ARTIFACT_REVERT: 'artifact:revert',
+  ARTIFACT_STATS: 'artifact:stats'
 } as const
 
 /**
@@ -133,6 +156,16 @@ export const EVENT_CHANNELS = {
   // Browser Events
   BROWSER_ZOOM_CHANGED: 'browser:zoom-changed',
   BROWSER_STATE_CHANGED: 'browser:state-changed',
+  BROWSER_PANEL_SHOW: 'browser:panel-show',
+
+  // Task Events
+  TASK_UPDATE: 'task:update',
+
+  // Agent Run Events
+  AGENT_RUN_UPDATE: 'agent-run:update',
+
+  // Artifact Events
+  ARTIFACT_CREATED: 'artifact:created',
 
   // Updater Events
   UPDATER_CHECKING_FOR_UPDATE: 'updater:checking-for-update',

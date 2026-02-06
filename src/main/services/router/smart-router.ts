@@ -27,6 +27,8 @@ export interface RoutingRule {
   category?: string
   subagent?: string
   model?: string
+  baseURL?: string
+  apiKey?: string
 }
 
 const DEFAULT_RULES: RoutingRule[] = [
@@ -91,7 +93,9 @@ export class SmartRouter {
         category: rule.category,
         subagent_type: rule.subagent,
         parentTaskId: context?.parentTaskId,
-        model: resolved?.model
+        model: resolved?.model ?? rule.model,
+        baseURL: rule.baseURL,
+        apiKey: rule.apiKey
       })
     }
 

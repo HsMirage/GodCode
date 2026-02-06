@@ -50,6 +50,10 @@ interface CodeAllAPI {
   invoke(channel: 'task:list', sessionId: string): Promise<Task[]>
   invoke(channel: 'artifact:list', sessionId: string): Promise<Artifact[]>
   invoke(
+    channel: 'artifact:list',
+    data: { sessionId: string; includeContent?: boolean }
+  ): Promise<Artifact[]>
+  invoke(
     channel: 'artifact:download',
     artifactId: string,
     workDir: string
@@ -168,6 +172,46 @@ interface CodeAllAPI {
   on(channel: 'updater:error', callback: (error: string) => void): () => void
   on(channel: 'updater:download-progress', callback: (progress: any) => void): () => void
   on(channel: 'updater:update-downloaded', callback: (info: any) => void): () => void
+
+  // Browser Panel Events
+  on(channel: 'browser:panel-show', callback: () => void): () => void
+  on(
+    channel: 'browser:ai-operation',
+    callback: (data: { toolName: string; status: 'running' | 'completed' | 'error' }) => void
+  ): () => void
+
+  // Task Events
+  on(channel: 'task:update', callback: () => void): () => void
+
+  // Artifact Events
+  on(channel: 'artifact:created', callback: () => void): () => void
+
+  // Agent Run Channels
+  invoke(channel: 'agent-run:list', taskId: string): Promise<any[]>
+  invoke(channel: 'agent-run:get', runId: string): Promise<any>
+  invoke(channel: 'agent-run:get-logs', runId: string): Promise<any[]>
+
+  // Enhanced Artifact Channels
+  invoke(channel: 'artifact:get-diff', artifactId: string): Promise<string | null>
+  invoke(
+    channel: 'artifact:accept',
+    artifactId: string
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'artifact:revert',
+    data: { artifactId: string; workDir: string }
+  ): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'artifact:stats',
+    sessionId: string
+  ): Promise<{
+    total: number
+    created: number
+    modified: number
+    deleted: number
+    accepted: number
+    pending: number
+  }>
 }
 
 declare global {

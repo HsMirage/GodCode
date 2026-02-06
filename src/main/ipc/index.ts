@@ -40,6 +40,21 @@ import {
   handleKeychainSetPassword,
   handleKeychainList
 } from './handlers/keychain'
+import {
+  handleAgentBindingList,
+  handleAgentBindingGet,
+  handleAgentBindingUpdate,
+  handleAgentBindingReset,
+  handleCategoryBindingList,
+  handleCategoryBindingGet,
+  handleCategoryBindingUpdate,
+  handleCategoryBindingReset
+} from './handlers/binding'
+import {
+  handleAgentRunList,
+  handleAgentRunGet,
+  handleAgentRunGetLogs
+} from './handlers/agent-run'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('model:create', handleModelCreate)
@@ -99,4 +114,21 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('keychain:get-password', handleKeychainGetPassword)
   ipcMain.handle('keychain:delete-password', handleKeychainDeletePassword)
   ipcMain.handle('keychain:list', handleKeychainList)
+
+  // Agent Binding handlers
+  ipcMain.handle('agent-binding:list', handleAgentBindingList)
+  ipcMain.handle('agent-binding:get', handleAgentBindingGet)
+  ipcMain.handle('agent-binding:update', handleAgentBindingUpdate)
+  ipcMain.handle('agent-binding:reset', handleAgentBindingReset)
+
+  // Category Binding handlers
+  ipcMain.handle('category-binding:list', handleCategoryBindingList)
+  ipcMain.handle('category-binding:get', handleCategoryBindingGet)
+  ipcMain.handle('category-binding:update', handleCategoryBindingUpdate)
+  ipcMain.handle('category-binding:reset', handleCategoryBindingReset)
+
+  // Agent Run handlers
+  ipcMain.handle('agent-run:list', handleAgentRunList)
+  ipcMain.handle('agent-run:get', handleAgentRunGet)
+  ipcMain.handle('agent-run:get-logs', handleAgentRunGetLogs)
 }

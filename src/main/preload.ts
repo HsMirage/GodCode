@@ -73,7 +73,32 @@ const ALLOWED_CHANNELS = [
   'backup:list',
   'backup:create',
   'backup:delete',
-  'restore:from-file'
+  'restore:from-file',
+  // Agent Binding Operations
+  'agent-binding:list',
+  'agent-binding:get',
+  'agent-binding:update',
+  'agent-binding:reset',
+  // Category Binding Operations
+  'category-binding:list',
+  'category-binding:get',
+  'category-binding:update',
+  'category-binding:reset',
+  // Event Channels
+  'browser:panel-show',
+  'browser:ai-operation',
+  'task:update',
+  'agent-run:update',
+  'artifact:created',
+  // Agent Run Operations
+  'agent-run:list',
+  'agent-run:get',
+  'agent-run:get-logs',
+  // Enhanced Artifact Operations
+  'artifact:get-diff',
+  'artifact:accept',
+  'artifact:revert',
+  'artifact:stats'
 ] as const
 
 type AllowedChannel = (typeof ALLOWED_CHANNELS)[number]

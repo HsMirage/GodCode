@@ -36,9 +36,16 @@ export interface WorkflowResult {
 const MAX_CONCURRENT = 3
 
 export class WorkforceEngine {
-  private prisma = DatabaseService.getInstance().getClient()
+  private _prisma: ReturnType<typeof DatabaseService.prototype.getClient> | null = null
   private logger = LoggerService.getInstance().getLogger()
   private delegateEngine = new DelegateEngine()
+
+  private get prisma() {
+    if (!this._prisma) {
+      this._prisma = DatabaseService.getInstance().getClient()
+    }
+    return this._prisma
+  }
 
   async decomposeTask(input: string): Promise<SubTask[]> {
     this.logger.info('Decomposing task', { input })

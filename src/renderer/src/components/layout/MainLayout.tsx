@@ -1,15 +1,42 @@
+import { useEffect } from 'react'
 import { Group, Panel, Separator } from 'react-resizable-panels'
 import { Sidebar } from './Sidebar'
 import { ChatPage } from '../../pages/ChatPage'
-import { ArtifactRail } from '../artifact/ArtifactRail'
-import { ContentCanvas } from '../canvas/ContentCanvas'
+import { TaskPanel } from '../panels/TaskPanel'
+import { BrowserPanel } from '../panels/BrowserPanel'
 import { TopNavigation } from './TopNavigation'
 import { useUIStore } from '../../store/ui.store'
-import { PanelRight, PanelBottom } from 'lucide-react'
+import { ListTodo, Globe } from 'lucide-react'
 import { UpdaterManager } from '../updater/UpdaterManager'
 
 export function MainLayout() {
-  const { showSidebar, showArtifactRail, showContentCanvas, setView } = useUIStore()
+  const {
+    showSidebar,
+    sidebarWidth,
+    isTaskPanelOpen,
+    isBrowserPanelOpen,
+    taskPanelWidth,
+    browserPanelWidth,
+    toggleTaskPanel,
+    toggleBrowserPanel,
+    openBrowserPanel,
+    setTaskPanelWidth,
+    setBrowserPanelWidth,
+    setPanelSizes
+  } = useUIStore()
+
+  // 监听浏览器面板自动展开事件
+  useEffect(() => {
+    if (!window.codeall) return
+
+    const removeListener = window.codeall.on('browser:panel-show', () => {
+      openBrowserPanel()
+    })
+
+    return () => {
+      removeListener()
+    }
+  }, [openBrowserPanel])
 
   return (
     <div className="h-screen flex flex-col bg-slate-950 text-slate-200 overflow-hidden">
@@ -18,57 +45,103 @@ export function MainLayout() {
 
       <div className="flex-1 flex overflow-hidden relative">
         <Group orientation="horizontal">
+          {/* Sidebar - 会话列表 */}
           {showSidebar && (
             <>
-              <Panel defaultSize={20} minSize={15} maxSize={30} id="sidebar">
+              <Panel
+                defaultSize={sidebarWidth}
+                minSize={15}
+                maxSize={25}
+                id="sidebar"
+                onResize={(size: any) => {
+                  // Cast to number because we know it returns percentage in this context
+                  const newSize = typeof size === 'number' ? size : (size.asPercentage ?? 20)
+                  setPanelSizes({ sidebar: newSize })
+                }}
+              >
                 <Sidebar />
               </Panel>
               <Separator className="w-1 bg-slate-800 hover:bg-indigo-500 transition-colors" />
             </>
           )}
 
-          <Panel defaultSize={60} id="chat">
+          {/* Chat Panel - 主对话界面 */}
+          <Panel id="chat">
             <ChatPage />
           </Panel>
 
-          {(showArtifactRail || showContentCanvas) && (
-            <Separator className="w-1 bg-slate-800 hover:bg-indigo-500 transition-colors" />
+          {/* Task Panel - 后台任务 (手动展开) */}
+          {isTaskPanelOpen && (
+            <>
+              <Separator className="w-1 bg-slate-800 hover:bg-indigo-500 transition-colors" />
+              <Panel
+                defaultSize={taskPanelWidth}
+                minSize={18}
+                maxSize={35}
+                id="task"
+                onResize={(size: any) => {
+                  const newSize = typeof size === 'number' ? size : (size.asPercentage ?? 25)
+                  setTaskPanelWidth(newSize)
+                }}
+              >
+                <TaskPanel />
+              </Panel>
+            </>
           )}
 
-          {showArtifactRail && (
-            <Panel defaultSize={25} minSize={20} id="artifact">
-              <ArtifactRail />
-            </Panel>
-          )}
-
-          {showContentCanvas && (
-            <Panel defaultSize={40} minSize={30} id="canvas">
-              <ContentCanvas />
-            </Panel>
+          {/* Browser Panel - 浏览器预览 (自动展开) */}
+          {isBrowserPanelOpen && (
+            <>
+              <Separator className="w-1 bg-slate-800 hover:bg-indigo-500 transition-colors" />
+              <Panel
+                defaultSize={browserPanelWidth}
+                minSize={25}
+                maxSize={50}
+                id="browser"
+                onResize={(size: any) => {
+                  const newSize = typeof size === 'number' ? size : (size.asPercentage ?? 35)
+                  setBrowserPanelWidth(newSize)
+                }}
+              >
+                <BrowserPanel />
+              </Panel>
+            </>
           )}
         </Group>
 
+        {/* Floating Action Buttons */}
         <div className="absolute bottom-4 right-4 flex gap-2">
-          {!showArtifactRail && !showContentCanvas && (
-            <div className="flex gap-2 bg-slate-900 border border-slate-700 rounded-lg p-1 shadow-xl">
-              <button
-                type="button"
-                onClick={() => setView('artifact')}
-                className="p-2 hover:bg-slate-800 rounded text-slate-400 hover:text-indigo-400"
-                title="Open Artifacts"
-              >
-                <PanelRight className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setView('canvas')}
-                className="p-2 hover:bg-slate-800 rounded text-slate-400 hover:text-indigo-400"
-                title="Open Preview"
-              >
-                <PanelBottom className="w-4 h-4" />
-              </button>
-            </div>
-          )}
+          <div className="flex gap-2 bg-slate-900 border border-slate-700 rounded-lg p-1 shadow-xl">
+            {/* Task Panel Toggle */}
+            <button
+              type="button"
+              onClick={toggleTaskPanel}
+              className={[
+                'p-2 rounded transition-colors',
+                isTaskPanelOpen
+                  ? 'bg-indigo-600 text-white'
+                  : 'hover:bg-slate-800 text-slate-400 hover:text-indigo-400'
+              ].join(' ')}
+              title={isTaskPanelOpen ? '关闭任务面板' : '打开任务面板'}
+            >
+              <ListTodo className="w-4 h-4" />
+            </button>
+
+            {/* Browser Panel Toggle */}
+            <button
+              type="button"
+              onClick={toggleBrowserPanel}
+              className={[
+                'p-2 rounded transition-colors',
+                isBrowserPanelOpen
+                  ? 'bg-indigo-600 text-white'
+                  : 'hover:bg-slate-800 text-slate-400 hover:text-indigo-400'
+              ].join(' ')}
+              title={isBrowserPanelOpen ? '关闭浏览器' : '打开浏览器'}
+            >
+              <Globe className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

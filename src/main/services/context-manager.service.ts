@@ -9,8 +9,15 @@ export interface ContextWindow {
 }
 
 export class ContextManagerService {
-  private prisma = DatabaseService.getInstance().getClient()
+  private _prisma: ReturnType<typeof DatabaseService.prototype.getClient> | null = null
   private logger = LoggerService.getInstance().getLogger()
+
+  private get prisma() {
+    if (!this._prisma) {
+      this._prisma = DatabaseService.getInstance().getClient()
+    }
+    return this._prisma
+  }
 
   /**
    * 获取会话的上下文窗口（滑动窗口）

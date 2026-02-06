@@ -83,6 +83,12 @@ export interface Artifact {
   /** Inline content for small files */
   content?: string;
   size: number;
+  /** Change type: created, modified, or deleted */
+  changeType: "created" | "modified" | "deleted";
+  /** Diff content */
+  diff?: string;
+  /** Whether the artifact has been accepted */
+  accepted: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
