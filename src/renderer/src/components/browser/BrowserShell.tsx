@@ -4,8 +4,9 @@ import { AddressBar } from './AddressBar'
 import { NavigationBar } from './NavigationBar'
 import { Toolbar } from './Toolbar'
 import { AIIndicator } from './AIIndicator'
-import { Plus, X } from 'lucide-react'
+import { Plus, X, List, Clock, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
 import { cn } from '../../utils'
+import { OperationLogEntry } from '../../store/ui.store'
 
 export function BrowserShell() {
   const browserRef = useRef<HTMLDivElement>(null)
@@ -16,10 +17,15 @@ export function BrowserShell() {
     browserTabs,
     activeBrowserTabId,
     setBrowserTabs,
-    setActiveBrowserTab
+    setActiveBrowserTab,
+    isBrowserPanelOpen,
+    openBrowserPanel,
+    browserOperationHistory,
+    addBrowserOperation
   } = useUIStore()
 
   const [zoomLevel, setZoomLevel] = useState(1)
+  const [showLogs, setShowLogs] = useState(false)
 
   // Sync tabs from backend
   const syncTabs = useCallback(async () => {
@@ -114,6 +120,23 @@ export function BrowserShell() {
 
     const removeAIListener = window.codeall.on('browser:ai-operation', data => {
       setAIOperation(data.toolName, data.status)
+
+      // Auto open panel and add log
+      if (data.status === 'running') {
+        openBrowserPanel()
+        // Ensure logs are visible when AI is operating
+        setShowLogs(true)
+      }
+
+      // Add operation to history
+      addBrowserOperation({
+        id: Date.now().toString(),
+        timestamp: Date.now(),
+        action: data.toolName,
+        target: ((data as any).args && JSON.stringify((data as any).args)) || undefined,
+        status: data.status === 'error' ? 'failed' : data.status
+      })
+
       if (data.status === 'completed' || data.status === 'error') {
         setTimeout(() => {
           setAIOperation(null, 'idle')
@@ -125,7 +148,60 @@ export function BrowserShell() {
       removeStateListener()
       removeAIListener()
     }
-  }, [activeBrowserTabId, setBrowserUrl, setBrowserNavState, setAIOperation, syncTabs])
+  }, [
+    activeBrowserTabId,
+    setBrowserUrl,
+    setBrowserNavState,
+    setAIOperation,
+    syncTabs,
+    addBrowserOperation,
+    openBrowserPanel
+  ])
+
+  // Handle visibility changes to hide browser view when overlays are present
+  useEffect(() => {
+    if (!activeBrowserTabId || !window.codeall) return
+
+    // Function to check if any overlay is open
+    const checkOverlays = () => {
+      // Check for common overlay classes or attributes in React Portals
+      // This is a heuristic - we might need to be more specific based on UI library
+      const hasOverlay = document.querySelector(
+        '[data-radix-portal], .dialog-overlay, .modal-overlay, [role="dialog"]'
+      )
+
+      if (hasOverlay) {
+        // Temporarily hide browser view
+        window.codeall.invoke('browser:hide', { viewId: activeBrowserTabId })
+      } else {
+        // Restore browser view
+        if (browserRef.current) {
+          const rect = browserRef.current.getBoundingClientRect()
+          // Only show if we are actually in the browser tab and visible
+          if (rect.width > 0 && rect.height > 0) {
+            window.codeall.invoke('browser:show', {
+              viewId: activeBrowserTabId,
+              bounds: {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height
+              }
+            })
+          }
+        }
+      }
+    }
+
+    // Set up a mutation observer to watch for body changes (portals usually append to body)
+    const observer = new MutationObserver(checkOverlays)
+    observer.observe(document.body, { childList: true, subtree: true })
+
+    // Also check on mount
+    checkOverlays()
+
+    return () => observer.disconnect()
+  }, [activeBrowserTabId])
 
   // Handle Resize
   useEffect(() => {
@@ -292,27 +368,108 @@ export function BrowserShell() {
           onResetZoom={() => handleZoom(1)}
           zoomLevel={zoomLevel}
         />
+        <button
+          onClick={() => setShowLogs(!showLogs)}
+          className={cn(
+            'p-1.5 rounded-md transition-colors',
+            showLogs
+              ? 'text-blue-400 bg-blue-500/10'
+              : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800'
+          )}
+          title="Toggle Operation Logs"
+        >
+          <List size={16} />
+        </button>
       </div>
 
-      {/* Browser View Container */}
-      <div className="flex-1 relative bg-white" ref={browserRef}>
-        {/* Electron BrowserView will be overlayed here */}
-        <div className="absolute inset-0 flex items-center justify-center text-slate-400 bg-slate-100">
-          {!activeBrowserTabId ? (
-            <div className="flex flex-col items-center gap-4">
-              <span>No tabs open</span>
-              <button
-                onClick={handleNewTab}
-                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-              >
-                Open New Tab
-              </button>
-            </div>
-          ) : (
-            <span className="animate-pulse">Loading Browser View...</span>
-          )}
+      {/* Main Content Area: Browser + Logs */}
+      <div className="flex-1 flex relative overflow-hidden">
+        {/* Browser View Container */}
+        <div className="flex-1 relative bg-white" ref={browserRef}>
+          {/* Electron BrowserView will be overlayed here */}
+          <div className="absolute inset-0 flex items-center justify-center text-slate-400 bg-slate-100">
+            {!activeBrowserTabId ? (
+              <div className="flex flex-col items-center gap-4">
+                <span>No tabs open</span>
+                <button
+                  onClick={handleNewTab}
+                  className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                >
+                  Open New Tab
+                </button>
+              </div>
+            ) : (
+              <span className="animate-pulse">Loading Browser View...</span>
+            )}
+          </div>
         </div>
+
+        {/* Operation Logs Panel */}
+        {showLogs && (
+          <div className="w-80 border-l border-slate-800 bg-slate-950 flex flex-col">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-800">
+              <Clock size={14} className="text-slate-400" />
+              <span className="text-xs font-medium text-slate-300">Operation History</span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-2">
+              {browserOperationHistory.length === 0 ? (
+                <div className="text-xs text-slate-500 text-center py-8">
+                  No operations recorded
+                </div>
+              ) : (
+                browserOperationHistory.map(entry => <LogItem key={entry.id} entry={entry} />)
+              )}
+            </div>
+          </div>
+        )}
       </div>
+    </div>
+  )
+}
+
+function LogItem({ entry }: { entry: OperationLogEntry }) {
+  const getIcon = () => {
+    switch (entry.status) {
+      case 'running':
+        return <Loader2 size={14} className="text-blue-400 animate-spin" />
+      case 'completed':
+        return <CheckCircle2 size={14} className="text-emerald-400" />
+      case 'failed':
+        return <AlertCircle size={14} className="text-rose-400" />
+      default:
+        return <Clock size={14} className="text-slate-500" />
+    }
+  }
+
+  const formatTime = (ts: number) => {
+    return new Date(ts).toLocaleTimeString([], {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    })
+  }
+
+  return (
+    <div className="p-3 rounded bg-slate-900 border border-slate-800 flex flex-col gap-2 text-xs">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {getIcon()}
+          <span className="font-medium text-slate-200 capitalize">
+            {entry.action.replace('browser_', '').replace(/_/g, ' ')}
+          </span>
+        </div>
+        <span className="text-slate-500 text-[10px]">{formatTime(entry.timestamp)}</span>
+      </div>
+
+      {entry.target && (
+        <div
+          className="text-slate-400 font-mono bg-slate-950 p-1.5 rounded truncate"
+          title={entry.target}
+        >
+          {entry.target}
+        </div>
+      )}
     </div>
   )
 }

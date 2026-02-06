@@ -1,7 +1,27 @@
+import { BrowserWindow } from 'electron'
 import type { Tool, ToolExecutionContext, ToolExecutionResult } from '../tool.interface'
 import { allTools } from '../../ai-browser/tools'
 import { browserViewManager } from '../../browser-view.service'
 import type { BrowserTool, BrowserToolContext } from '../../ai-browser/types'
+
+// Helper function to notify renderer to open browser panel
+function notifyBrowserPanelShow(): void {
+  const windows = BrowserWindow.getAllWindows()
+  if (windows.length > 0) {
+    windows[0].webContents.send('browser:panel-show')
+  }
+}
+
+// Helper function to notify renderer of AI operation status
+function notifyAIOperation(
+  toolName: string,
+  status: 'running' | 'completed' | 'error'
+): void {
+  const windows = BrowserWindow.getAllWindows()
+  if (windows.length > 0) {
+    windows[0].webContents.send('browser:ai-operation', { toolName, status })
+  }
+}
 
 // Helper to convert BrowserTool to generic Tool
 function adaptBrowserTool(browserTool: BrowserTool): Tool {
@@ -45,8 +65,8 @@ function adaptBrowserTool(browserTool: BrowserTool): Tool {
       if (!viewState && browserTool.name === 'browser_navigate') {
         // Auto-create view for navigation if it doesn't exist
         await browserViewManager.create(viewId)
-        // We don't need to show it by default, but we could:
-        // browserViewManager.show(viewId, { x: 0, y: 0, width: 1000, height: 800 })
+        // Notify renderer to open browser panel when AI starts using browser
+        notifyBrowserPanelShow()
       } else if (!viewState) {
         return {
           success: false,
@@ -54,6 +74,12 @@ function adaptBrowserTool(browserTool: BrowserTool): Tool {
           error: `No active browser session found. Please use 'browser_navigate' first to start a session.`
         }
       }
+
+      // Always notify browser panel show when AI interacts with browser
+      notifyBrowserPanelShow()
+
+      // Notify AI operation started
+      notifyAIOperation(browserTool.name, 'running')
 
       const webContents = browserViewManager.getWebContents(viewId)
 
@@ -65,6 +91,9 @@ function adaptBrowserTool(browserTool: BrowserTool): Tool {
       try {
         const result = await browserTool.execute(params, browserContext)
 
+        // Notify AI operation completed or error
+        notifyAIOperation(browserTool.name, result.success ? 'completed' : 'error')
+
         return {
           success: result.success,
           output: result.data ? JSON.stringify(result.data, null, 2) : '',
@@ -75,6 +104,9 @@ function adaptBrowserTool(browserTool: BrowserTool): Tool {
           }
         }
       } catch (error) {
+        // Notify AI operation error
+        notifyAIOperation(browserTool.name, 'error')
+
         return {
           success: false,
           output: '',

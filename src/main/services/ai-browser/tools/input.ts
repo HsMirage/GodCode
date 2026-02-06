@@ -7,6 +7,89 @@
 
 import type { BrowserTool, ClickParams, FillParams } from '../types'
 
+// Helper function to highlight element before AI operation
+const highlightElementScript = (uid: string, color: string = '#3b82f6') => `
+  (function() {
+    const el = document.querySelector('[data-uid="${uid}"]');
+    if (!el) return false;
+
+    // Create highlight overlay
+    const highlight = document.createElement('div');
+    highlight.id = 'codeall-ai-highlight';
+    highlight.style.cssText = \`
+      position: absolute;
+      border: 3px solid ${color};
+      border-radius: 4px;
+      background: ${color}20;
+      pointer-events: none;
+      z-index: 999999;
+      transition: all 0.3s ease;
+      box-shadow: 0 0 10px ${color}80;
+    \`;
+
+    // Remove any existing highlight
+    const existing = document.getElementById('codeall-ai-highlight');
+    if (existing) existing.remove();
+
+    // Position the highlight
+    const rect = el.getBoundingClientRect();
+    highlight.style.left = (rect.left + window.scrollX - 3) + 'px';
+    highlight.style.top = (rect.top + window.scrollY - 3) + 'px';
+    highlight.style.width = (rect.width + 6) + 'px';
+    highlight.style.height = (rect.height + 6) + 'px';
+
+    document.body.appendChild(highlight);
+
+    // Auto-remove after animation
+    setTimeout(() => {
+      if (highlight.parentNode) {
+        highlight.style.opacity = '0';
+        setTimeout(() => highlight.remove(), 300);
+      }
+    }, 1500);
+
+    return true;
+  })();
+`
+
+const ELEMENT_LOOKUP_MAX_RETRIES = 2
+const ELEMENT_LOOKUP_RETRY_DELAY_MS = 500
+
+const ELEMENT_NOT_FOUND_ERROR_PREFIX = '__CODEALL_ELEMENT_NOT_FOUND__:'
+
+function makeElementNotFoundError(uid: string): Error {
+  return new Error(`${ELEMENT_NOT_FOUND_ERROR_PREFIX}${uid}`)
+}
+
+function isElementNotFoundError(uid: string, e: unknown): boolean {
+  return e instanceof Error && e.message === `${ELEMENT_NOT_FOUND_ERROR_PREFIX}${uid}`
+}
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = ELEMENT_LOOKUP_MAX_RETRIES,
+  delay = ELEMENT_LOOKUP_RETRY_DELAY_MS,
+  mapFinalError?: (e: unknown) => unknown
+): Promise<T> {
+  for (let i = 0; i <= maxRetries; i++) {
+    try {
+      return await fn()
+    } catch (e) {
+      if (i === maxRetries) {
+        throw mapFinalError ? mapFinalError(e) : e
+      }
+      console.error(`[ai-browser][input] Retry ${i + 1}/${maxRetries} after error:`, e)
+      await new Promise(r => setTimeout(r, delay))
+    }
+  }
+  throw new Error('Unreachable')
+}
+
+const getElementNotFoundErrorMessage = (
+  uid: string,
+  maxRetries = ELEMENT_LOOKUP_MAX_RETRIES
+): string => `Element with data-uid="${uid}" not found after ${maxRetries} retries`
+
 export const clickTool: BrowserTool = {
   name: 'browser_click',
   description: 'Click on an element identified by its UID from the accessibility tree snapshot',
@@ -33,29 +116,59 @@ export const clickTool: BrowserTool = {
     }
 
     try {
-      // CodeAll original implementation
-      const result = await webContents.executeJavaScript(`
-        const el = document.querySelector('[data-uid="${uid}"]')
-        if (el) {
-          el.click()
-          true
-        } else {
-          false
-        }
-      `)
+      const maxRetries = ELEMENT_LOOKUP_MAX_RETRIES
 
-      if (!result) {
-        return { success: false, error: 'Element not found with UID: ' + uid }
-      }
+      // Highlight the element before clicking (visual feedback for user)
+      await webContents.executeJavaScript(highlightElementScript(uid, '#22c55e'))
+
+      // Wait a brief moment so user can see the highlight
+      await new Promise(resolve => setTimeout(resolve, 200))
+
+      await withRetry(
+        async () => {
+          const result = await webContents.executeJavaScript(`
+            const el = document.querySelector('[data-uid="${uid}"]')
+            if (el) {
+              el.click()
+              true
+            } else {
+              false
+            }
+          `)
+
+          if (!result) {
+            throw makeElementNotFoundError(uid)
+          }
+
+          return result
+        },
+        maxRetries,
+        ELEMENT_LOOKUP_RETRY_DELAY_MS
+      )
 
       // Handle double click if requested
       if (dblClick) {
-        await webContents.executeJavaScript(`
-          const el = document.querySelector('[data-uid="${uid}"]')
-          if (el) {
-            el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-          }
-        `)
+        await withRetry(
+          async () => {
+            const result = await webContents.executeJavaScript(`
+              const el = document.querySelector('[data-uid="${uid}"]')
+              if (el) {
+                el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+                true
+              } else {
+                false
+              }
+            `)
+
+            if (!result) {
+              throw makeElementNotFoundError(uid)
+            }
+
+            return result
+          },
+          maxRetries,
+          ELEMENT_LOOKUP_RETRY_DELAY_MS
+        )
       }
 
       return {
@@ -68,6 +181,17 @@ export const clickTool: BrowserTool = {
         }
       }
     } catch (error) {
+      if (isElementNotFoundError(uid, error)) {
+        const friendlyError = getElementNotFoundErrorMessage(uid)
+        console.error('[ai-browser][browser_click] Element lookup failed after retries:', {
+          uid,
+          maxRetries: ELEMENT_LOOKUP_MAX_RETRIES,
+          error
+        })
+        return { success: false, error: friendlyError }
+      }
+
+      console.error('[ai-browser][browser_click] Unexpected error:', error)
       return { success: false, error: (error as Error).message }
     }
   }
@@ -95,23 +219,44 @@ export const hoverTool: BrowserTool = {
     }
 
     try {
-      // Basic implementation using JS since CDP might not be available in all contexts
-      const result = await webContents.executeJavaScript(`
-        const el = document.querySelector('[data-uid="${uid}"]')
-        if (el) {
-          el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-          true
-        } else {
-          false
-        }
-      `)
+      const maxRetries = ELEMENT_LOOKUP_MAX_RETRIES
 
-      if (!result) {
-        return { success: false, error: 'Element not found with UID: ' + uid }
-      }
+      // Basic implementation using JS since CDP might not be available in all contexts
+      await withRetry(
+        async () => {
+          const result = await webContents.executeJavaScript(`
+            const el = document.querySelector('[data-uid="${uid}"]')
+            if (el) {
+              el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+              true
+            } else {
+              false
+            }
+          `)
+
+          if (!result) {
+            throw makeElementNotFoundError(uid)
+          }
+
+          return result
+        },
+        maxRetries,
+        ELEMENT_LOOKUP_RETRY_DELAY_MS
+      )
 
       return { success: true, data: { message: 'Successfully hovered over the element' } }
     } catch (error) {
+      if (isElementNotFoundError(uid, error)) {
+        const friendlyError = getElementNotFoundErrorMessage(uid)
+        console.error('[ai-browser][browser_hover] Element lookup failed after retries:', {
+          uid,
+          maxRetries: ELEMENT_LOOKUP_MAX_RETRIES,
+          error
+        })
+        return { success: false, error: friendlyError }
+      }
+
+      console.error('[ai-browser][browser_hover] Unexpected error:', error)
       return { success: false, error: (error as Error).message }
     }
   }
@@ -143,49 +288,76 @@ export const fillTool: BrowserTool = {
     }
 
     try {
-      const result = await webContents.executeJavaScript(`
-        const el = document.querySelector('[data-uid="${uid}"]')
-        if (el) {
-          if (el.tagName.toLowerCase() === 'select' || el.role === 'combobox') {
-            // Handle select/combobox
-            // Try to find option with matching text or value
-            let found = false;
-            for (let i = 0; i < el.options.length; i++) {
-              if (el.options[i].text === ${JSON.stringify(value)} || el.options[i].value === ${JSON.stringify(value)}) {
-                el.selectedIndex = i;
-                found = true;
-                break;
-              }
-            }
-            if (!found) {
-               // Try to match partial text
-               for (let i = 0; i < el.options.length; i++) {
-                 if (el.options[i].text.includes(${JSON.stringify(value)})) {
-                   el.selectedIndex = i;
-                   found = true;
-                   break;
-                 }
-               }
-            }
-          } else {
-            // Handle regular input/textarea
-            el.value = ${JSON.stringify(value)}
-          }
-          
-          el.dispatchEvent(new Event('input', { bubbles: true }))
-          el.dispatchEvent(new Event('change', { bubbles: true }))
-          true
-        } else {
-          false
-        }
-      `)
+      const maxRetries = ELEMENT_LOOKUP_MAX_RETRIES
 
-      if (!result) {
-        return { success: false, error: 'Input element not found with UID: ' + uid }
-      }
+      // Highlight the element before filling (visual feedback for user)
+      await webContents.executeJavaScript(highlightElementScript(uid, '#f59e0b'))
+
+      // Wait a brief moment so user can see the highlight
+      await new Promise(resolve => setTimeout(resolve, 200))
+
+      await withRetry(
+        async () => {
+          const result = await webContents.executeJavaScript(`
+            const el = document.querySelector('[data-uid="${uid}"]')
+            if (el) {
+              if (el.tagName.toLowerCase() === 'select' || el.role === 'combobox') {
+                // Handle select/combobox
+                // Try to find option with matching text or value
+                let found = false;
+                for (let i = 0; i < el.options.length; i++) {
+                  if (el.options[i].text === ${JSON.stringify(value)} || el.options[i].value === ${JSON.stringify(value)}) {
+                    el.selectedIndex = i;
+                    found = true;
+                    break;
+                  }
+                }
+                if (!found) {
+                  // Try to match partial text
+                  for (let i = 0; i < el.options.length; i++) {
+                    if (el.options[i].text.includes(${JSON.stringify(value)})) {
+                      el.selectedIndex = i;
+                      found = true;
+                      break;
+                    }
+                  }
+                }
+              } else {
+                // Handle regular input/textarea
+                el.value = ${JSON.stringify(value)}
+              }
+              
+              el.dispatchEvent(new Event('input', { bubbles: true }))
+              el.dispatchEvent(new Event('change', { bubbles: true }))
+              true
+            } else {
+              false
+            }
+          `)
+
+          if (!result) {
+            throw makeElementNotFoundError(uid)
+          }
+
+          return result
+        },
+        maxRetries,
+        ELEMENT_LOOKUP_RETRY_DELAY_MS
+      )
 
       return { success: true, data: { uid, value } }
     } catch (error) {
+      if (isElementNotFoundError(uid, error)) {
+        const friendlyError = getElementNotFoundErrorMessage(uid)
+        console.error('[ai-browser][browser_fill] Element lookup failed after retries:', {
+          uid,
+          maxRetries: ELEMENT_LOOKUP_MAX_RETRIES,
+          error
+        })
+        return { success: false, error: friendlyError }
+      }
+
+      console.error('[ai-browser][browser_fill] Unexpected error:', error)
       return { success: false, error: (error as Error).message }
     }
   }

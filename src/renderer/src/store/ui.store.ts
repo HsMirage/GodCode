@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+export interface OperationLogEntry {
+  id: string
+  timestamp: number
+  action: string
+  target?: string
+  status: 'running' | 'completed' | 'failed'
+}
+
 interface UIState {
   showSidebar: boolean
   showArtifactRail: boolean
@@ -28,6 +36,10 @@ interface UIState {
   // Tab State
   browserTabs: Array<{ id: string; title: string; url: string; isLoading: boolean }>
   activeBrowserTabId: string | null
+
+  // Operation History
+  browserOperationHistory: OperationLogEntry[]
+  addBrowserOperation: (entry: OperationLogEntry) => void
 
   toggleSidebar: () => void
   toggleArtifactRail: () => void
@@ -87,6 +99,7 @@ export const useUIStore = create<UIState>()(
       aiOperationStatus: 'idle',
       browserTabs: [],
       activeBrowserTabId: null,
+      browserOperationHistory: [],
 
       toggleSidebar: () => set(state => ({ showSidebar: !state.showSidebar })),
       toggleArtifactRail: () => set(state => ({ showArtifactRail: !state.showArtifactRail })),
@@ -151,7 +164,11 @@ export const useUIStore = create<UIState>()(
           isAIOperating: status === 'running'
         }),
       setBrowserTabs: tabs => set({ browserTabs: tabs }),
-      setActiveBrowserTab: id => set({ activeBrowserTabId: id })
+      setActiveBrowserTab: id => set({ activeBrowserTabId: id }),
+      addBrowserOperation: entry =>
+        set(state => ({
+          browserOperationHistory: [entry, ...state.browserOperationHistory].slice(0, 100)
+        }))
     }),
     {
       name: 'codeall-ui-storage',
