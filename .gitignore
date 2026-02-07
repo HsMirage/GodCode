@@ -66,3 +66,4 @@ temp/
 # Test artifacts
 test-results/
 playwright-report/
+nul
