@@ -3,9 +3,16 @@ import { Atom, Paperclip, Send, X } from 'lucide-react'
 
 export interface MessageInputProps {
   isLoading?: boolean
-  onSend: (message: string) => void
+  onSend: (message: string) => boolean | Promise<boolean>
   placeholder?: string
   afterSend?: React.ReactNode
+  disabled?: boolean
+  disabledHint?: string
+  /**
+   * When changed, the input clears and focuses (used for switching sessions).
+   */
+  resetKey?: string | number | null
+  autoFocus?: boolean
 }
 
 const panelClass = [
@@ -61,7 +68,11 @@ export function MessageInput({
   isLoading = false,
   onSend,
   placeholder,
-  afterSend
+  afterSend,
+  disabled = false,
+  disabledHint,
+  resetKey,
+  autoFocus = false
 }: MessageInputProps) {
   const [value, setValue] = useState('')
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
@@ -82,12 +93,25 @@ export function MessageInput({
     resizeTextarea()
   }, [value])
 
+  useEffect(() => {
+    if (resetKey === undefined) return
+    setValue('')
+    setAttachments([])
+    if (!autoFocus) return
+
+    // Focus after the DOM updates.
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
+  }, [autoFocus, resetKey])
+
   const canSend = useMemo(() => {
+    if (disabled) return false
     if (isLoading) return false
     if (value.trim()) return true
     if (attachments.length > 0) return true
     return false
-  }, [attachments.length, isLoading, value])
+  }, [attachments.length, disabled, isLoading, value])
 
   const buildPayload = () => {
     const trimmed = value.trim()
@@ -111,13 +135,20 @@ export function MessageInput({
     return content
   }
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!canSend) return
     const payload = buildPayload()
     if (!payload) return
-    onSend(payload)
-    setValue('')
-    setAttachments([])
+
+    try {
+      const ok = await onSend(payload)
+      if (ok) {
+        setValue('')
+        setAttachments([])
+      }
+    } catch {
+      // Keep the input so user can retry.
+    }
   }
 
   const removeAttachment = (id: string) => {
@@ -125,11 +156,12 @@ export function MessageInput({
   }
 
   const onPickFiles = () => {
-    if (isLoading) return
+    if (isLoading || disabled) return
     fileInputRef.current?.click()
   }
 
   const onFilesSelected = async (files: FileList | null) => {
+    if (disabled) return
     if (!files) return
 
     const remainingSlots = Math.max(0, MAX_ATTACHMENTS - attachments.length)
@@ -180,6 +212,11 @@ export function MessageInput({
     <section className={panelClass}>
       <div className="flex items-stretch gap-3">
         <div className={['flex-1', inputShellClass].join(' ')}>
+          {disabled && (
+            <div className="px-4 pt-3 text-xs text-slate-500">
+              {disabledHint ?? '请先选择一个对话'}
+            </div>
+          )}
           {/* Attachments */}
           {attachments.length > 0 && (
             <div className="px-3 pt-3 flex flex-wrap gap-2">
@@ -211,15 +248,16 @@ export function MessageInput({
           <textarea
             ref={textareaRef}
             className={textareaClass}
+            // Keep placeholder stable; show disabled hint in the dedicated banner above.
             placeholder={placeholder ?? 'Type your message...'}
             rows={1}
             value={value}
-            disabled={isLoading}
+            disabled={isLoading || disabled}
             onChange={(event) => setValue(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
-                handleSend()
+                void handleSend()
               }
             }}
           />
@@ -241,7 +279,7 @@ export function MessageInput({
                 onClick={onPickFiles}
                 className={iconButtonBase}
                 title="添加文件"
-                disabled={isLoading || attachments.length >= MAX_ATTACHMENTS}
+                disabled={isLoading || disabled || attachments.length >= MAX_ATTACHMENTS}
               >
                 <Paperclip className="h-4 w-4" />
                 <span className="text-xs">文件</span>
@@ -260,7 +298,7 @@ export function MessageInput({
                     : ''
                 ].join(' ')}
                 title={thinkingEnabled ? '关闭深度思考' : '开启深度思考'}
-                disabled={isLoading}
+                disabled={isLoading || disabled}
               >
                 <Atom className="h-4 w-4" />
                 <span className="text-xs">深度思考</span>
@@ -269,7 +307,7 @@ export function MessageInput({
 
             <button
               type="button"
-              onClick={handleSend}
+              onClick={() => void handleSend()}
               disabled={!canSend}
               className={[
                 'h-9 w-9 flex items-center justify-center rounded-lg transition-all duration-150',

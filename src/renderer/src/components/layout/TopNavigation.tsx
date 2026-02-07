@@ -1,49 +1,11 @@
-import { useEffect, useState } from 'react'
-import { Plus, Box, Settings, ArrowLeft, X } from 'lucide-react'
+import { Box, Settings, ArrowLeft } from 'lucide-react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useDataStore } from '../../store/data.store'
-import { safeInvoke } from '../../api'
-import { cn } from '../../utils'
-import { getLastPathSegment } from '../../utils/path'
 
 export function TopNavigation() {
-  const { spaces, currentSpaceId, setCurrentSpace, fetchSpaces, createSpace } = useDataStore()
-  const [isCreating, setIsCreating] = useState(false)
-  const [newSpaceName, setNewSpaceName] = useState('')
-  const [pendingWorkDir, setPendingWorkDir] = useState<string | null>(null)
+  const { spaces, currentSpaceId } = useDataStore()
   const navigate = useNavigate()
   const location = useLocation()
-
-  useEffect(() => {
-    fetchSpaces()
-  }, [fetchSpaces])
-
-  const startCreateSpace = async () => {
-    const folder = await safeInvoke<string | null>('dialog:select-folder')
-    if (!folder) return
-    setPendingWorkDir(folder)
-    setNewSpaceName(getLastPathSegment(folder) || 'New Space')
-    setIsCreating(true)
-  }
-
-  const cancelCreateSpace = () => {
-    setIsCreating(false)
-    setNewSpaceName('')
-    setPendingWorkDir(null)
-  }
-
-  const handleCreateSpace = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!pendingWorkDir) return
-    if (!newSpaceName.trim()) return
-
-    try {
-      await createSpace(newSpaceName.trim(), pendingWorkDir)
-      cancelCreateSpace()
-    } catch (err) {
-      console.error(err)
-    }
-  }
 
   const isHomePage = location.pathname === '/'
   const handleBack = () => {
@@ -81,55 +43,25 @@ export function TopNavigation() {
         )}
       </button>
 
-      <div className="flex-1 flex items-center gap-2 overflow-x-auto no-scrollbar">
-        {spaces.map(space => (
-          <button
-            type="button"
-            key={space.id}
-            onClick={() => setCurrentSpace(space.id)}
-            className={cn(
-              'px-3 py-1.5 rounded-md text-sm transition-colors whitespace-nowrap',
-              currentSpaceId === space.id
-                ? 'bg-slate-800 text-slate-100 font-medium'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            )}
-          >
-            {space.name}
-          </button>
-        ))}
-
-        {isCreating ? (
-          <form onSubmit={handleCreateSpace} className="flex items-center gap-2">
-            <input
-              type="text"
-              value={newSpaceName}
-              onChange={e => setNewSpaceName(e.target.value)}
-              placeholder="Space name..."
-              className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-32"
-              onBlur={() => !newSpaceName && cancelCreateSpace()}
-            />
-            <button
-              type="button"
-              onClick={cancelCreateSpace}
-              className="p-1.5 rounded-md text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
-              title="Cancel"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </form>
-        ) : (
-          <button
-            type="button"
-            onClick={() => void startCreateSpace()}
-            className="p-1.5 rounded-md text-slate-500 hover:text-indigo-400 hover:bg-slate-900 transition-colors"
-            title="Create New Space"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-        )}
-      </div>
+      <div className="flex-1" />
 
       <div className="flex items-center gap-2 ml-auto">
+        <div
+          className="hidden md:flex items-center gap-2 text-[11px] text-slate-600"
+          title={window.location.href}
+        >
+          <span
+            className={[
+              'px-2 py-1 rounded-full border',
+              import.meta.env.DEV
+                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+                : 'border-slate-700/60 bg-slate-900/40 text-slate-500'
+            ].join(' ')}
+          >
+            {import.meta.env.DEV ? 'DEV' : 'PROD'}
+          </span>
+          <span className="font-mono">{window.location.protocol.replace(':', '')}</span>
+        </div>
         <button
           type="button"
           onClick={() => navigate('/settings')}

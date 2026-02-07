@@ -1,4 +1,4 @@
-import { Space } from '@prisma/client'
+import { Prisma, Space } from '@prisma/client'
 import { mkdirSync } from 'fs'
 import path from 'path'
 import { DatabaseService } from './database'
@@ -77,11 +77,17 @@ export async function getSpace(spaceId: string): Promise<Space | null> {
 export async function deleteSpace(spaceId: string): Promise<boolean> {
   try {
     const prisma = DatabaseService.getInstance().getClient()
-    await prisma.space.delete({
-      where: {
-        id: spaceId
-      }
+
+    // Manual cascade delete (schema relations do not specify onDelete: Cascade).
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.run.deleteMany({ where: { task: { session: { spaceId } } } })
+      await tx.task.deleteMany({ where: { session: { spaceId } } })
+      await tx.artifact.deleteMany({ where: { session: { spaceId } } })
+      await tx.message.deleteMany({ where: { session: { spaceId } } })
+      await tx.session.deleteMany({ where: { spaceId } })
+      await tx.space.delete({ where: { id: spaceId } })
     })
+
     console.log(`[Space] Deleted space: ${spaceId}`)
     return true
   } catch (error) {

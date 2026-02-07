@@ -24,13 +24,14 @@ beforeEach(() => {
     sessionsBySpaceId: {},
     currentSpaceId: null,
     currentSessionId: null,
+    selectedSessionIdBySpaceId: {},
     isLoading: false,
     error: null
   })
 })
 
 describe('useDataStore', () => {
-  it('fetchSpaces sets a default space and ensures a default session', async () => {
+  it('fetchSpaces sets a default space but does not auto-select a session', async () => {
     const spaces: Space[] = [
       {
         id: 'sp_1',
@@ -41,25 +42,12 @@ describe('useDataStore', () => {
       }
     ]
 
-    const defaultSession: Session = {
-      id: 'ses_1',
-      spaceId: 'sp_1',
-      title: 'New Chat',
-      status: 'active',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    }
-
     ;(safeInvoke as unknown as ReturnType<typeof vi.fn>).mockImplementation(
       async (channel: string, ...args: unknown[]) => {
         if (channel === 'space:list') return spaces
         if (channel === 'session:list') {
           expect(args[0]).toBe('sp_1')
           return []
-        }
-        if (channel === 'session:get-or-create-default') {
-          expect(args[0]).toEqual({ spaceId: 'sp_1' })
-          return defaultSession
         }
         throw new Error(`Unexpected channel: ${channel}`)
       }
@@ -69,8 +57,8 @@ describe('useDataStore', () => {
 
     const state = useDataStore.getState()
     expect(state.currentSpaceId).toBe('sp_1')
-    expect(state.currentSessionId).toBe('ses_1')
-    expect(state.sessionsBySpaceId['sp_1']?.[0]?.id).toBe('ses_1')
+    expect(state.currentSessionId).toBe(null)
+    expect(state.sessionsBySpaceId['sp_1']).toEqual([])
   })
 
   it('bumpSessionActivity moves the session to the top', () => {
@@ -101,4 +89,3 @@ describe('useDataStore', () => {
     expect(list?.[0]?.id).toBe('ses_2')
   })
 })
-

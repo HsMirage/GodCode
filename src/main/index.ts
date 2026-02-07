@@ -28,19 +28,24 @@ process.on('unhandledRejection', reason => {
   logger.error('[Main] Unhandled Rejection:', reason)
 })
 
-const gotTheLock = app.requestSingleInstanceLock()
+// In dev, allow multiple instances so the packaged app (or a stuck dev instance) doesn't block `pnpm dev`.
+// Packaged builds still enforce single-instance behavior.
+const enforceSingleInstance = app.isPackaged
+const gotTheLock = enforceSingleInstance ? app.requestSingleInstanceLock() : true
 
 if (!gotTheLock) {
   app.quit()
 } else {
   let mainWindow: BrowserWindow | null = null
 
-  app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
-    }
-  })
+  if (enforceSingleInstance) {
+    app.on('second-instance', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        mainWindow.focus()
+      }
+    })
+  }
 
   app.whenReady().then(async () => {
     logger.info('Application starting')
@@ -177,6 +182,18 @@ function createWindow() {
       console.warn(
         '[Main] No dev server URL detected; loading built renderer. Hot reload will NOT work in this mode.'
       )
+      // Fallback for cases where electron-vite didn't inject VITE_DEV_SERVER_URL (common on Windows tooling issues).
+      // `electron.vite.config.ts` pins the dev server to 5173 in dev.
+      const fallbackDevURL = 'http://localhost:5173'
+      console.warn('[Main] Dev fallback URL:', fallbackDevURL)
+      void mainWindow
+        .loadURL(fallbackDevURL)
+        .then(() => mainWindow.webContents.openDevTools())
+        .catch(() => {
+          console.warn('[Main] Dev fallback URL failed; loading built renderer instead.')
+          void mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
+        })
+      return mainWindow
     }
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }

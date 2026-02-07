@@ -93,7 +93,7 @@ export function ChatView() {
   }, [])
 
   const handleSend = async (content: string) => {
-    if (!sessionId || !window.codeall) return
+    if (!sessionId || !window.codeall) return false
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -112,9 +112,11 @@ export function ChatView() {
         sessionId,
         content
       })
+      return true
     } catch (error) {
       console.error('Failed to send message:', error)
       setIsLoading(false)
+      return true
     }
   }
 

@@ -19,14 +19,14 @@ type ViewMode = 'chat' | 'workflow' | 'agent'
 export function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
   const streamingContentRef = useRef('')
   const [streamingContent, setStreamingContent] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
   const { isOpen: canvasIsOpen } = useCanvasLifecycle()
   const { selectedAgentId } = useAgentStore()
   const { isTaskPanelOpen, isBrowserPanelOpen, toggleTaskPanel, toggleBrowserPanel } = useUIStore()
-  const { currentSpaceId, currentSessionId, ensureDefaultSession, bumpSessionActivity, fetchSpaces } =
-    useDataStore()
+  const { currentSpaceId, currentSessionId, bumpSessionActivity, fetchSpaces } = useDataStore()
   const activeSessionIdRef = useRef<string | null>(null)
   const messageScrollRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -50,7 +50,7 @@ export function ChatPage() {
     activeSessionIdRef.current = currentSessionId
   }, [currentSessionId])
 
-  // Ensure base data exists (spaces -> currentSpace -> currentSession)
+  // Ensure base data exists (spaces -> currentSpace).
   useEffect(() => {
     if (!window.codeall) {
       console.warn('[ChatPage] window.codeall not available, chat will be disabled')
@@ -61,9 +61,9 @@ export function ChatPage() {
       void fetchSpaces()
       return
     }
+  }, [currentSpaceId, fetchSpaces])
 
-    void ensureDefaultSession(currentSpaceId)
-  }, [currentSpaceId, ensureDefaultSession, fetchSpaces])
+  const chatDisabled = !currentSessionId
 
   // Load message history for the active session
   useEffect(() => {
@@ -72,6 +72,7 @@ export function ChatPage() {
     streamingContentRef.current = ''
     setStreamingContent('')
     setIsLoading(false)
+    setSendError(null)
 
     if (!currentSessionId) {
       setMessages([])
@@ -143,7 +144,7 @@ export function ChatPage() {
   }, [])
 
   const handleSend = async (content: string) => {
-    if (!currentSessionId || !currentSpaceId || !window.codeall) return
+    if (!currentSessionId || !currentSpaceId || !window.codeall) return false
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -153,6 +154,7 @@ export function ChatPage() {
     }
     setMessages(prev => [...prev, userMessage])
     setIsLoading(true)
+    setSendError(null)
     bumpSessionActivity(currentSpaceId, currentSessionId)
 
     streamingContentRef.current = ''
@@ -163,9 +165,32 @@ export function ChatPage() {
         sessionId: currentSessionId,
         content
       })
+      return true
     } catch (error) {
       console.error('Failed to send message:', error)
       setIsLoading(false)
+      setSendError(error instanceof Error ? error.message : String(error))
+
+      // Reconcile with DB state: message:send may have already persisted the user message
+      // before failing to produce an assistant reply.
+      try {
+        const existingMessages = await window.codeall.invoke('message:list', currentSessionId)
+        if (Array.isArray(existingMessages)) {
+          setMessages(
+            existingMessages
+              .filter(msg => msg.role !== 'system')
+              .map(msg => ({
+                id: msg.id,
+                role: msg.role as 'user' | 'assistant',
+                content: msg.content,
+                createdAt: msg.createdAt || new Date().toISOString()
+              }))
+          )
+        }
+      } catch {
+        // ignore
+      }
+      return true
     }
   }
 
@@ -251,12 +276,29 @@ export function ChatPage() {
               ref={messageScrollRef}
               className="flex-1 min-h-0 overflow-y-auto scroll-smooth pr-2 scrollbar-overlay"
             >
-              <MessageList
-                messages={displayMessages}
-                scrollContainerRef={messageScrollRef}
-                scrollKey={currentSessionId ?? undefined}
-              />
+              {chatDisabled ? (
+                <div className="h-full flex items-center justify-center">
+                  <div className="max-w-md text-center rounded-2xl border border-slate-800/70 bg-slate-950/60 p-6 backdrop-blur">
+                    <p className="text-slate-200 font-medium">未选择任何对话</p>
+                    <p className="mt-2 text-sm text-slate-500">
+                      请在左侧空间下选择一个已有对话，或点击“新对话”创建。
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <MessageList
+                  messages={displayMessages}
+                  scrollContainerRef={messageScrollRef}
+                  scrollKey={currentSessionId ?? undefined}
+                />
+              )}
             </div>
+
+            {sendError && (
+              <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                发送失败: {sendError}
+              </div>
+            )}
 
             {isLoading && (
               <div className="flex justify-center">
@@ -267,7 +309,11 @@ export function ChatPage() {
             <MessageInput
               isLoading={isLoading}
               onSend={handleSend}
+              disabled={chatDisabled}
+              disabledHint="请先选择一个对话"
               placeholder="输入消息... (Enter 发送 / Shift+Enter 换行)"
+              resetKey={currentSessionId}
+              autoFocus={!chatDisabled}
               afterSend={
                 <>
                   <button
@@ -306,7 +352,13 @@ export function ChatPage() {
 
         {viewMode === 'workflow' && (
           <div className="flex-1 overflow-hidden">
-            {currentSessionId && <WorkflowView sessionId={currentSessionId} />}
+            {currentSessionId ? (
+              <WorkflowView sessionId={currentSessionId} />
+            ) : (
+              <div className="h-full flex items-center justify-center">
+                <div className="text-center text-slate-500">请先在左侧选择或创建一个对话</div>
+              </div>
+            )}
           </div>
         )}
 

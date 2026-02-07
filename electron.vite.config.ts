@@ -64,6 +64,8 @@ export default defineConfig({
     // Windows file watching can miss updates depending on filesystem/editor.
     // Polling makes HMR reliable (at a small CPU cost) and fixes "changes not applied immediately" in dev.
     server: {
+      port: 5173,
+      strictPort: true,
       watch: {
         usePolling: true,
         interval: 200

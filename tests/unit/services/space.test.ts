@@ -22,6 +22,22 @@ vi.mock('fs', () => ({
 
 // Mock DatabaseService
 const prismaMock = {
+  $transaction: vi.fn(),
+  run: {
+    deleteMany: vi.fn()
+  },
+  task: {
+    deleteMany: vi.fn()
+  },
+  artifact: {
+    deleteMany: vi.fn()
+  },
+  message: {
+    deleteMany: vi.fn()
+  },
+  session: {
+    deleteMany: vi.fn()
+  },
   space: {
     create: vi.fn(),
     findMany: vi.fn(),
@@ -42,6 +58,8 @@ vi.mock('@/main/services/database', () => ({
 describe('SpaceService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+
+    prismaMock.$transaction.mockImplementation(async (fn: any) => fn(prismaMock))
   })
 
   afterEach(() => {
@@ -189,9 +207,8 @@ describe('SpaceService', () => {
 
       const result = await deleteSpace(spaceId)
 
-      expect(prismaMock.space.delete).toHaveBeenCalledWith({
-        where: { id: spaceId }
-      })
+      expect(prismaMock.$transaction).toHaveBeenCalledTimes(1)
+      expect(prismaMock.space.delete).toHaveBeenCalledWith({ where: { id: spaceId } })
       expect(result).toBe(true)
 
       // Note: Current implementation does not remove directories
@@ -200,7 +217,7 @@ describe('SpaceService', () => {
     it('should return false if deletion fails', async () => {
       const spaceId = '123'
       const error = new Error('DB Error')
-      prismaMock.space.delete.mockRejectedValue(error)
+      prismaMock.$transaction.mockRejectedValue(error)
 
       const result = await deleteSpace(spaceId)
 

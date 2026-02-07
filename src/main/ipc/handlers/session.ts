@@ -1,5 +1,5 @@
 import { IpcMainInvokeEvent } from 'electron'
-import { Session as PrismaSession } from '@prisma/client'
+import { Prisma, Session as PrismaSession } from '@prisma/client'
 import { DatabaseService } from '../../services/database'
 import { LoggerService } from '../../services/logger'
 
@@ -176,8 +176,13 @@ export async function handleSessionDelete(_event: IpcMainInvokeEvent, id: string
   const prisma = db.getClient()
 
   try {
-    await prisma.session.delete({
-      where: { id }
+    // Manual cascade delete. Relations are not configured with onDelete: Cascade in schema.prisma.
+    await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.run.deleteMany({ where: { task: { sessionId: id } } })
+      await tx.task.deleteMany({ where: { sessionId: id } })
+      await tx.artifact.deleteMany({ where: { sessionId: id } })
+      await tx.message.deleteMany({ where: { sessionId: id } })
+      await tx.session.delete({ where: { id } })
     })
   } catch (error) {
     logger.error('Failed to delete session', { id, error })
