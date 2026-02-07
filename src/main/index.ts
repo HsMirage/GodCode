@@ -9,6 +9,15 @@ import { processCleanupService } from './services/process-cleanup.service'
 import { browserViewManager } from './services/browser-view.service'
 import { logger } from '../shared/logger'
 
+// In dev, keep app data under the repo so it is easy to reset between runs.
+// This also prevents accidentally mixing dev/test data with the packaged app's userData.
+if (!app.isPackaged && process.env.CODEALL_E2E_TEST !== '1') {
+  const devUserData = path.join(process.cwd(), 'dev-data')
+  app.setPath('userData', devUserData)
+  // Helpful when debugging "data not reset" / "changes not applied" issues.
+  console.log('[Main] Dev userData:', devUserData)
+}
+
 process.on('uncaughtException', error => {
   console.error('[Main] Uncaught Exception:', error)
   logger.error('[Main] Uncaught Exception:', error)
@@ -164,6 +173,11 @@ function createWindow() {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
     mainWindow.webContents.openDevTools()
   } else {
+    if (!app.isPackaged) {
+      console.warn(
+        '[Main] No dev server URL detected; loading built renderer. Hot reload will NOT work in this mode.'
+      )
+    }
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
 

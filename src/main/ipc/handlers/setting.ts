@@ -1,4 +1,5 @@
 import { IpcMainInvokeEvent } from 'electron'
+import type { SystemSetting } from '@prisma/client'
 import { DatabaseService } from '../../services/database'
 
 /**
@@ -68,13 +69,10 @@ export async function handleSettingGetAll(
   await dbService.init()
   const prisma = dbService.getClient()
 
-  const settings = await prisma.systemSetting.findMany()
+  const settings: SystemSetting[] = await prisma.systemSetting.findMany()
 
-  return settings.reduce(
-    (acc, setting) => {
-      acc[setting.key] = setting.value
-      return acc
-    },
-    {} as Record<string, string | null>
-  )
+  return settings.reduce((acc: Record<string, string | null>, setting: SystemSetting) => {
+    acc[setting.key] = setting.value
+    return acc
+  }, {})
 }

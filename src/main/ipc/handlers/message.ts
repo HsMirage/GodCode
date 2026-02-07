@@ -54,13 +54,22 @@ export async function handleMessageSend(
   const router = new SmartRouter()
 
   const userMessage = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    return tx.message.create({
+    const created = await tx.message.create({
       data: {
         sessionId: input.sessionId,
         role: 'user',
         content: input.content
       }
     })
+
+    // Ensure the owning session is marked active recently so session lists reflect activity.
+    // Prisma @updatedAt will also update automatically on writes, but we make it explicit here.
+    await tx.session.update({
+      where: { id: input.sessionId },
+      data: { updatedAt: new Date() }
+    })
+
+    return created
   })
 
   const strategy = router.analyzeTask(input.content)
@@ -139,6 +148,7 @@ export async function handleMessageSend(
         }
 
         event.sender.send('message:stream-chunk', {
+          sessionId: input.sessionId,
           content: chunk.content,
           done: chunk.done
         })
@@ -153,6 +163,7 @@ export async function handleMessageSend(
       assistantContent = extractRouteOutput(routeResult)
 
       event.sender.send('message:stream-chunk', {
+        sessionId: input.sessionId,
         content: assistantContent,
         done: true
       })
@@ -164,13 +175,20 @@ export async function handleMessageSend(
   }
 
   const assistantMessage = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-    return tx.message.create({
+    const created = await tx.message.create({
       data: {
         sessionId: userMessage.sessionId,
         role: 'assistant',
         content: assistantContent
       }
     })
+
+    await tx.session.update({
+      where: { id: input.sessionId },
+      data: { updatedAt: new Date() }
+    })
+
+    return created
   })
 
   return assistantMessage

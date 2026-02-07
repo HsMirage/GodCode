@@ -245,7 +245,9 @@ describe('DelegateEngine', () => {
       // Force fallback to provider-level model lookup by returning a binding without apiKey/baseURL.
       bindingMocks.getCategoryModelConfig.mockResolvedValueOnce({
         model: 'claude-3-haiku-20240307',
-        temperature: 0.3
+        temperature: 0.3,
+        apiKey: '',
+        baseURL: ''
       })
       mocks.mockPrisma.model.findFirst.mockResolvedValue(null)
 

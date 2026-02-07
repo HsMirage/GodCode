@@ -2,10 +2,25 @@ declare module '../../types/domain' {
   export * from '../../../types/domain'
 }
 
-import type { Session, Message, Model, Task, Artifact } from '../../types/domain'
+import type { Space, Session, Message, Model, Task, Artifact } from '../../types/domain'
 
 interface CodeAllAPI {
   invoke(channel: 'ping'): Promise<string>
+
+  // Space
+  invoke(
+    channel: 'space:create',
+    data: { name: string; workDir: string }
+  ): Promise<{ success: boolean; data?: Space; error?: string }>
+  invoke(channel: 'space:list'): Promise<{ success: boolean; data?: Space[]; error?: string }>
+  invoke(
+    channel: 'space:update',
+    spaceId: string,
+    updates: { name?: string; workDir?: string }
+  ): Promise<{ success: boolean; data?: Space | null; error?: string }>
+  invoke(channel: 'space:get', spaceId: string): Promise<{ success: boolean; data?: Space | null; error?: string }>
+  invoke(channel: 'space:delete', spaceId: string): Promise<{ success: boolean; error?: string }>
+  invoke(channel: 'dialog:select-folder'): Promise<{ success: boolean; data?: string | null; error?: string }>
   invoke(
     channel: 'model:create',
     data: {
@@ -162,7 +177,7 @@ interface CodeAllAPI {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
   on(
     channel: 'message:stream-chunk',
-    callback: (data: { content: string; done: boolean }) => void
+    callback: (data: { sessionId?: string; content: string; done: boolean }) => void
   ): () => void
   on(
     channel: 'task:status-changed',

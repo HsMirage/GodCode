@@ -578,6 +578,150 @@ async function ensureBindingSchemaCompatibility(
   }
 }
 
+async function tableExists(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any,
+  table: string
+): Promise<boolean> {
+  if (typeof client?.$queryRawUnsafe !== 'function') return false
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const rows = await client.$queryRawUnsafe(
+    `SELECT 1
+     FROM information_schema.tables
+     WHERE table_schema = 'public'
+       AND table_name = '${table}'
+     LIMIT 1`
+  )
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  return Array.isArray(rows) && rows.length > 0
+}
+
+function splitSqlStatements(sql: string): string[] {
+  // Minimal SQL splitter for Prisma-generated migration.sql (PostgreSQL):
+  // - Supports ';' terminators
+  // - Tracks single/double quotes to avoid splitting inside strings/identifiers
+  // - Handles doubled quotes ('' / "") escape style
+  const out: string[] = []
+  let buf = ''
+  let inSingle = false
+  let inDouble = false
+
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i]
+    const next = i + 1 < sql.length ? sql[i + 1] : ''
+
+    if (!inDouble && ch === "'") {
+      if (inSingle && next === "'") {
+        buf += "''"
+        i++
+        continue
+      }
+      inSingle = !inSingle
+      buf += ch
+      continue
+    }
+
+    if (!inSingle && ch === '"') {
+      if (inDouble && next === '"') {
+        buf += '""'
+        i++
+        continue
+      }
+      inDouble = !inDouble
+      buf += ch
+      continue
+    }
+
+    if (!inSingle && !inDouble && ch === ';') {
+      const stmt = buf.trim()
+      if (stmt) out.push(stmt)
+      buf = ''
+      continue
+    }
+
+    buf += ch
+  }
+
+  const tail = buf.trim()
+  if (tail) out.push(tail)
+  return out
+}
+
+async function ensureBaseSchema(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any
+): Promise<void> {
+  const isTestEnv = process.env.NODE_ENV === 'test' || !!process.env.VITEST
+  if (isTestEnv) return
+
+  // On a fresh dev database, tables may not exist because we don't run Prisma migrations at runtime.
+  // In dev, we bootstrap the schema from prisma/migrations/**/migration.sql.
+  const hasSpace = await tableExists(client, 'Space')
+  const hasAgentBinding = await tableExists(client, 'AgentBinding')
+  if (hasSpace && hasAgentBinding) return
+
+  if (typeof client?.$executeRawUnsafe !== 'function' || typeof client?.$queryRawUnsafe !== 'function') {
+    throw new Error(
+      'Database schema is missing, and Prisma raw SQL APIs are not available. ' +
+        'Run `pnpm prisma migrate deploy` (preferred) or `pnpm prisma db push --force-reset` to initialize schema.'
+    )
+  }
+
+  const migrationsDir = path.join(process.cwd(), 'prisma', 'migrations')
+  if (!fs.existsSync(migrationsDir)) {
+    throw new Error(`Prisma migrations not found at ${migrationsDir}. Cannot bootstrap schema.`)
+  }
+
+  const dirs = fs
+    .readdirSync(migrationsDir, { withFileTypes: true })
+    .filter(d => d.isDirectory())
+    .map(d => d.name)
+    .sort()
+
+  if (dirs.length === 0) {
+    throw new Error(`No Prisma migrations found under ${migrationsDir}. Cannot bootstrap schema.`)
+  }
+
+  console.warn('[Database] Base schema missing. Bootstrapping from Prisma migrations...')
+
+  for (const dir of dirs) {
+    const migrationSqlPath = path.join(migrationsDir, dir, 'migration.sql')
+    if (!fs.existsSync(migrationSqlPath)) continue
+
+    console.warn('[Database] Applying migration:', dir)
+    const sql = fs.readFileSync(migrationSqlPath, 'utf-8')
+    const statements = splitSqlStatements(sql)
+
+    for (const stmt of statements) {
+      // Skip pure comments (Prisma migrations include "-- CreateTable" blocks).
+      const cleaned = stmt
+        .split(/\r?\n/)
+        .filter(line => !line.trim().startsWith('--'))
+        .join('\n')
+        .trim()
+      if (!cleaned) continue
+
+      try {
+        await client.$executeRawUnsafe(cleaned)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        // Make schema bootstrap idempotent enough for partial runs.
+        if (
+          /already exists/i.test(msg) ||
+          /duplicate/i.test(msg) ||
+          /violates unique constraint/i.test(msg)
+        ) {
+          continue
+        }
+        throw e
+      }
+    }
+  }
+
+  console.log('[Database] Base schema bootstrap complete')
+}
+
 async function getAvailablePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer()
@@ -866,7 +1010,10 @@ export class DatabaseService {
         : new Error(String(lastConnectError))
     }
 
-    console.log('[Database] Phase 6: Ensuring schema compatibility...')
+    console.log('[Database] Phase 6: Ensuring schema exists...')
+    await ensureBaseSchema(prismaClient)
+
+    console.log('[Database] Phase 7: Ensuring schema compatibility...')
     await ensureBindingSchemaCompatibility(prismaClient)
 
     this.isInitialized = true

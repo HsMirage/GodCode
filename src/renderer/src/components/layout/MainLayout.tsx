@@ -80,7 +80,7 @@ export function MainLayout() {
           )}
 
           {/* Chat Panel - 主对话界面 */}
-          <ResizablePanel id="chat" minSize="320px">
+          <ResizablePanel id="chat" minSize="420px">
             <ChatPage />
           </ResizablePanel>
 

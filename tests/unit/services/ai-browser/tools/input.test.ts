@@ -53,8 +53,8 @@ describe('Input Tools', () => {
       const result = await clickTool.execute({ uid: '999' }, mockContext as any)
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('999')
-      expect(result.error.toLowerCase()).toContain('not found')
+      expect(result.error ?? '').toContain('999')
+      expect((result.error ?? '').toLowerCase()).toContain('not found')
     })
   })
 
@@ -101,8 +101,8 @@ describe('Input Tools', () => {
       )
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('Partially filled')
-      expect(result.error).toContain('JS Error')
+      expect(result.error ?? '').toContain('Partially filled')
+      expect(result.error ?? '').toContain('JS Error')
     })
   })
 
@@ -122,7 +122,7 @@ describe('Input Tools', () => {
       const result = await dragTool.execute({ from_uid: 'a', to_uid: 'b' }, noDragContext as any)
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('not available')
+      expect(result.error ?? '').toContain('not available')
     })
   })
 
@@ -161,7 +161,7 @@ describe('Input Tools', () => {
       )
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('requires CDP access')
+      expect(result.error ?? '').toContain('requires CDP access')
     })
   })
 
@@ -180,8 +180,8 @@ describe('Input Tools', () => {
       const result = await hoverTool.execute({ uid: '999' }, mockContext as any)
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('999')
-      expect(result.error.toLowerCase()).toContain('not found')
+      expect(result.error ?? '').toContain('999')
+      expect((result.error ?? '').toLowerCase()).toContain('not found')
     })
   })
 })

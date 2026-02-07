@@ -85,7 +85,7 @@ describe('AI Browser Tools', () => {
 
       expect(browserViewManager.navigate).not.toHaveBeenCalled()
       expect(result.success).toBe(false)
-      expect(result.error).toContain('Local file access forbidden')
+      expect(result.error ?? '').toContain('Local file access forbidden')
     })
 
     it('should handle navigation errors', async () => {
@@ -94,7 +94,7 @@ describe('AI Browser Tools', () => {
       const result = await navigateTool.execute({ url: 'https://fail.com' }, context)
 
       expect(result.success).toBe(false)
-      expect(result.error).toBe('Network error')
+      expect(result.error ?? '').toBe('Network error')
     })
   })
 
@@ -104,7 +104,7 @@ describe('AI Browser Tools', () => {
       const badContext = { viewId: 'id' }
       const result = await clickTool.execute({ uid: 'uid-123' }, badContext as any)
       expect(result.success).toBe(false)
-      expect(result.error).toContain('No active WebContents')
+      expect(result.error ?? '').toContain('No active WebContents')
     })
 
     it('should execute click script and return success', async () => {
@@ -113,7 +113,9 @@ describe('AI Browser Tools', () => {
       const result = await clickTool.execute({ uid: 'uid-123' }, context)
 
       expect(mockWebContents.executeJavaScript).toHaveBeenCalled()
-      const scripts = mockWebContents.executeJavaScript.mock.calls.map(c => String(c[0]))
+      const scripts: string[] = mockWebContents.executeJavaScript.mock.calls.map(
+        (call: unknown[]) => String(call[0])
+      )
       expect(scripts.some(s => s.includes('uid-123'))).toBe(true)
       // Implementation highlights first, then clicks.
       expect(scripts.some(s => s.includes('el.click()'))).toBe(true)
@@ -129,8 +131,8 @@ describe('AI Browser Tools', () => {
       const result = await clickTool.execute({ uid: 'uid-ghost' }, context)
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('uid-ghost')
-      expect(result.error.toLowerCase()).toContain('not found')
+      expect(result.error ?? '').toContain('uid-ghost')
+      expect((result.error ?? '').toLowerCase()).toContain('not found')
     })
 
     it('should handle execution errors', async () => {
@@ -139,7 +141,7 @@ describe('AI Browser Tools', () => {
       const result = await clickTool.execute({ uid: 'uid-bad' }, context)
 
       expect(result.success).toBe(false)
-      expect(result.error).toBe('DOM Error')
+      expect(result.error ?? '').toBe('DOM Error')
     })
   })
 
@@ -155,7 +157,9 @@ describe('AI Browser Tools', () => {
 
       const result = await fillTool.execute({ uid: 'uid-input', value: 'secret' }, context)
 
-      const scripts = mockWebContents.executeJavaScript.mock.calls.map(c => String(c[0]))
+      const scripts: string[] = mockWebContents.executeJavaScript.mock.calls.map(
+        (call: unknown[]) => String(call[0])
+      )
       expect(scripts.some(s => s.includes('uid-input'))).toBe(true)
       expect(scripts.some(s => s.includes('"secret"'))).toBe(true) // JSON stringified
       expect(scripts.some(s => s.includes('el.value ='))).toBe(true)
@@ -170,8 +174,8 @@ describe('AI Browser Tools', () => {
       const result = await fillTool.execute({ uid: 'uid-missing', value: 'val' }, context)
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('uid-missing')
-      expect(result.error.toLowerCase()).toContain('not found')
+      expect(result.error ?? '').toContain('uid-missing')
+      expect((result.error ?? '').toLowerCase()).toContain('not found')
     })
   })
 
@@ -198,7 +202,7 @@ describe('AI Browser Tools', () => {
       const result = await snapshotTool.execute({}, context)
 
       expect(result.success).toBe(false)
-      expect(result.error).toBe('Script failed')
+      expect(result.error ?? '').toBe('Script failed')
     })
   })
 
@@ -224,7 +228,7 @@ describe('AI Browser Tools', () => {
       const result = await screenshotTool.execute({}, context)
 
       expect(result.success).toBe(false)
-      expect(result.error).toBe('Capture failed')
+      expect(result.error ?? '').toBe('Capture failed')
     })
   })
 
@@ -248,7 +252,7 @@ describe('AI Browser Tools', () => {
       const result = await extractTool.execute({}, context)
 
       expect(result.success).toBe(false)
-      expect(result.error).toBe('Extract failed')
+      expect(result.error ?? '').toBe('Extract failed')
     })
   })
 })

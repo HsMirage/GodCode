@@ -61,6 +61,14 @@ export default defineConfig({
         '@types': resolve(__dirname, 'src/types')
       }
     },
+    // Windows file watching can miss updates depending on filesystem/editor.
+    // Polling makes HMR reliable (at a small CPU cost) and fixes "changes not applied immediately" in dev.
+    server: {
+      watch: {
+        usePolling: true,
+        interval: 200
+      }
+    },
     build: {
       cssCodeSplit: false,
       modulePreload: {

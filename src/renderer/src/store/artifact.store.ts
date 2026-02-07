@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { safeInvoke } from '../api'
-import type { Artifact, Session, Space } from '../types/domain'
+import type { Artifact, Space } from '../types/domain'
 
 interface ArtifactState {
   artifacts: Artifact[]
@@ -63,11 +63,11 @@ export const useArtifactStore = create<ArtifactState>((set, get) => ({
   clearSelection: () => set({ selectedArtifact: null }),
 
   downloadArtifact: async (artifact: Artifact, spaceId: string) => {
-    if (!window.codeall) return
     try {
-      const space = (await window.codeall.invoke('space:get', spaceId)) as Space
+      const space = await safeInvoke<Space | null>('space:get', spaceId)
       if (!space || !space.workDir) throw new Error('Space not found')
 
+      if (!window.codeall) return
       await window.codeall.invoke('artifact:download', artifact.id, space.workDir)
     } catch (err) {
       console.error('Failed to download artifact:', err)

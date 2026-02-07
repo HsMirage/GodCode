@@ -1,4 +1,6 @@
 import { ipcMain, dialog } from 'electron'
+import os from 'os'
+import path from 'path'
 import {
   createSpace,
   listSpaces,
@@ -64,6 +66,13 @@ export function registerSpaceHandlers(): void {
   // 6. dialog:select-folder (for directory picker)
   ipcMain.handle('dialog:select-folder', async () => {
     try {
+      // Avoid native OS dialogs in E2E runs.
+      if (process.env.CODEALL_E2E_TEST === '1') {
+        const e2eDir =
+          process.env.CODEALL_E2E_SPACE_DIR ?? path.join(os.tmpdir(), 'codeall-e2e-space')
+        return { success: true, data: e2eDir }
+      }
+
       const result = await dialog.showOpenDialog({
         title: 'Select Space Location',
         properties: ['openDirectory', 'createDirectory'],

@@ -122,12 +122,18 @@ export async function handleSessionGet(
   return session
 }
 
-export async function handleSessionList(_event: IpcMainInvokeEvent): Promise<PrismaSession[]> {
+export async function handleSessionList(
+  _event: IpcMainInvokeEvent,
+  spaceId?: string
+): Promise<PrismaSession[]> {
   // In E2E test environment, database may not be initialized
   if (process.env.CODEALL_E2E_TEST === '1') {
     try {
       const prisma = DatabaseService.getInstance().getClient()
-      const sessions = await prisma.session.findMany({ orderBy: { updatedAt: 'desc' } })
+      const sessions = await prisma.session.findMany({
+        where: { status: 'active', ...(spaceId ? { spaceId } : {}) },
+        orderBy: { updatedAt: 'desc' }
+      })
       return sessions
     } catch {
       // Return empty array if database not initialized in test environment
@@ -135,7 +141,10 @@ export async function handleSessionList(_event: IpcMainInvokeEvent): Promise<Pri
     }
   }
   const prisma = DatabaseService.getInstance().getClient()
-  const sessions = await prisma.session.findMany({ orderBy: { updatedAt: 'desc' } })
+  const sessions = await prisma.session.findMany({
+    where: { status: 'active', ...(spaceId ? { spaceId } : {}) },
+    orderBy: { updatedAt: 'desc' }
+  })
   return sessions
 }
 

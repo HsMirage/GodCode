@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Plus, Box, Settings, ArrowLeft } from 'lucide-react'
+import { Plus, Box, Settings, ArrowLeft, X } from 'lucide-react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useDataStore } from '../../store/data.store'
+import { safeInvoke } from '../../api'
 import { cn } from '../../utils'
+import { getLastPathSegment } from '../../utils/path'
 
 export function TopNavigation() {
   const { spaces, currentSpaceId, setCurrentSpace, fetchSpaces, createSpace } = useDataStore()
   const [isCreating, setIsCreating] = useState(false)
   const [newSpaceName, setNewSpaceName] = useState('')
+  const [pendingWorkDir, setPendingWorkDir] = useState<string | null>(null)
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -15,14 +18,28 @@ export function TopNavigation() {
     fetchSpaces()
   }, [fetchSpaces])
 
+  const startCreateSpace = async () => {
+    const folder = await safeInvoke<string | null>('dialog:select-folder')
+    if (!folder) return
+    setPendingWorkDir(folder)
+    setNewSpaceName(getLastPathSegment(folder) || 'New Space')
+    setIsCreating(true)
+  }
+
+  const cancelCreateSpace = () => {
+    setIsCreating(false)
+    setNewSpaceName('')
+    setPendingWorkDir(null)
+  }
+
   const handleCreateSpace = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!pendingWorkDir) return
     if (!newSpaceName.trim()) return
 
     try {
-      await createSpace(newSpaceName, `/tmp/${newSpaceName}`)
-      setNewSpaceName('')
-      setIsCreating(false)
+      await createSpace(newSpaceName.trim(), pendingWorkDir)
+      cancelCreateSpace()
     } catch (err) {
       console.error(err)
     }
@@ -57,6 +74,11 @@ export function TopNavigation() {
       >
         <Box className="w-5 h-5 text-indigo-500" />
         <span>CodeAll</span>
+        {currentSpaceId && (
+          <span className="ml-2 text-xs font-normal text-slate-500">
+            / {spaces.find(s => s.id === currentSpaceId)?.name ?? 'Space'}
+          </span>
+        )}
       </button>
 
       <div className="flex-1 flex items-center gap-2 overflow-x-auto no-scrollbar">
@@ -84,13 +106,21 @@ export function TopNavigation() {
               onChange={e => setNewSpaceName(e.target.value)}
               placeholder="Space name..."
               className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-indigo-500 w-32"
-              onBlur={() => !newSpaceName && setIsCreating(false)}
+              onBlur={() => !newSpaceName && cancelCreateSpace()}
             />
+            <button
+              type="button"
+              onClick={cancelCreateSpace}
+              className="p-1.5 rounded-md text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
+              title="Cancel"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </form>
         ) : (
           <button
             type="button"
-            onClick={() => setIsCreating(true)}
+            onClick={() => void startCreateSpace()}
             className="p-1.5 rounded-md text-slate-500 hover:text-indigo-400 hover:bg-slate-900 transition-colors"
             title="Create New Space"
           >

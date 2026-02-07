@@ -257,7 +257,7 @@ describe('Browser Tools Integration', () => {
           mockContext
         )
         expect(result.success).toBe(false)
-        expect(result.error).toContain('Local file access forbidden')
+        expect(result.error ?? '').toContain('Local file access forbidden')
       })
     })
 
@@ -267,8 +267,8 @@ describe('Browser Tools Integration', () => {
         mocks.webContents.executeJavaScript.mockResolvedValue(false)
         const result = await toolExecutor.execute('browser_click', { uid: 'uid-999' }, mockContext)
         expect(result.success).toBe(false)
-        expect(result.error).toContain('uid-999')
-        expect(result.error.toLowerCase()).toContain('not found')
+        expect(result.error ?? '').toContain('uid-999')
+        expect((result.error ?? '').toLowerCase()).toContain('not found')
       })
     })
 

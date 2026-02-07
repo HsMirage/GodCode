@@ -12,6 +12,7 @@ export function ChatView() {
 
   const streamingContentRef = useRef('')
   const [streamingContent, setStreamingContent] = useState('')
+  const messageScrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     // Skip if not running in Electron environment
@@ -130,13 +131,20 @@ export function ChatView() {
 
   return (
     <div className="h-full flex flex-col bg-slate-950">
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+      <div
+        ref={messageScrollRef}
+        className="flex-1 min-h-0 overflow-y-auto scroll-smooth p-4 scrollbar-overlay"
+      >
         {sessionId && (
           <div className="mb-2">
             <SessionResumeIndicator sessionId={sessionId} />
           </div>
         )}
-        <MessageList messages={displayMessages} />
+        <MessageList
+          messages={displayMessages}
+          scrollContainerRef={messageScrollRef}
+          scrollKey={sessionId ?? undefined}
+        />
 
         {isLoading && !streamingContent && (
           <div className="flex justify-center">

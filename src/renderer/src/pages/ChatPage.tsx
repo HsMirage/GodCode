@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { MessageList } from '../components/chat/MessageList'
 import { MessageInput } from '../components/chat/MessageInput'
 import { TypingIndicator } from '../components/chat/TypingIndicator'
@@ -12,39 +12,77 @@ import { AgentWorkViewer } from '../components/agents/AgentWorkViewer'
 import { useAgentStore } from '../store/agent.store'
 import { useUIStore } from '../store/ui.store'
 import { Globe, ListTodo } from 'lucide-react'
+import { useDataStore } from '../store/data.store'
 
 type ViewMode = 'chat' | 'workflow' | 'agent'
 
 export function ChatPage() {
-  const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const streamingContentRef = useRef('')
   const [streamingContent, setStreamingContent] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
   const { isOpen: canvasIsOpen } = useCanvasLifecycle()
   const { selectedAgentId } = useAgentStore()
   const { isTaskPanelOpen, isBrowserPanelOpen, toggleTaskPanel, toggleBrowserPanel } = useUIStore()
+  const { currentSpaceId, currentSessionId, ensureDefaultSession, bumpSessionActivity, fetchSpaces } =
+    useDataStore()
+  const activeSessionIdRef = useRef<string | null>(null)
+  const messageScrollRef = useRef<HTMLDivElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [isNarrow, setIsNarrow] = useState(false)
 
+  // When ContentCanvas is visible, avoid shrinking the chat column too far.
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+
+    const ro = new ResizeObserver(entries => {
+      const width = entries[0]?.contentRect?.width ?? el.clientWidth
+      setIsNarrow(width < 980)
+    })
+
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  useEffect(() => {
+    activeSessionIdRef.current = currentSessionId
+  }, [currentSessionId])
+
+  // Ensure base data exists (spaces -> currentSpace -> currentSession)
   useEffect(() => {
     if (!window.codeall) {
       console.warn('[ChatPage] window.codeall not available, chat will be disabled')
       return
     }
 
-    const initializeSession = async () => {
+    if (!currentSpaceId) {
+      void fetchSpaces()
+      return
+    }
+
+    void ensureDefaultSession(currentSpaceId)
+  }, [currentSpaceId, ensureDefaultSession, fetchSpaces])
+
+  // Load message history for the active session
+  useEffect(() => {
+    if (!window.codeall) return
+
+    streamingContentRef.current = ''
+    setStreamingContent('')
+    setIsLoading(false)
+
+    if (!currentSessionId) {
+      setMessages([])
+      return
+    }
+
+    const load = async () => {
       try {
-        const session = await window.codeall.invoke('session:get-or-create-default')
-        if (!session || typeof session !== 'object' || !('id' in session)) {
-          console.warn('No session available, chat will be disabled')
-          return
-        }
-
-        const id = (session as { id: string }).id
-        setSessionId(id)
-
-        const existingMessages = await window.codeall.invoke('message:list', id)
+        const existingMessages = await window.codeall.invoke('message:list', currentSessionId)
         if (!Array.isArray(existingMessages)) {
-          console.warn('No messages available')
+          setMessages([])
           return
         }
 
@@ -59,41 +97,53 @@ export function ChatPage() {
             }))
         )
       } catch (error) {
-        console.error('Failed to initialize session:', error)
+        console.error('Failed to load messages:', error)
       }
     }
 
-    initializeSession()
-  }, [])
+    void load()
+  }, [currentSessionId])
 
   useEffect(() => {
     if (!window.codeall) return
 
-    const removeListener = window.codeall.on('message:stream-chunk', ({ content, done }) => {
+    const removeListener = window.codeall.on('message:stream-chunk', payload => {
+      const { content, done, sessionId } = payload as {
+        content: string
+        done: boolean
+        sessionId?: string
+      }
+
+      // Ignore chunks for sessions that aren't currently visible.
+      if (sessionId && sessionId !== activeSessionIdRef.current) return
+
       if (done) {
+        const finalContent = streamingContentRef.current + content
         setMessages(prev => [
           ...prev,
           {
             id: Date.now().toString(),
             role: 'assistant',
-            content: streamingContent + content,
+            content: finalContent,
             createdAt: new Date().toISOString()
           }
         ])
+        streamingContentRef.current = ''
         setStreamingContent('')
         setIsLoading(false)
       } else {
-        setStreamingContent(prev => prev + content)
+        streamingContentRef.current += content
+        setStreamingContent(streamingContentRef.current)
       }
     })
 
     return () => {
       removeListener()
     }
-  }, [streamingContent])
+  }, [])
 
   const handleSend = async (content: string) => {
-    if (!sessionId || !window.codeall) return
+    if (!currentSessionId || !currentSpaceId || !window.codeall) return
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -103,10 +153,14 @@ export function ChatPage() {
     }
     setMessages(prev => [...prev, userMessage])
     setIsLoading(true)
+    bumpSessionActivity(currentSpaceId, currentSessionId)
+
+    streamingContentRef.current = ''
+    setStreamingContent('')
 
     try {
       await window.codeall.invoke('message:send', {
-        sessionId,
+        sessionId: currentSessionId,
         content
       })
     } catch (error) {
@@ -127,11 +181,16 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex h-full">
+    <div
+      ref={rootRef}
+      className={['h-full', canvasIsOpen && !isNarrow ? 'flex' : 'flex flex-col'].join(' ')}
+    >
       <div
-        className={`flex flex-col gap-4 px-6 py-4 transition-all ${
-          canvasIsOpen ? 'w-2/3' : 'flex-1'
-        }`}
+        className={[
+          'flex flex-col gap-4 py-4 transition-all',
+          isNarrow ? 'px-4' : 'px-6',
+          canvasIsOpen && !isNarrow ? 'flex-[2] min-w-0' : 'flex-1 min-w-0'
+        ].join(' ')}
       >
         <header className="flex items-center justify-between mb-2">
           <div>
@@ -182,14 +241,21 @@ export function ChatPage() {
 
         {viewMode === 'chat' && (
           <>
-            {sessionId && (
+            {currentSessionId && (
               <div className="mb-2">
-                <SessionResumeIndicator sessionId={sessionId} />
+                <SessionResumeIndicator sessionId={currentSessionId} />
               </div>
             )}
 
-            <div className="flex-1 overflow-hidden">
-              <MessageList messages={displayMessages} />
+            <div
+              ref={messageScrollRef}
+              className="flex-1 min-h-0 overflow-y-auto scroll-smooth pr-2 scrollbar-overlay"
+            >
+              <MessageList
+                messages={displayMessages}
+                scrollContainerRef={messageScrollRef}
+                scrollKey={currentSessionId ?? undefined}
+              />
             </div>
 
             {isLoading && (
@@ -208,7 +274,7 @@ export function ChatPage() {
                     type="button"
                     onClick={toggleTaskPanel}
                     className={[
-                      'flex h-12 w-12 items-center justify-center rounded-2xl border transition',
+                      'flex h-10 w-10 items-center justify-center rounded-2xl border transition',
                       isTaskPanelOpen
                         ? 'border-indigo-400/50 bg-indigo-500/25 text-indigo-100'
                         : 'border-slate-700/60 bg-slate-900/40 text-slate-400 hover:text-indigo-200 hover:border-indigo-400/40'
@@ -216,13 +282,13 @@ export function ChatPage() {
                     title={isTaskPanelOpen ? '关闭任务面板' : '打开任务面板'}
                     aria-label="Toggle task panel"
                   >
-                    <ListTodo className="h-5 w-5" />
+                    <ListTodo className="h-4 w-4" />
                   </button>
                   <button
                     type="button"
                     onClick={toggleBrowserPanel}
                     className={[
-                      'flex h-12 w-12 items-center justify-center rounded-2xl border transition',
+                      'flex h-10 w-10 items-center justify-center rounded-2xl border transition',
                       isBrowserPanelOpen
                         ? 'border-indigo-400/50 bg-indigo-500/25 text-indigo-100'
                         : 'border-slate-700/60 bg-slate-900/40 text-slate-400 hover:text-indigo-200 hover:border-indigo-400/40'
@@ -230,7 +296,7 @@ export function ChatPage() {
                     title={isBrowserPanelOpen ? '关闭浏览器' : '打开浏览器'}
                     aria-label="Toggle browser panel"
                   >
-                    <Globe className="h-5 w-5" />
+                    <Globe className="h-4 w-4" />
                   </button>
                 </>
               }
@@ -239,7 +305,9 @@ export function ChatPage() {
         )}
 
         {viewMode === 'workflow' && (
-          <div className="flex-1 overflow-hidden">{sessionId && <WorkflowView sessionId={sessionId} />}</div>
+          <div className="flex-1 overflow-hidden">
+            {currentSessionId && <WorkflowView sessionId={currentSessionId} />}
+          </div>
         )}
 
         {viewMode === 'agent' && (
@@ -259,7 +327,12 @@ export function ChatPage() {
       </div>
 
       {canvasIsOpen && (
-        <div className="w-1/3">
+        <div
+          className={[
+            canvasIsOpen && !isNarrow ? 'flex-[1] min-w-0' : 'flex-none border-t border-slate-800/60',
+            isNarrow ? 'h-[44%] min-h-[260px]' : ''
+          ].join(' ')}
+        >
           <ContentCanvas />
         </div>
       )}

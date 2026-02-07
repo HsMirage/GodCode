@@ -16,6 +16,7 @@ import {
   FileCode
 } from 'lucide-react'
 import { useUIStore } from '../../store/ui.store'
+import { useDataStore } from '../../store/data.store'
 import { ArtifactList } from '../artifact/ArtifactList'
 import { DiffViewer } from '../artifact/DiffViewer'
 import type { Task } from '@/types/domain'
@@ -101,9 +102,9 @@ function TaskCard({ task }: TaskCardProps) {
 
 export function TaskPanel() {
   const { closeTaskPanel } = useUIStore()
+  const { currentSessionId } = useDataStore()
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
-  const [sessionId, setSessionId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabType>('tasks')
   const [diffViewerState, setDiffViewerState] = useState<{
     artifactId: string
@@ -111,10 +112,10 @@ export function TaskPanel() {
   } | null>(null)
 
   const loadTasks = useCallback(async () => {
-    if (!window.codeall || !sessionId) return
+    if (!window.codeall || !currentSessionId) return
 
     try {
-      const taskList = (await window.codeall.invoke('task:list', sessionId)) as Task[]
+      const taskList = (await window.codeall.invoke('task:list', currentSessionId)) as Task[]
       setTasks(
         taskList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       )
@@ -123,34 +124,17 @@ export function TaskPanel() {
     } finally {
       setLoading(false)
     }
-  }, [sessionId])
+  }, [currentSessionId])
 
   useEffect(() => {
-    const initSession = async () => {
-      if (!window.codeall) {
-        setLoading(false)
-        return
-      }
-
-      try {
-        const session = await window.codeall.invoke('session:get-or-create-default')
-        if (session && typeof session === 'object' && 'id' in session) {
-          setSessionId((session as { id: string }).id)
-        }
-      } catch (error) {
-        console.error('Failed to get session:', error)
-        setLoading(false)
-      }
-    }
-
-    initSession()
-  }, [])
-
-  useEffect(() => {
-    if (sessionId) {
+    if (currentSessionId) {
+      setLoading(true)
       loadTasks()
+    } else {
+      setTasks([])
+      setLoading(false)
     }
-  }, [sessionId, loadTasks])
+  }, [currentSessionId, loadTasks])
 
   // 监听任务更新事件
   useEffect(() => {
@@ -294,7 +278,7 @@ export function TaskPanel() {
           )
         ) : (
           // Artifacts Tab
-          <ArtifactList sessionId={sessionId} onViewDiff={handleViewDiff} />
+          <ArtifactList sessionId={currentSessionId} onViewDiff={handleViewDiff} />
         )}
       </div>
 

@@ -58,6 +58,7 @@ coverage/
 tmp/
 temp/
 *.tmp
+dev-data/
 网站CodeAlltemp_eigent/
 
 # Sisyphus runtime state
