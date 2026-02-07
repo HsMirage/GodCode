@@ -1,0 +1,224 @@
+# CodeAll - Agent Development Guidelines
+
+开发一个独立的多LLM AI模型协同编程与多Agent协同工作软件，需融合项目内 @参考项目 文件夹中多个应用的核心优势。软件名称CodeAll，具体要求如下：
+建议使用"pnpm + Electron + React + TypeScript + Claude Code SDK"（具体请根据项目自行决定）
+提示：由于这是一个完全的私人项目，所以允许你直接使用参考项目中的代码，允许直接复制
+1. 架构设计：
+   - 集成oh-my-opencode的多LLM智能体协同编程框架，实现多AI模型、多代理的协同，并行后台任务工作机制，Hook 生命周期治理，持续执行/自动续跑
+   - 融合eigent的多Agent协同架构，实现复杂工作流程的子任务拆解与并行执行能力
+2. 功能实现：
+   - 完整移植moltbot（该项目已更名为openclaw）的核心能力模块，确保其功能在新软件中无缝集成
+   - 实现hello-halo的内嵌浏览器功能及AI自动操控浏览器技术
+   - 开发多视图并行的"工作台"式布局，支持Agent产物的可视化与追踪
+   - 支持自定义api模型接入，需兼容OpenAI-compatible
+3. 界面设计：
+     * 采用hello-halo的UI界面设计风格，实现多视图并行的工作台布局
+     * 借鉴eigent的前端页面设计布局，优化用户交互体验
+     * 实现Agent产物"可视化、可追踪"的关键UI组件
+     * 实现agent后台任务查看功能
+     * 实现LLM模型和各个agent设置的可视化管理
+     * 实现LLM模型与agent的绑定功能
+4. 技术要求：
+   - 允许直接复制 @参考项目 中各文件夹内的代码，确保代码兼容性与可维护性（当前为私人项目，不公开）
+   - 确保软件作为独立应用运行，不依赖原有项目环境
+   - 实现各模块间的无缝集成，保证整体系统的稳定性与性能
+5. 开发流程：
+     * 首先完成核心架构设计，确定模块间接口与通信机制
+     * 依次集成各参考项目的核心功能模块
+     * 进行模块间联调与整体功能测试
+     * 优化UI/UX设计，确保符合用户体验要求
+6. 交付标准：
+   - 可独立运行的软件安装包（优先完成windows版本exe文件，和linux远程网页访问版）
+   - 完整的源代码与文档
+   - 各功能模块的单元测试与集成测试报告
+   - 性能测试报告，确保系统在多LLM模型协同，多Agent协同工作时的稳定性。
+ 
+
+
+## Build Commands
+
+### Primary Build
+```bash
+# TypeScript compilation
+tsc -p tsconfig.json
+
+# Build with declarations
+bun run build     # oh-my-opencode style: bundler + declarations
+unbuild           # ccg-workflow style
+vite build        # eigent/hello-halo style
+```
+
+### Type Checking
+```bash
+tsc --noEmit
+```
+
+### Linting & Formatting
+```bash
+# Lint
+oxlint --type-aware src test  # moltbot
+eslint                          # ccg-workflow
+
+# Format
+oxfmt --check src test   # moltbot
+oxfmt --write src test   # auto-fix
+```
+
+## Testing Commands
+
+### Run All Tests
+```bash
+vitest run              # Run tests once
+bun test               # oh-my-opencode
+vitest                 # Watch mode
+```
+
+### Run Single Test
+```bash
+vitest run path/to/file.test.ts
+bun test path/to/file.test.ts
+```
+
+### Test Coverage
+```bash
+vitest run --coverage
+```
+
+### Test Configuration
+- Test timeout: 120s (moltbot), 29s (eigent)
+- Coverage thresholds: 70% lines, 70% functions, 70% statements
+- Pool: forks (moltbot), threads (default)
+
+## Code Style Guidelines
+
+### Imports
+- Use `import type` for type-only imports
+- Group imports: third-party → internal → type imports
+- Use `@/` alias for absolute imports (eigent/hello-halo style)
+- Use relative imports for same-module dependencies
+
+```typescript
+import { spawn } from "node:child_process"
+import type { AgentConfig } from "@opencode-ai/sdk"
+import { createAgentToolRestrictions } from "../shared/permission-compat"
+```
+
+### Naming Conventions
+- **Variables/Functions**: camelCase (`sessionId`, `createAcpClient`)
+- **Classes/Interfaces/Types**: PascalCase (`AcpClientOptions`, `SendMessageRequest`)
+- **Constants**: UPPER_SNAKE_CASE (`EXPLORE_PROMPT_METADATA`)
+- **Files**: kebab-case or camelCase, match export name
+
+### Types
+- Always use explicit type annotations for function parameters and returns
+- Use `interface` for object shapes, `type` for unions/aliases
+- Prefer `const` assertions for readonly data
+- Type assertions discouraged; use proper types instead
+
+```typescript
+export async function createAcpClient(opts: AcpClientOptions = {}): Promise<AcpClientHandle>
+```
+
+### Error Handling
+- Never use `@ts-ignore`, `as any`, or `@ts-expect-error`
+- Always catch errors explicitly with typed error objects
+- Return standardized response objects for async functions
+
+```typescript
+try {
+  await agentSendMessage(mainWindow, request)
+  return { success: true }
+} catch (error: unknown) {
+  const err = error as Error
+  return { success: false, error: err.message }
+}
+```
+
+### Formatting
+- 2-space indentation
+- Single quotes for strings
+- Trailing commas in objects/arrays
+- Semicolons required
+- Max line length: 100 (implicit from samples)
+
+### File Organization
+- One export per file preferred
+- Co-locate test files: `file.ts` → `file.test.ts`
+- Use index files for barrel exports
+- Clear separation between API and implementation
+
+### Comments
+- JSDoc for exported functions/classes
+- Use `// TODO:` and `// FIXME:` for temporary markers
+- No emoji in code comments
+- Keep comments concise and actionable
+
+```typescript
+/**
+ * Create an ACP client with spawned agent process
+ * @param opts - Client configuration options
+ * @returns Handle containing client, agent process, and session ID
+ */
+```
+
+### Testing
+- Test files: `*.test.ts` or `*.spec.ts`
+- Use `describe`/`it` blocks
+- Mock external dependencies
+- Test both success and error paths
+- Keep tests isolated and fast
+
+### TypeScript Configuration
+- `strict: true` required
+- `target`: ESNext
+- `module`: NodeNext or ESNext
+- `moduleResolution`: bundler or NodeNext
+- `skipLibCheck: true`
+- `resolveJsonModule: true`
+
+## Project Structure Guidelines
+
+This is a multi-reference fusion project integrating:
+- **oh-my-opencode**: Multi-LLM orchestration, background agents, LSP/AST tools
+- **eigent**: Multi-agent workflows, React frontend, Electron app
+- **ccg-workflow**: Task scheduling, resource allocation
+- **moltbot**: Core capabilities, browser automation, plugin system
+- **hello-halo**: Embedded browser, AI browser control, multi-view UI
+
+### Module Integration Rules
+1. Copy code directly from `参考项目/` folders
+2. Maintain original file structure where possible
+3. Adapt imports to new project structure
+4. Ensure no dependencies on original project environments
+5. Test each module independently before integration
+
+### Key Directories
+- `/agents` - Agent definitions and orchestrations (oh-my-opencode)
+- `/workflow` - Task scheduling and execution (ccg-workflow)
+- `/browser` - Browser automation (moltbot, hello-halo)
+- `/ui` - React components and views (eigent, hello-halo)
+- `/plugins` - Extensible plugin system (moltbot)
+- `/shared` - Common utilities and types
+
+## Development Workflow
+
+1. **Type check before committing**: `tsc --noEmit`
+2. **Lint**: `oxlint --type-aware src test`
+3. **Test**: `vitest run`
+4. **Build**: `tsc -p tsconfig.json`
+
+## Performance Guidelines
+
+- Use async/await for I/O operations
+- Implement proper cleanup in background tasks
+- Cache expensive operations
+- Use streaming for large data transfers
+- Monitor memory usage in long-running processes
+
+## Security Guidelines
+
+- Validate all user inputs
+- Sanitize file paths before access
+- Use proper authentication for external services
+- Never expose sensitive data in logs
+- Implement rate limiting for API calls

@@ -1,56 +1,91 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { DelegateEngine } from '@/main/services/delegate/delegate-engine'
-import { DatabaseService } from '@/main/services/database'
-import { LoggerService } from '@/main/services/logger'
 import { createLLMAdapter } from '@/main/services/llm/factory'
 
-// Mock dependencies
-const mockPrisma = {
-  task: {
-    create: vi.fn(),
-    update: vi.fn()
-  },
-  model: {
-    findFirst: vi.fn()
-  },
-  session: {
-    findFirst: vi.fn(),
-    create: vi.fn()
-  },
-  space: {
-    findFirst: vi.fn(),
-    create: vi.fn()
+// vi.mock() is hoisted; keep shared mocks in a hoisted factory to avoid TDZ issues.
+const mocks = vi.hoisted(() => {
+  const mockPrisma = {
+    task: {
+      create: vi.fn(),
+      update: vi.fn()
+    },
+    model: {
+      findFirst: vi.fn()
+    },
+    session: {
+      findFirst: vi.fn(),
+      create: vi.fn()
+    },
+    space: {
+      findFirst: vi.fn(),
+      create: vi.fn()
+    }
   }
-}
+
+  const mockLogger = {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn()
+  }
+
+  const mockAdapter = {
+    sendMessage: vi.fn()
+  }
+
+  return { mockPrisma, mockLogger, mockAdapter }
+})
+
+const bindingMocks = vi.hoisted(() => ({
+  getCategoryModelConfig: vi.fn(async (categoryCode: string) => {
+    if (categoryCode === 'quick') {
+      return {
+        model: 'claude-3-haiku-20240307',
+        temperature: 0.3,
+        apiKey: 'test-key',
+        baseURL: 'https://api.openai.com/v1'
+      }
+    }
+    return null
+  }),
+  getAgentModelConfig: vi.fn(async (agentCode: string) => {
+    if (agentCode === 'explore') {
+      return {
+        model: 'claude-3-5-sonnet-20240620',
+        temperature: 0.2,
+        apiKey: 'test-key',
+        baseURL: 'https://api.openai.com/v1'
+      }
+    }
+    return null
+  }),
+  getCategoryBinding: vi.fn(async () => null),
+  getAgentBinding: vi.fn(async () => null)
+}))
 
 vi.mock('@/main/services/database', () => ({
   DatabaseService: {
     getInstance: vi.fn(() => ({
-      getClient: vi.fn(() => mockPrisma)
+      getClient: vi.fn(() => mocks.mockPrisma)
     }))
   }
 }))
 
-const mockLogger = {
-  info: vi.fn(),
-  error: vi.fn(),
-  warn: vi.fn()
-}
+vi.mock('@/main/services/binding.service', () => ({
+  BindingService: {
+    getInstance: vi.fn(() => bindingMocks)
+  }
+}))
 
 vi.mock('@/main/services/logger', () => ({
   LoggerService: {
     getInstance: vi.fn(() => ({
-      getLogger: vi.fn(() => mockLogger)
+      getLogger: vi.fn(() => mocks.mockLogger)
     }))
   }
 }))
 
-const mockAdapter = {
-  sendMessage: vi.fn()
-}
-
 vi.mock('@/main/services/llm/factory', () => ({
-  createLLMAdapter: vi.fn(() => mockAdapter)
+  createLLMAdapter: vi.fn(() => mocks.mockAdapter)
 }))
 
 describe('DelegateEngine', () => {
@@ -61,16 +96,20 @@ describe('DelegateEngine', () => {
     delegateEngine = new DelegateEngine()
 
     // Default mocks setup
-    mockPrisma.session.findFirst.mockResolvedValue({ id: 'session-1' })
-    mockPrisma.task.create.mockResolvedValue({ id: 'task-1', type: 'subtask' })
-    mockPrisma.task.update.mockResolvedValue({ id: 'task-1' })
-    mockPrisma.model.findFirst.mockResolvedValue({
+    mocks.mockPrisma.session.findFirst.mockResolvedValue({ id: 'session-1' })
+    mocks.mockPrisma.task.create.mockResolvedValue({ id: 'task-1', type: 'subtask' })
+    mocks.mockPrisma.task.update.mockResolvedValue({ id: 'task-1' })
+    mocks.mockPrisma.model.findFirst.mockResolvedValue({
       id: 'model-1',
-      provider: 'anthropic',
+      provider: 'openai-compatible',
       apiKey: 'test-key',
-      config: { baseURL: 'https://api.anthropic.com' }
+      baseURL: 'https://api.openai.com/v1',
+      config: {}
     })
-    mockAdapter.sendMessage.mockResolvedValue({ content: 'Task completed result' })
+    mocks.mockAdapter.sendMessage.mockResolvedValue({
+      content: 'Task completed result',
+      usage: { prompt_tokens: 10, completion_tokens: 5 }
+    })
   })
 
   afterEach(() => {
@@ -87,7 +126,7 @@ describe('DelegateEngine', () => {
 
       const result = await delegateEngine.delegateTask(input)
 
-      expect(mockPrisma.task.create).toHaveBeenCalledWith(
+      expect(mocks.mockPrisma.task.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             input: input.description,
@@ -100,14 +139,14 @@ describe('DelegateEngine', () => {
       )
 
       expect(createLLMAdapter).toHaveBeenCalledWith(
-        'anthropic',
+        'openai-compatible',
         expect.objectContaining({
           apiKey: 'test-key'
         })
       )
 
-      expect(mockAdapter.sendMessage).toHaveBeenCalled()
-      expect(mockPrisma.task.update).toHaveBeenCalledWith(
+      expect(mocks.mockAdapter.sendMessage).toHaveBeenCalled()
+      expect(mocks.mockPrisma.task.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'task-1' },
           data: expect.objectContaining({
@@ -130,7 +169,7 @@ describe('DelegateEngine', () => {
 
       const result = await delegateEngine.delegateTask(input)
 
-      expect(mockPrisma.task.create).toHaveBeenCalledWith(
+      expect(mocks.mockPrisma.task.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             metadata: expect.objectContaining({
@@ -145,9 +184,9 @@ describe('DelegateEngine', () => {
     })
 
     it('should create new session if none exists', async () => {
-      mockPrisma.session.findFirst.mockResolvedValue(null)
-      mockPrisma.space.findFirst.mockResolvedValue({ id: 'space-1' })
-      mockPrisma.session.create.mockResolvedValue({ id: 'session-new' })
+      mocks.mockPrisma.session.findFirst.mockResolvedValue(null)
+      mocks.mockPrisma.space.findFirst.mockResolvedValue({ id: 'space-1' })
+      mocks.mockPrisma.session.create.mockResolvedValue({ id: 'session-new' })
 
       const input = {
         description: 'Test task',
@@ -157,8 +196,8 @@ describe('DelegateEngine', () => {
 
       await delegateEngine.delegateTask(input)
 
-      expect(mockPrisma.session.create).toHaveBeenCalled()
-      expect(mockPrisma.task.create).toHaveBeenCalledWith(
+      expect(mocks.mockPrisma.session.create).toHaveBeenCalled()
+      expect(mocks.mockPrisma.task.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             sessionId: 'session-new'
@@ -175,7 +214,7 @@ describe('DelegateEngine', () => {
       }
 
       await expect(delegateEngine.delegateTask(input)).rejects.toThrow(
-        'Unknown category: unknown-category'
+        'Category not found or disabled: unknown-category'
       )
     })
 
@@ -187,7 +226,7 @@ describe('DelegateEngine', () => {
       }
 
       await expect(delegateEngine.delegateTask(input)).rejects.toThrow(
-        'Unknown agent type: unknown-agent'
+        'Agent not found or disabled: unknown-agent'
       )
     })
 
@@ -203,7 +242,12 @@ describe('DelegateEngine', () => {
     })
 
     it('should handle model not found error', async () => {
-      mockPrisma.model.findFirst.mockResolvedValue(null)
+      // Force fallback to provider-level model lookup by returning a binding without apiKey/baseURL.
+      bindingMocks.getCategoryModelConfig.mockResolvedValueOnce({
+        model: 'claude-3-haiku-20240307',
+        temperature: 0.3
+      })
+      mocks.mockPrisma.model.findFirst.mockResolvedValue(null)
 
       const input = {
         description: 'Test task',
@@ -215,7 +259,7 @@ describe('DelegateEngine', () => {
 
       expect(result.success).toBe(false)
       expect(result.output).toContain('No model configured for provider')
-      expect(mockPrisma.task.update).toHaveBeenCalledWith(
+      expect(mocks.mockPrisma.task.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             status: 'failed'
@@ -226,7 +270,7 @@ describe('DelegateEngine', () => {
 
     it('should handle LLM adapter error', async () => {
       const errorMessage = 'API Error'
-      mockAdapter.sendMessage.mockRejectedValue(errorMessage)
+      mocks.mockAdapter.sendMessage.mockRejectedValue(errorMessage)
 
       const input = {
         description: 'Test task',
@@ -238,7 +282,7 @@ describe('DelegateEngine', () => {
 
       expect(result.success).toBe(false)
       expect(result.output).toBe(errorMessage)
-      expect(mockPrisma.task.update).toHaveBeenCalledWith(
+      expect(mocks.mockPrisma.task.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             status: 'failed'
@@ -252,7 +296,7 @@ describe('DelegateEngine', () => {
     it('should cancel task successfully', async () => {
       await delegateEngine.cancelTask('task-1')
 
-      expect(mockPrisma.task.update).toHaveBeenCalledWith({
+      expect(mocks.mockPrisma.task.update).toHaveBeenCalledWith({
         where: { id: 'task-1' },
         data: expect.objectContaining({
           status: 'cancelled',
@@ -260,7 +304,7 @@ describe('DelegateEngine', () => {
         })
       })
 
-      expect(mockLogger.info).toHaveBeenCalledWith('Task cancelled', { taskId: 'task-1' })
+      expect(mocks.mockLogger.info).toHaveBeenCalledWith('Task cancelled', { taskId: 'task-1' })
     })
   })
 })

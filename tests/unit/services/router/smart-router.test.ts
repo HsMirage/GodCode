@@ -63,7 +63,8 @@ describe('SmartRouter', () => {
     })
 
     it('should route general tasks to delegate by default', () => {
-      expect(router.analyzeTask('What is the weather?')).toBe('delegate')
+      // Default rule is `direct` (use user-configured model) for unmatched inputs.
+      expect(router.analyzeTask('What is the weather?')).toBe('direct')
     })
   })
 

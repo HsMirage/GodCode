@@ -5,6 +5,7 @@
 
 import { DatabaseService } from './database'
 import { LoggerService } from './logger'
+import { SecureStorageService } from './secure-storage.service'
 import { Prisma } from '@prisma/client'
 import {
   AGENT_DEFINITIONS,
@@ -84,9 +85,14 @@ export class BindingService {
    * 首次启动时创建所有 Agent 和 Category 的默认记录
    */
   async initializeDefaults(): Promise<void> {
-    if (this.initialized) return
+    if (this.initialized) {
+      this.logger.info('BindingService already initialized, skipping')
+      return
+    }
 
     this.logger.info('Initializing default agent and category bindings')
+    this.logger.info(`Agent definitions count: ${AGENT_DEFINITIONS.length}`)
+    this.logger.info(`Category definitions count: ${CATEGORY_DEFINITIONS.length}`)
 
     // 初始化 Agent 绑定
     for (const agent of AGENT_DEFINITIONS) {
@@ -103,11 +109,13 @@ export class BindingService {
   }
 
   private async ensureAgentBinding(agent: AgentDefinition): Promise<void> {
+    this.logger.debug(`Checking agent binding: ${agent.code}`)
     const existing = await this.prisma.agentBinding.findUnique({
       where: { agentCode: agent.code }
     })
 
     if (!existing) {
+      this.logger.info(`Creating default binding for agent: ${agent.code} (${agent.name})`)
       await this.prisma.agentBinding.create({
         data: {
           agentCode: agent.code,
@@ -146,7 +154,7 @@ export class BindingService {
 
   async listAgentBindings(): Promise<AgentBindingData[]> {
     const bindings = await this.prisma.agentBinding.findMany({
-      include: { model: true },
+      include: { model: { include: { apiKeyRef: true } } },
       orderBy: [{ agentType: 'asc' }, { agentCode: 'asc' }]
     })
 
@@ -168,7 +176,7 @@ export class BindingService {
   async getAgentBinding(agentCode: string): Promise<AgentBindingData | null> {
     const binding = await this.prisma.agentBinding.findUnique({
       where: { agentCode },
-      include: { model: true }
+      include: { model: { include: { apiKeyRef: true } } }
     })
 
     if (!binding) return null
@@ -201,7 +209,7 @@ export class BindingService {
         systemPrompt: data.systemPrompt,
         enabled: data.enabled
       },
-      include: { model: true }
+      include: { model: { include: { apiKeyRef: true } } }
     })
 
     this.logger.info(`Updated agent binding: ${agentCode}`, { data })
@@ -236,7 +244,7 @@ export class BindingService {
         systemPrompt: null,
         enabled: true
       },
-      include: { model: true }
+      include: { model: { include: { apiKeyRef: true } } }
     })
 
     this.logger.info(`Reset agent binding to defaults: ${agentCode}`)
@@ -260,7 +268,7 @@ export class BindingService {
 
   async listCategoryBindings(): Promise<CategoryBindingData[]> {
     const bindings = (await this.prisma.categoryBinding.findMany({
-      include: { model: true },
+      include: { model: { include: { apiKeyRef: true } } },
       orderBy: { categoryCode: 'asc' }
     })) as CategoryBindingWithModel[]
 
@@ -280,7 +288,7 @@ export class BindingService {
   async getCategoryBinding(categoryCode: string): Promise<CategoryBindingData | null> {
     const binding = (await this.prisma.categoryBinding.findUnique({
       where: { categoryCode },
-      include: { model: true }
+      include: { model: { include: { apiKeyRef: true } } }
     })) as CategoryBindingWithModel | null
 
     if (!binding) return null
@@ -310,7 +318,7 @@ export class BindingService {
         systemPrompt: data.systemPrompt,
         enabled: data.enabled
       },
-      include: { model: true }
+      include: { model: { include: { apiKeyRef: true } } }
     })) as CategoryBindingWithModel
 
     this.logger.info(`Updated category binding: ${categoryCode}`, { data })
@@ -342,7 +350,7 @@ export class BindingService {
         systemPrompt: null,
         enabled: true
       },
-      include: { model: true }
+      include: { model: { include: { apiKeyRef: true } } }
     })) as CategoryBindingWithModel
 
     this.logger.info(`Reset category binding to defaults: ${categoryCode}`)
@@ -374,7 +382,7 @@ export class BindingService {
   } | null> {
     const binding = await this.prisma.agentBinding.findUnique({
       where: { agentCode },
-      include: { model: true }
+      include: { model: { include: { apiKeyRef: true } } }
     })
 
     if (!binding || !binding.enabled) return null
@@ -382,11 +390,15 @@ export class BindingService {
     const definition = AGENT_DEFINITIONS.find(a => a.code === agentCode)
 
     if (binding.model) {
+      const decryptedKey = binding.model.apiKeyRef?.encryptedKey
+        ? SecureStorageService.getInstance().decrypt(binding.model.apiKeyRef.encryptedKey)
+        : binding.model.apiKey
+
       return {
         model: binding.model.modelName,
         temperature: binding.temperature,
-        apiKey: binding.model.apiKey ?? undefined,
-        baseURL: binding.model.baseURL ?? undefined
+        apiKey: decryptedKey ?? undefined,
+        baseURL: binding.model.apiKeyRef?.baseURL ?? binding.model.baseURL ?? undefined
       }
     }
 
@@ -408,7 +420,7 @@ export class BindingService {
   } | null> {
     const binding = await this.prisma.categoryBinding.findUnique({
       where: { categoryCode },
-      include: { model: true }
+      include: { model: { include: { apiKeyRef: true } } }
     })
 
     if (!binding || !binding.enabled) return null
@@ -416,11 +428,15 @@ export class BindingService {
     const definition = CATEGORY_DEFINITIONS.find(c => c.code === categoryCode)
 
     if (binding.model) {
+      const decryptedKey = binding.model.apiKeyRef?.encryptedKey
+        ? SecureStorageService.getInstance().decrypt(binding.model.apiKeyRef.encryptedKey)
+        : binding.model.apiKey
+
       return {
         model: binding.model.modelName,
         temperature: binding.temperature,
-        apiKey: binding.model.apiKey ?? undefined,
-        baseURL: binding.model.baseURL ?? undefined
+        apiKey: decryptedKey ?? undefined,
+        baseURL: binding.model.apiKeyRef?.baseURL ?? binding.model.baseURL ?? undefined
       }
     }
 

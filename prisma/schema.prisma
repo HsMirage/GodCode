@@ -123,6 +123,8 @@ model Model {
   modelName        String
   apiKey           String?
   baseURL          String?
+  apiKeyId         String?
+  apiKeyRef        ApiKey?           @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
   contextSize      Int               @default(32) // 上下文大小，单位：K
   config           Json              @default("{}")
   createdAt        DateTime          @default(now())
@@ -181,6 +183,7 @@ model ApiKey {
   encryptedKey  String   @db.Text
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  models        Model[]
 
   @@index([provider])
 }
@@ -215,4 +218,15 @@ model AuditLog {
   @@index([sessionId])
   @@index([createdAt])
   @@index([success])
+}
+
+// SystemSetting表 - 系统设置
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique // 设置键，如 "defaultModelId"
+  value     String?  // 设置值
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
 }

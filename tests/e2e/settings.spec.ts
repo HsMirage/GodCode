@@ -4,10 +4,10 @@ test.describe('Settings Configuration', () => {
   test('navigates to settings page', async ({ window }) => {
     await navigateTo(window, 'settings')
 
-    // Settings page should show LLM config tab
+    // Settings page should show provider tab
     await window.waitForTimeout(2000)
-    const llmConfigTab = window.locator('text=LLM配置').first()
-    await expect(llmConfigTab).toBeVisible()
+    const providerTab = window.locator('text=API服务商').first()
+    await expect(providerTab).toBeVisible()
   })
 
   test('can click settings button', async ({ window }) => {

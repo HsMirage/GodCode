@@ -33,6 +33,7 @@ export async function handleModelCreate(
       provider: input.provider,
       modelName: input.modelName,
       apiKey: encryptedApiKey,
+      apiKeyId: input.apiKeyId ?? null,
       baseURL: input.baseURL,
       config: input.config
     }

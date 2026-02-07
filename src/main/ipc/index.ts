@@ -22,7 +22,6 @@ import {
   handleProviderCacheIsConnected,
   handleProviderCacheSetStatus
 } from './handlers/provider-cache'
-import { handleRouterGetRules, handleRouterSaveRules } from './handlers/router'
 import { handleTaskCreate, handleTaskGet, handleTaskList, handleTaskUpdate } from './handlers/task'
 import {
   handleTaskContinuationAbort,
@@ -38,7 +37,9 @@ import {
   handleKeychainDeletePassword,
   handleKeychainGetPassword,
   handleKeychainSetPassword,
-  handleKeychainList
+  handleKeychainList,
+  handleKeychainListWithModels,
+  handleKeychainGetWithModels
 } from './handlers/keychain'
 import {
   handleAgentBindingList,
@@ -50,11 +51,8 @@ import {
   handleCategoryBindingUpdate,
   handleCategoryBindingReset
 } from './handlers/binding'
-import {
-  handleAgentRunList,
-  handleAgentRunGet,
-  handleAgentRunGetLogs
-} from './handlers/agent-run'
+import { handleAgentRunList, handleAgentRunGet, handleAgentRunGetLogs } from './handlers/agent-run'
+import { handleSettingGet, handleSettingSet, handleSettingGetAll } from './handlers/setting'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('model:create', handleModelCreate)
@@ -83,10 +81,6 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('provider-cache:get-available-models', handleProviderCacheGetAvailableModels)
   ipcMain.handle('provider-cache:set-status', handleProviderCacheSetStatus)
 
-  // Router handlers
-  ipcMain.handle('router:get-rules', handleRouterGetRules)
-  ipcMain.handle('router:save-rules', handleRouterSaveRules)
-
   // Task handlers
   ipcMain.handle('task:create', handleTaskCreate)
   ipcMain.handle('task:get', handleTaskGet)
@@ -114,6 +108,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('keychain:get-password', handleKeychainGetPassword)
   ipcMain.handle('keychain:delete-password', handleKeychainDeletePassword)
   ipcMain.handle('keychain:list', handleKeychainList)
+  ipcMain.handle('keychain:list-with-models', handleKeychainListWithModels)
+  ipcMain.handle('keychain:get-with-models', handleKeychainGetWithModels)
 
   // Agent Binding handlers
   ipcMain.handle('agent-binding:list', handleAgentBindingList)
@@ -131,4 +127,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('agent-run:list', handleAgentRunList)
   ipcMain.handle('agent-run:get', handleAgentRunGet)
   ipcMain.handle('agent-run:get-logs', handleAgentRunGetLogs)
+
+  // System Setting handlers
+  ipcMain.handle('setting:get', handleSettingGet)
+  ipcMain.handle('setting:set', handleSettingSet)
+  ipcMain.handle('setting:get-all', handleSettingGetAll)
 }

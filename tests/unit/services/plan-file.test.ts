@@ -51,7 +51,9 @@ describe('PlanFileService', () => {
   it('should list only .md plan files', async () => {
     const plans = await service.listPlans()
     expect(plans).toEqual(['codeall-unified-plan'])
-    expect(mockFs.readdirSync).toHaveBeenCalledWith(expect.stringContaining('.sisyphus/plans'))
+    expect(mockFs.readdirSync).toHaveBeenCalledWith(
+      expect.stringContaining(path.join('.sisyphus', 'plans'))
+    )
   })
 
   it('should handle missing plans directory gracefully', async () => {
@@ -62,7 +64,7 @@ describe('PlanFileService', () => {
 
   it('should get correct plan path', async () => {
     const planPath = await service.getPlanPath('test-plan')
-    expect(planPath).toContain('.sisyphus/plans/test-plan.md')
+    expect(planPath).toContain(path.join('.sisyphus', 'plans', 'test-plan.md'))
   })
 
   it('should read plan content', async () => {

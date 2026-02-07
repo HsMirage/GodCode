@@ -4,14 +4,6 @@ declare module '../../types/domain' {
 
 import type { Session, Message, Model, Task, Artifact } from '../../types/domain'
 
-interface RoutingRule {
-  pattern: string
-  strategy: 'delegate' | 'workforce' | 'direct'
-  category?: string
-  subagent?: string
-  model?: string
-}
-
 interface CodeAllAPI {
   invoke(channel: 'ping'): Promise<string>
   invoke(
@@ -20,6 +12,7 @@ interface CodeAllAPI {
       provider: string
       modelName: string
       apiKey?: string
+      apiKeyId?: string
       baseURL?: string | null
       config?: Record<string, unknown>
     }
@@ -33,6 +26,7 @@ interface CodeAllAPI {
         provider?: string
         modelName?: string
         apiKey?: string
+        apiKeyId?: string | null
         baseURL?: string | null
         config?: Record<string, unknown>
       }
@@ -45,8 +39,6 @@ interface CodeAllAPI {
   invoke(channel: 'session:list', spaceId?: string): Promise<Session[]>
   invoke(channel: 'message:send', data: { sessionId: string; content: string }): Promise<Message>
   invoke(channel: 'message:list', sessionId: string): Promise<Message[]>
-  invoke(channel: 'router:get-rules'): Promise<RoutingRule[]>
-  invoke(channel: 'router:save-rules', rules: RoutingRule[]): Promise<void>
   invoke(channel: 'task:list', sessionId: string): Promise<Task[]>
   invoke(channel: 'artifact:list', sessionId: string): Promise<Artifact[]>
   invoke(
@@ -71,6 +63,27 @@ interface CodeAllAPI {
     channel: 'keychain:list'
   ): Promise<
     { id: string; label: string | null; baseURL: string; apiKey: string; provider: string }[]
+  >
+  invoke(channel: 'keychain:list-with-models'): Promise<
+    Array<{
+      id: string
+      provider: string
+      label: string | null
+      baseURL: string
+      apiKeyMasked: string
+      models: Array<{ id: string; modelName: string; provider: string }>
+    }>
+  >
+  invoke(channel: 'keychain:get-with-models', apiKeyId: string): Promise<
+    | {
+        id: string
+        provider: string
+        label: string | null
+        baseURL: string
+        apiKey: string
+        models: Array<{ id: string; modelName: string; provider: string }>
+      }
+    | null
   >
   invoke(
     channel: 'keychain:set-password',
@@ -131,6 +144,21 @@ interface CodeAllAPI {
     data: { viewId: string }
   ): Promise<{ success: boolean; error?: string }>
 
+  invoke(
+    channel: `${string}:get-rules`,
+    ...args: unknown[]
+  ): Promise<
+    Array<{
+      pattern: string
+      strategy: 'delegate' | 'workforce' | 'direct'
+      category?: string
+      subagent?: string
+      model?: string
+      [key: string]: unknown
+    }>
+  >
+
+  // Fallback signature for channels without dedicated overloads.
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
   on(
     channel: 'message:stream-chunk',
@@ -181,7 +209,7 @@ interface CodeAllAPI {
   ): () => void
 
   // Task Events
-  on(channel: 'task:update', callback: () => void): () => void
+  on(channel: 'task:status-changed', callback: () => void): () => void
 
   // Artifact Events
   on(channel: 'artifact:created', callback: () => void): () => void

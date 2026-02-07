@@ -1,4 +1,5 @@
 import type { Plugin, ToolDefinition } from "@opencode-ai/plugin";
+import type { AvailableSkill } from "./agents/dynamic-agent-prompt-builder";
 import {
   createTodoContinuationEnforcer,
   createContextWindowMonitorHook,
@@ -37,6 +38,7 @@ import {
   createUnstableAgentBabysitterHook,
   createPreemptiveCompactionHook,
   createTasksTodowriteDisablerHook,
+  createWriteExistingFileGuardHook,
 } from "./hooks";
 import {
   contextCollector,
@@ -55,6 +57,7 @@ import {
   discoverOpencodeProjectSkills,
   mergeSkills,
 } from "./features/opencode-skill-loader";
+import type { SkillScope } from "./features/opencode-skill-loader/types";
 import { createBuiltinSkills } from "./features/builtin-skills";
 import { getSystemMcpServerNames } from "./features/claude-code-mcp-loader";
 import {
@@ -83,6 +86,10 @@ import {
   createTaskList,
   createTaskUpdateTool,
 } from "./tools";
+import {
+  CATEGORY_DESCRIPTIONS,
+  DEFAULT_CATEGORIES,
+} from "./tools/delegate-task/constants";
 import { BackgroundManager } from "./features/background-agent";
 import { SkillMcpManager } from "./features/skill-mcp-manager";
 import { initTaskToastManager } from "./features/task-toast-manager";
@@ -100,6 +107,7 @@ import {
   OPENCODE_NATIVE_AGENTS_INJECTION_VERSION,
   injectServerAuthIntoClient,
 } from "./shared";
+import { filterDisabledTools } from "./shared/disabled-tools";
 import { loadPluginConfig } from "./plugin-config";
 import { createModelCacheState } from "./plugin-state";
 import { createConfigHandler } from "./plugin-handlers";
@@ -114,6 +122,7 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
 
   const pluginConfig = loadPluginConfig(ctx.directory, ctx);
   const disabledHooks = new Set(pluginConfig.disabled_hooks ?? []);
+
   const firstMessageVariantGate = createFirstMessageVariantGate();
 
   const tmuxConfig = {
@@ -241,9 +250,7 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     ? createThinkingBlockValidatorHook()
     : null;
 
-  const categorySkillReminder = isHookEnabled("category-skill-reminder")
-    ? createCategorySkillReminderHook(ctx)
-    : null;
+  let categorySkillReminder: ReturnType<typeof createCategorySkillReminderHook> | null = null;
 
   const ralphLoop = isHookEnabled("ralph-loop")
     ? createRalphLoopHook(ctx, {
@@ -280,6 +287,9 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
 
   const questionLabelTruncator = createQuestionLabelTruncatorHook();
   const subagentQuestionBlocker = createSubagentQuestionBlockerHook();
+  const writeExistingFileGuard = isHookEnabled("write-existing-file-guard")
+    ? createWriteExistingFileGuardHook(ctx)
+    : null;
 
   const taskResumeInfo = createTaskResumeInfoHook();
 
@@ -389,33 +399,6 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
   const browserProvider =
     pluginConfig.browser_automation_engine?.provider ?? "playwright";
   const disabledSkills = new Set<string>(pluginConfig.disabled_skills ?? []);
-  const delegateTask = createDelegateTask({
-    manager: backgroundManager,
-    client: ctx.client,
-    directory: ctx.directory,
-    userCategories: pluginConfig.categories,
-    gitMasterConfig: pluginConfig.git_master,
-    sisyphusJuniorModel: pluginConfig.agents?.["sisyphus-junior"]?.model,
-    browserProvider,
-    disabledSkills,
-    onSyncSessionCreated: async (event) => {
-      log("[index] onSyncSessionCreated callback", {
-        sessionID: event.sessionID,
-        parentID: event.parentID,
-        title: event.title,
-      });
-      await tmuxSessionManager.onSessionCreated({
-        type: "session.created",
-        properties: {
-          info: {
-            id: event.sessionID,
-            parentID: event.parentID,
-            title: event.title,
-          },
-        },
-      });
-    },
-  });
   const systemMcpNames = getSystemMcpServerNames();
   const builtinSkills = createBuiltinSkills({ browserProvider, disabledSkills }).filter((skill) => {
       if (skill.mcpConfig) {
@@ -442,6 +425,68 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
     projectSkills,
     opencodeProjectSkills,
   );
+
+  function mapScopeToLocation(scope: SkillScope): AvailableSkill["location"] {
+    if (scope === "user" || scope === "opencode") return "user";
+    if (scope === "project" || scope === "opencode-project") return "project";
+    return "plugin";
+  }
+
+  const availableSkills: AvailableSkill[] = mergedSkills.map((skill) => ({
+    name: skill.name,
+    description: skill.definition.description ?? "",
+    location: mapScopeToLocation(skill.scope),
+  }));
+
+  const mergedCategories = pluginConfig.categories
+    ? { ...DEFAULT_CATEGORIES, ...pluginConfig.categories }
+    : DEFAULT_CATEGORIES;
+
+  const availableCategories = Object.entries(mergedCategories).map(
+    ([name, categoryConfig]) => ({
+      name,
+      description:
+        pluginConfig.categories?.[name]?.description
+          ?? CATEGORY_DESCRIPTIONS[name]
+          ?? "General tasks",
+      model: categoryConfig.model,
+    }),
+  );
+
+  const delegateTask = createDelegateTask({
+    manager: backgroundManager,
+    client: ctx.client,
+    directory: ctx.directory,
+    userCategories: pluginConfig.categories,
+    gitMasterConfig: pluginConfig.git_master,
+    sisyphusJuniorModel: pluginConfig.agents?.["sisyphus-junior"]?.model,
+    browserProvider,
+    disabledSkills,
+    availableCategories,
+    availableSkills,
+    onSyncSessionCreated: async (event) => {
+      log("[index] onSyncSessionCreated callback", {
+        sessionID: event.sessionID,
+        parentID: event.parentID,
+        title: event.title,
+      });
+      await tmuxSessionManager.onSessionCreated({
+        type: "session.created",
+        properties: {
+          info: {
+            id: event.sessionID,
+            parentID: event.parentID,
+            title: event.title,
+          },
+        },
+      });
+    },
+  });
+
+  categorySkillReminder = isHookEnabled("category-skill-reminder")
+    ? createCategorySkillReminderHook(ctx, availableSkills)
+    : null;
+
   const skillMcpManager = new SkillMcpManager();
   const getSessionIDForMcp = () => getMainSessionID() || "";
   const skillTool = createSkillTool({
@@ -483,19 +528,26 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       }
     : {};
 
+  const allTools: Record<string, ToolDefinition> = {
+    ...builtinTools,
+    ...backgroundTools,
+    call_omo_agent: callOmoAgent,
+    ...(lookAt ? { look_at: lookAt } : {}),
+    delegate_task: delegateTask,
+    skill: skillTool,
+    skill_mcp: skillMcpTool,
+    slashcommand: slashcommandTool,
+    interactive_bash,
+    ...taskToolsRecord,
+  };
+
+  const filteredTools: Record<string, ToolDefinition> = filterDisabledTools(
+    allTools,
+    pluginConfig.disabled_tools,
+  );
+
   return {
-    tool: {
-      ...builtinTools,
-      ...backgroundTools,
-      call_omo_agent: callOmoAgent,
-      ...(lookAt ? { look_at: lookAt } : {}),
-      delegate_task: delegateTask,
-      skill: skillTool,
-      skill_mcp: skillMcpTool,
-      slashcommand: slashcommandTool,
-      interactive_bash,
-      ...taskToolsRecord,
-    },
+    tool: filteredTools,
 
     "chat.message": async (input, output) => {
       if (input.agent) {
@@ -720,6 +772,7 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
 
     "tool.execute.before": async (input, output) => {
       await subagentQuestionBlocker["tool.execute.before"]?.(input, output);
+      await writeExistingFileGuard?.["tool.execute.before"]?.(input, output);
       await questionLabelTruncator["tool.execute.before"]?.(input, output);
       await claudeCodeHooks["tool.execute.before"](input, output);
       await nonInteractiveEnv?.["tool.execute.before"](input, output);
@@ -837,17 +890,14 @@ const OhMyOpenCodePlugin: Plugin = async (ctx) => {
       await taskResumeInfo["tool.execute.after"](input, output);
     },
 
-    "experimental.session.compacting": async (input: { sessionID: string }) => {
+    "experimental.session.compacting": async (
+      _input: { sessionID: string },
+      output: { context: string[] },
+    ): Promise<void> => {
       if (!compactionContextInjector) {
         return;
       }
-      await compactionContextInjector({
-        sessionID: input.sessionID,
-        providerID: "anthropic",
-        modelID: "claude-opus-4-5",
-        usageRatio: 0.8,
-        directory: ctx.directory,
-      });
+      output.context.push(compactionContextInjector());
     },
   };
 };

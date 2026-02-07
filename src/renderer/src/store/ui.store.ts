@@ -79,7 +79,7 @@ export const useUIStore = create<UIState>()(
       showArtifactRail: false,
       showContentCanvas: false,
       activeView: 'chat',
-      sidebarWidth: 20,
+      sidebarWidth: 15,
       chatWidth: 60,
       artifactWidth: 20,
 
@@ -87,7 +87,7 @@ export const useUIStore = create<UIState>()(
       isTaskPanelOpen: false,
       isBrowserPanelOpen: false,
       taskPanelWidth: 25,
-      browserPanelWidth: 35,
+      browserPanelWidth: 30,
 
       // Browser Initial State
       browserUrl: '',
@@ -174,6 +174,7 @@ export const useUIStore = create<UIState>()(
       name: 'codeall-ui-storage',
       partialize: state => ({
         isTaskPanelOpen: state.isTaskPanelOpen,
+        isBrowserPanelOpen: state.isBrowserPanelOpen,
         taskPanelWidth: state.taskPanelWidth,
         browserPanelWidth: state.browserPanelWidth,
         sidebarWidth: state.sidebarWidth

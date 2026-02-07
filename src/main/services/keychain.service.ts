@@ -24,7 +24,7 @@ export class KeychainService {
     baseURL: string
     apiKey: string
     provider?: string
-  }): Promise<void> {
+  }): Promise<{ id: string }> {
     try {
       await DatabaseService.getInstance().init()
       const { id, label, baseURL, apiKey, provider } = data
@@ -41,8 +41,9 @@ export class KeychainService {
       // For backward compatibility or if provider is used
       const providerValue = provider || label || 'custom'
 
+      let resultId: string
       if (id) {
-        await prisma.apiKey.update({
+        const updated = await prisma.apiKey.update({
           where: { id },
           data: {
             label: label || providerValue,
@@ -52,8 +53,9 @@ export class KeychainService {
             updatedAt: new Date()
           }
         })
+        resultId = updated.id
       } else {
-        await prisma.apiKey.create({
+        const created = await prisma.apiKey.create({
           data: {
             label: label || providerValue,
             baseURL,
@@ -61,9 +63,11 @@ export class KeychainService {
             provider: providerValue
           }
         })
+        resultId = created.id
       }
 
       console.log(`[Keychain] Successfully stored API key for ${label || providerValue}`)
+      return { id: resultId }
     } catch (error) {
       console.error(`[Keychain] Failed to store API key:`, error)
       throw error

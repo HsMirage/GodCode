@@ -1,0 +1,14 @@
+{
+  "startedAt": "2026-02-06T09:08:17.843Z",
+  "encryptionMode": "plaintext-fallback",
+  "totals": {
+    "totalModels": 0,
+    "migrated": 0,
+    "skipped": 0,
+    "failed": 1
+  },
+  "entries": [],
+  "fatalError": "Can't reach database server at `localhost:51789`\n\nPlease make sure your database server is running at `localhost:51789`.",
+  "finishedAt": "2026-02-06T09:08:21.905Z",
+  "durationMs": 4062
+}

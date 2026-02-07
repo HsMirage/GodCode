@@ -484,6 +484,63 @@ let embeddedPostgres: EmbeddedPostgresInstance | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let prismaClient: any = null
 
+async function ensureBindingSchemaCompatibility(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any
+): Promise<void> {
+  // Keep this strictly additive (no drops/renames) to avoid data loss.
+  const checks: Array<{ table: string; column: string; addSql: string }> = [
+    {
+      table: 'CategoryBinding',
+      column: 'systemPrompt',
+      addSql: 'ALTER TABLE "CategoryBinding" ADD COLUMN IF NOT EXISTS "systemPrompt" TEXT'
+    },
+    {
+      table: 'AgentBinding',
+      column: 'systemPrompt',
+      addSql: 'ALTER TABLE "AgentBinding" ADD COLUMN IF NOT EXISTS "systemPrompt" TEXT'
+    },
+    {
+      table: 'Model',
+      column: 'apiKeyId',
+      addSql: 'ALTER TABLE "Model" ADD COLUMN IF NOT EXISTS "apiKeyId" TEXT'
+    }
+  ]
+
+  for (const c of checks) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const tableRows = await client.$queryRawUnsafe(
+      `SELECT 1
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_name = '${c.table}'
+       LIMIT 1`
+    )
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const tableExists = Array.isArray(tableRows) && tableRows.length > 0
+    if (!tableExists) {
+      console.warn(`[Database] Table missing, skipping patch: ${c.table}`)
+      continue
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const rows = await client.$queryRawUnsafe(
+      `SELECT 1
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = '${c.table}'
+         AND column_name = '${c.column}'
+       LIMIT 1`
+    )
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const exists = Array.isArray(rows) && rows.length > 0
+    if (!exists) {
+      console.warn(`[Database] Applying additive schema patch: ${c.table}.${c.column}`)
+      await client.$executeRawUnsafe(c.addSql)
+    }
+  }
+}
+
 async function getAvailablePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer()
@@ -718,6 +775,9 @@ export class DatabaseService {
         ? lastConnectError
         : new Error(String(lastConnectError))
     }
+
+    console.log('[Database] Ensuring schema compatibility...')
+    await ensureBindingSchemaCompatibility(prismaClient)
 
     this.isInitialized = true
     console.log('[Database] ✓ All phases completed successfully')

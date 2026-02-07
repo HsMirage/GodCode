@@ -81,6 +81,8 @@ vi.mock('@prisma/client', () => ({
   PrismaClient: class MockPrismaClient {
     $connect = vi.fn().mockResolvedValue(undefined)
     $disconnect = vi.fn().mockResolvedValue(undefined)
+    $queryRawUnsafe = vi.fn().mockResolvedValue([])
+    $executeRawUnsafe = vi.fn().mockResolvedValue(undefined)
     model = {
       create: vi.fn().mockImplementation((args: any) =>
         Promise.resolve({

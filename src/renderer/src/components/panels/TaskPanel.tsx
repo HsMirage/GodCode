@@ -80,9 +80,7 @@ function TaskCard({ task }: TaskCardProps) {
               </span>
             )}
             {task.assignedModel && (
-              <span className="text-xs text-slate-500 font-mono">
-                {task.assignedModel}
-              </span>
+              <span className="text-xs text-slate-500 font-mono">{task.assignedModel}</span>
             )}
           </div>
         </div>
@@ -116,10 +114,10 @@ export function TaskPanel() {
     if (!window.codeall || !sessionId) return
 
     try {
-      const taskList = await window.codeall.invoke('task:list', sessionId) as Task[]
-      setTasks(taskList.sort((a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      ))
+      const taskList = (await window.codeall.invoke('task:list', sessionId)) as Task[]
+      setTasks(
+        taskList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      )
     } catch (error) {
       console.error('Failed to load tasks:', error)
     } finally {
@@ -158,7 +156,7 @@ export function TaskPanel() {
   useEffect(() => {
     if (!window.codeall) return
 
-    const removeListener = window.codeall.on('task:update', () => {
+    const removeListener = window.codeall.on('task:status-changed', () => {
       loadTasks()
     })
 
@@ -249,9 +247,7 @@ export function TaskPanel() {
               <Loader2 className="w-5 h-5 text-slate-500 animate-spin" />
             </div>
           ) : tasks.length === 0 ? (
-            <div className="text-center py-8 text-slate-500 text-sm">
-              暂无后台任务
-            </div>
+            <div className="text-center py-8 text-slate-500 text-sm">暂无后台任务</div>
           ) : (
             <>
               {/* Running Tasks */}

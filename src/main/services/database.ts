@@ -474,6 +474,110 @@ let embeddedPostgres: EmbeddedPostgresInstance | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let prismaClient: any = null
 
+async function ensureBindingSchemaCompatibility(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any
+): Promise<void> {
+  if (typeof client?.$queryRawUnsafe !== 'function' || typeof client?.$executeRawUnsafe !== 'function') {
+    console.warn(
+      '[Database] Prisma raw query APIs not available ($queryRawUnsafe/$executeRawUnsafe), skipping schema patching'
+    )
+    return
+  }
+
+  // This project does not currently ship Prisma migrations with the app.
+  // Embedded Postgres data persists across upgrades, so we apply small additive
+  // schema patches here to keep older databases working.
+  //
+  // Keep this strictly additive (no drops/renames) to avoid data loss.
+  const checks: Array<{ table: string; column: string; addSql: string }> = [
+    {
+      table: 'CategoryBinding',
+      column: 'systemPrompt',
+      addSql: 'ALTER TABLE "CategoryBinding" ADD COLUMN IF NOT EXISTS "systemPrompt" TEXT'
+    },
+    {
+      table: 'AgentBinding',
+      column: 'systemPrompt',
+      addSql: 'ALTER TABLE "AgentBinding" ADD COLUMN IF NOT EXISTS "systemPrompt" TEXT'
+    },
+    {
+      table: 'Model',
+      column: 'apiKeyId',
+      addSql: 'ALTER TABLE "Model" ADD COLUMN IF NOT EXISTS "apiKeyId" TEXT'
+    }
+  ]
+
+  for (const c of checks) {
+    // Table may be missing on a brand new database if schema was never pushed.
+    // Don't hard-fail here; downstream calls will surface a clearer error,
+    // and docs already describe `prisma db push --force-reset` as a recovery path.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const tableRows = await client.$queryRawUnsafe(
+      `SELECT 1
+       FROM information_schema.tables
+       WHERE table_schema = 'public'
+         AND table_name = '${c.table}'
+       LIMIT 1`
+    )
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const tableExists = Array.isArray(tableRows) && tableRows.length > 0
+    if (!tableExists) {
+      console.warn(`[Database] Table missing, skipping patch: ${c.table}`)
+      continue
+    }
+
+    // information_schema contains the *exact* table/column names, including case.
+    // We keep table/column names fixed here to avoid SQL injection concerns.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const rows = await client.$queryRawUnsafe(
+      `SELECT 1
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = '${c.table}'
+         AND column_name = '${c.column}'
+       LIMIT 1`
+    )
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+    const exists = Array.isArray(rows) && rows.length > 0
+    if (!exists) {
+      console.warn(`[Database] Applying additive schema patch: ${c.table}.${c.column}`)
+      await client.$executeRawUnsafe(c.addSql)
+    }
+  }
+
+  // Ensure SystemSetting table exists
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const systemSettingTableRows = await client.$queryRawUnsafe(
+    `SELECT 1
+     FROM information_schema.tables
+     WHERE table_schema = 'public'
+       AND table_name = 'SystemSetting'
+     LIMIT 1`
+  )
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  const systemSettingExists = Array.isArray(systemSettingTableRows) && systemSettingTableRows.length > 0
+  if (!systemSettingExists) {
+    console.warn('[Database] Creating SystemSetting table')
+    await client.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "SystemSetting" (
+        "id" TEXT NOT NULL,
+        "key" TEXT NOT NULL,
+        "value" TEXT,
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "SystemSetting_pkey" PRIMARY KEY ("id")
+      )
+    `)
+    await client.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "SystemSetting_key_key" ON "SystemSetting"("key")
+    `)
+    await client.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "SystemSetting_key_idx" ON "SystemSetting"("key")
+    `)
+  }
+}
+
 async function getAvailablePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer()
@@ -532,6 +636,7 @@ export class DatabaseService {
   private static instance: DatabaseService | null = null
   private dbPath: string
   private isInitialized = false
+  private initPromise: Promise<void> | null = null
 
   private constructor() {
     const userDataPath = app.getPath('userData')
@@ -556,20 +661,37 @@ export class DatabaseService {
       return
     }
 
+    if (this.initPromise) {
+      console.log('[Database] Initialization in progress, waiting...')
+      await this.initPromise
+      return
+    }
+
     const startTime = Date.now()
     console.log('[Database] Starting initialization...')
 
-    const initPromise = this._doInit()
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Database initialization timeout (120s)')), INIT_TIMEOUT_MS)
-    })
+    this.initPromise = (async () => {
+      const initPromise = this._doInit()
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error('Database initialization timeout (120s)')),
+          INIT_TIMEOUT_MS
+        )
+      })
+
+      try {
+        await Promise.race([initPromise, timeoutPromise])
+        console.log(`[Database] Initialization complete (${Date.now() - startTime}ms)`)
+      } catch (error) {
+        console.error('[Database] Initialization failed:', error)
+        throw error
+      }
+    })()
 
     try {
-      await Promise.race([initPromise, timeoutPromise])
-      console.log(`[Database] Initialization complete (${Date.now() - startTime}ms)`)
-    } catch (error) {
-      console.error('[Database] Initialization failed:', error)
-      throw error
+      await this.initPromise
+    } finally {
+      this.initPromise = null
     }
   }
 
@@ -670,25 +792,37 @@ export class DatabaseService {
 
     console.log('[Database] Phase 5: Connecting Prisma...')
 
-    // Use createRequire to robustly load Prisma Client in both dev and prod
-    const { createRequire } = await import('module')
-    const require = createRequire(import.meta.url)
+    // Prisma loading strategy:
+    // - In packaged apps, `require()` is more reliable due to module resolution/NODE_PATH tweaks.
+    // - In tests, prefer ESM import so Vitest `vi.mock('@prisma/client')` works (createRequire bypasses it).
+    const isTestEnv = process.env.NODE_ENV === 'test' || !!process.env.VITEST
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let PrismaClient: any
-    try {
-      const prismaModule = require('@prisma/client')
-      PrismaClient = prismaModule.PrismaClient || prismaModule.default?.PrismaClient
-    } catch (e) {
-      console.warn('[Database] Failed to require @prisma/client, trying import:', e)
-      // Fallback to import if require fails
+
+    if (isTestEnv) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const prismaModule = (await import('@prisma/client')) as any
       PrismaClient = prismaModule.PrismaClient || prismaModule.default?.PrismaClient
+    } else {
+      // Use createRequire to robustly load Prisma Client in both dev and prod
+      const { createRequire } = await import('module')
+      const require = createRequire(import.meta.url)
+
+      try {
+        const prismaModule = require('@prisma/client')
+        PrismaClient = prismaModule.PrismaClient || prismaModule.default?.PrismaClient
+      } catch (e) {
+        console.warn('[Database] Failed to require @prisma/client, trying import:', e)
+        // Fallback to import if require fails
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const prismaModule = (await import('@prisma/client')) as any
+        PrismaClient = prismaModule.PrismaClient || prismaModule.default?.PrismaClient
+      }
     }
 
     if (!PrismaClient) {
-        throw new Error('Failed to load PrismaClient from @prisma/client')
+      throw new Error('Failed to load PrismaClient from @prisma/client')
     }
 
     prismaClient = new PrismaClient()
@@ -731,6 +865,9 @@ export class DatabaseService {
         ? lastConnectError
         : new Error(String(lastConnectError))
     }
+
+    console.log('[Database] Phase 6: Ensuring schema compatibility...')
+    await ensureBindingSchemaCompatibility(prismaClient)
 
     this.isInitialized = true
     console.log('[Database] ✓ All phases completed successfully')

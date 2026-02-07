@@ -69,24 +69,36 @@ export async function handleMessageSend(
   try {
     if (strategy === 'direct') {
       const isE2ETest = process.env.CODEALL_E2E_TEST === '1'
-      const model = await prisma.model.findFirst({ orderBy: { createdAt: 'desc' } })
+      const model = await prisma.model.findFirst({
+        orderBy: { createdAt: 'desc' },
+        include: { apiKeyRef: true }
+      })
       const resolvedModel =
-        model ?? (isE2ETest ? { provider: 'mock', apiKey: 'mock', config: {} } : null)
+        model ??
+        (isE2ETest
+          ? { provider: 'mock', apiKey: 'mock', baseURL: null, config: {}, apiKeyRef: null }
+          : null)
 
       // Debug: 打印从数据库读取的模型配置
       logger.info('[handleMessageSend] Model from database', {
         hasModel: !!model,
         provider: model?.provider,
         modelName: model?.modelName,
-        baseURL: model?.baseURL,
-        hasApiKey: !!model?.apiKey
+        baseURL: model?.apiKeyRef?.baseURL ?? model?.baseURL,
+        hasApiKeyRef: !!model?.apiKeyRef,
+        hasApiKey: !!model?.apiKey,
+        hasApiKeyRefEncryptedKey: !!model?.apiKeyRef?.encryptedKey
       })
 
       if (!resolvedModel) {
         throw new Error('No active model configured')
       }
 
-      if (!resolvedModel.apiKey) {
+      // Credentials resolution (new relation first, legacy fallback)
+      const encryptedApiKey = resolvedModel.apiKeyRef?.encryptedKey ?? resolvedModel.apiKey
+      const resolvedBaseURL = resolvedModel.apiKeyRef?.baseURL ?? resolvedModel.baseURL ?? undefined
+
+      if (!encryptedApiKey) {
         if (!isE2ETest) {
           throw new Error('Active model API key is missing')
         }
@@ -94,13 +106,11 @@ export async function handleMessageSend(
 
       // Decrypt API key before use
       const secureStorage = SecureStorageService.getInstance()
-      const decryptedApiKey = resolvedModel.apiKey
-        ? secureStorage.decrypt(resolvedModel.apiKey)
-        : 'mock'
+      const decryptedApiKey = encryptedApiKey ? secureStorage.decrypt(encryptedApiKey) : 'mock'
 
       const adapter = createLLMAdapter(resolvedModel.provider, {
         apiKey: decryptedApiKey,
-        baseURL: resolvedModel.baseURL ?? undefined
+        baseURL: resolvedBaseURL
       })
 
       const history = await prisma.message.findMany({

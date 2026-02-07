@@ -76,8 +76,8 @@ export function BrowserShell() {
         url: undefined // Reuse existing URL if alive
       })
 
-      // Show the active view
-      if (browserRef.current) {
+      // Show the active view (only if panel is currently open)
+      if (isBrowserPanelOpen && browserRef.current) {
         const rect = browserRef.current.getBoundingClientRect()
         window.codeall.invoke('browser:show', {
           viewId: activeBrowserTabId,
@@ -145,6 +145,8 @@ export function BrowserShell() {
     })
 
     return () => {
+      // Ensure BrowserView is detached on unmount / tab switch
+      window.codeall?.invoke('browser:hide', { viewId: activeBrowserTabId })
       removeStateListener()
       removeAIListener()
     }
@@ -155,8 +157,34 @@ export function BrowserShell() {
     setAIOperation,
     syncTabs,
     addBrowserOperation,
-    openBrowserPanel
+    openBrowserPanel,
+    isBrowserPanelOpen
   ])
+
+  // Hide/show the BrowserView when panel is toggled
+  useEffect(() => {
+    if (!activeBrowserTabId || !window.codeall) return
+
+    if (!isBrowserPanelOpen) {
+      window.codeall.invoke('browser:hide', { viewId: activeBrowserTabId })
+      return
+    }
+
+    if (browserRef.current) {
+      const rect = browserRef.current.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        window.codeall.invoke('browser:show', {
+          viewId: activeBrowserTabId,
+          bounds: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height
+          }
+        })
+      }
+    }
+  }, [activeBrowserTabId, isBrowserPanelOpen])
 
   // Handle visibility changes to hide browser view when overlays are present
   useEffect(() => {
@@ -206,6 +234,7 @@ export function BrowserShell() {
   // Handle Resize
   useEffect(() => {
     if (!browserRef.current || !window.codeall || !activeBrowserTabId) return
+    if (!isBrowserPanelOpen) return
 
     const updateBounds = () => {
       if (!browserRef.current || !window.codeall || !activeBrowserTabId) return
@@ -226,7 +255,7 @@ export function BrowserShell() {
     updateBounds()
 
     return () => observer.disconnect()
-  }, [activeBrowserTabId])
+  }, [activeBrowserTabId, isBrowserPanelOpen])
 
   // Actions
   const handleNewTab = async () => {

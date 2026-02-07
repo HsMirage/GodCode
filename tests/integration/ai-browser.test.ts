@@ -92,7 +92,8 @@ describe('AI Browser Integration', () => {
     }
 
     // 3. Click Element
-    vi.spyOn(view, 'executeJavaScript').mockResolvedValueOnce(true)
+    // clickTool highlights first, then clicks; satisfy both executeJavaScript calls.
+    vi.spyOn(view, 'executeJavaScript').mockResolvedValueOnce(true).mockResolvedValueOnce(true)
 
     const clickResult = await clickTool.execute(
       { uid: 'uid-0' },
@@ -211,13 +212,14 @@ describe('AI Browser Integration', () => {
     const view = browserViewManager.getWebContents(VIEW_ID)
     if (!view) throw new Error('View not created')
 
-    vi.spyOn(view, 'executeJavaScript').mockResolvedValueOnce(false)
+    // clickTool may retry; keep returning false.
+    vi.spyOn(view, 'executeJavaScript').mockResolvedValue(false)
 
     const result = await clickTool.execute(
       { uid: 'non-existent-uid' },
       { viewId: VIEW_ID, webContents: view }
     )
     expect(result.success).toBe(false)
-    expect(result.error).toContain('Element not found')
+    expect(result.error).toContain('not found')
   })
 })

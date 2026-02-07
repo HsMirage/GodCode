@@ -5,6 +5,7 @@ export interface MessageInputProps {
   isLoading?: boolean
   onSend: (message: string) => void
   placeholder?: string
+  afterSend?: React.ReactNode
 }
 
 const panelClass = [
@@ -35,7 +36,12 @@ const buttonClass = [
 
 const MAX_HEIGHT = 200
 
-export function MessageInput({ isLoading = false, onSend, placeholder }: MessageInputProps) {
+export function MessageInput({
+  isLoading = false,
+  onSend,
+  placeholder,
+  afterSend
+}: MessageInputProps) {
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
@@ -87,6 +93,7 @@ export function MessageInput({ isLoading = false, onSend, placeholder }: Message
         >
           <Send className='h-5 w-5' />
         </button>
+        {afterSend && <div className="flex items-center gap-2">{afterSend}</div>}
       </div>
     </section>
   )

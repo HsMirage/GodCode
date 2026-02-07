@@ -19,7 +19,8 @@ const mocks = vi.hoisted(() => {
       findFirst: vi.fn()
     },
     model: {
-      findFirst: vi.fn()
+      findFirst: vi.fn(),
+      findMany: vi.fn()
     },
     $transaction: vi.fn((callback: any): any => callback(prisma))
   }
@@ -27,7 +28,8 @@ const mocks = vi.hoisted(() => {
   const logger = {
     info: vi.fn(),
     warn: vi.fn(),
-    error: vi.fn()
+    error: vi.fn(),
+    debug: vi.fn()
   }
 
   const llmAdapter = {
@@ -35,10 +37,18 @@ const mocks = vi.hoisted(() => {
     streamMessage: vi.fn()
   }
 
+  const bindingService = {
+    getCategoryModelConfig: vi.fn(),
+    getAgentModelConfig: vi.fn(),
+    getCategoryBinding: vi.fn(),
+    getAgentBinding: vi.fn()
+  }
+
   return {
     prisma,
     logger,
-    llmAdapter
+    llmAdapter,
+    bindingService
   }
 })
 
@@ -66,6 +76,12 @@ vi.mock('@/main/services/llm/dynamic-truncator', () => ({
   truncateToTokenLimit: (text: string) => ({ result: text })
 }))
 
+vi.mock('@/main/services/binding.service', () => ({
+  BindingService: {
+    getInstance: () => mocks.bindingService
+  }
+}))
+
 describe('Workforce Engine Integration', () => {
   let delegateEngine: DelegateEngine
   let workforceEngine: WorkforceEngine
@@ -80,6 +96,34 @@ describe('Workforce Engine Integration', () => {
       provider: 'openai-compatible',
       apiKey: 'test-key',
       model: 'gpt-4o'
+    })
+    mocks.prisma.model.findMany.mockResolvedValue([
+      {
+        id: 'model_123',
+        provider: 'openai-compatible',
+        apiKey: 'test-key',
+        modelName: 'gpt-4o',
+        createdAt: new Date()
+      }
+    ])
+
+    mocks.bindingService.getCategoryModelConfig.mockImplementation(async (category: string) => {
+      if (category === 'quick') {
+        return { model: 'gpt-4o', temperature: 0.3, apiKey: 'test-key' }
+      }
+      return { model: 'gpt-4o', temperature: 0.5, apiKey: 'test-key' }
+    })
+    mocks.bindingService.getAgentModelConfig.mockImplementation(async (agentCode: string) => {
+      if (agentCode) {
+        return { model: 'gpt-4o', temperature: 0.5, apiKey: 'test-key' }
+      }
+      return null
+    })
+    mocks.bindingService.getCategoryBinding.mockResolvedValue({
+      systemPrompt: null
+    })
+    mocks.bindingService.getAgentBinding.mockResolvedValue({
+      systemPrompt: null
     })
 
     mocks.prisma.task.create.mockImplementation((args: any) =>

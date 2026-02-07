@@ -2,6 +2,18 @@ import { describe, it, expect, vi } from 'vitest'
 import { createLLMAdapter } from '@/main/services/llm/factory'
 import { OpenAICompatAdapter } from '@/main/services/llm/openai-compat.adapter'
 
+vi.mock('electron', () => ({
+  app: {
+    getPath: vi.fn().mockReturnValue('/tmp/mock-user-data'),
+    isPackaged: false
+  },
+  safeStorage: {
+    isEncryptionAvailable: vi.fn(() => false),
+    encryptString: vi.fn(),
+    decryptString: vi.fn()
+  }
+}))
+
 vi.mock('@/main/services/llm/openai-compat.adapter')
 
 describe('LLM Factory', () => {
@@ -26,16 +38,8 @@ describe('LLM Factory', () => {
   })
 
   it('should create OpenAICompatAdapter for legacy providers with default URLs', () => {
-    createLLMAdapter('anthropic', { apiKey })
-    expect(OpenAICompatAdapter).toHaveBeenCalledWith(apiKey, 'https://api.anthropic.com/v1')
-
-    createLLMAdapter('openai', { apiKey })
-    expect(OpenAICompatAdapter).toHaveBeenCalledWith(apiKey, 'https://api.openai.com/v1')
-
-    createLLMAdapter('google', { apiKey })
-    expect(OpenAICompatAdapter).toHaveBeenCalledWith(
-      apiKey,
-      'https://generativelanguage.googleapis.com/v1beta/openai'
-    )
+    expect(() => createLLMAdapter('anthropic', { apiKey })).toThrow('baseURL is required for API adapter')
+    expect(() => createLLMAdapter('openai', { apiKey })).toThrow('baseURL is required for API adapter')
+    expect(() => createLLMAdapter('google', { apiKey })).toThrow('baseURL is required for API adapter')
   })
 })

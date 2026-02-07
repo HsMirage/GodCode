@@ -1,28 +1,24 @@
-import { useEffect } from 'react'
-import { Group, Panel, Separator } from 'react-resizable-panels'
+import { useEffect, useMemo } from 'react'
+import { useDefaultLayout } from 'react-resizable-panels'
+
 import { Sidebar } from './Sidebar'
-import { ChatPage } from '../../pages/ChatPage'
-import { TaskPanel } from '../panels/TaskPanel'
-import { BrowserPanel } from '../panels/BrowserPanel'
 import { TopNavigation } from './TopNavigation'
-import { useUIStore } from '../../store/ui.store'
-import { ListTodo, Globe } from 'lucide-react'
+import { BrowserPanel } from '../panels/BrowserPanel'
+import { TaskPanel } from '../panels/TaskPanel'
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../ui/resizable'
 import { UpdaterManager } from '../updater/UpdaterManager'
+import { ChatPage } from '../../pages/ChatPage'
+import { useUIStore } from '../../store/ui.store'
 
 export function MainLayout() {
   const {
     showSidebar,
-    sidebarWidth,
     isTaskPanelOpen,
     isBrowserPanelOpen,
-    taskPanelWidth,
-    browserPanelWidth,
-    toggleTaskPanel,
-    toggleBrowserPanel,
     openBrowserPanel,
+    setPanelSizes,
     setTaskPanelWidth,
-    setBrowserPanelWidth,
-    setPanelSizes
+    setBrowserPanelWidth
   } = useUIStore()
 
   // 监听浏览器面板自动展开事件
@@ -33,10 +29,24 @@ export function MainLayout() {
       openBrowserPanel()
     })
 
-    return () => {
-      removeListener()
-    }
+    return () => removeListener()
   }, [openBrowserPanel])
+
+  // Panels are conditionally mounted; panelIds must match rendered panels
+  const outerPanelIds = useMemo(
+    () => [
+      ...(showSidebar ? ['sidebar'] : []),
+      'chat',
+      ...(isTaskPanelOpen ? ['task'] : []),
+      ...(isBrowserPanelOpen ? ['browser'] : [])
+    ],
+    [showSidebar, isTaskPanelOpen, isBrowserPanelOpen]
+  )
+
+  const outerLayout = useDefaultLayout({
+    id: 'main-layout:outer',
+    panelIds: outerPanelIds
+  })
 
   return (
     <div className="h-screen flex flex-col bg-slate-950 text-slate-200 overflow-hidden">
@@ -44,105 +54,74 @@ export function MainLayout() {
       <TopNavigation />
 
       <div className="flex-1 flex overflow-hidden relative">
-        <Group orientation="horizontal">
-          {/* Sidebar - 会话列表 */}
+        <ResizablePanelGroup
+          id="main-layout-outer"
+          orientation="horizontal"
+          defaultLayout={outerLayout.defaultLayout}
+          onLayoutChanged={outerLayout.onLayoutChanged}
+        >
+          {/* Sidebar - 空间/会话列表 */}
           {showSidebar && (
             <>
-              <Panel
-                defaultSize={sidebarWidth}
-                minSize={15}
-                maxSize={25}
+              <ResizablePanel
                 id="sidebar"
-                onResize={(size: any) => {
-                  // Cast to number because we know it returns percentage in this context
-                  const newSize = typeof size === 'number' ? size : (size.asPercentage ?? 20)
+                defaultSize={15}
+                minSize="160px"
+                maxSize="35%"
+                onResize={(size: number | { asPercentage?: number }) => {
+                  const newSize = typeof size === 'number' ? size : (size.asPercentage ?? 15)
                   setPanelSizes({ sidebar: newSize })
                 }}
               >
                 <Sidebar />
-              </Panel>
-              <Separator className="w-1 bg-slate-800 hover:bg-indigo-500 transition-colors" />
+              </ResizablePanel>
+              <ResizableHandle />
             </>
           )}
 
           {/* Chat Panel - 主对话界面 */}
-          <Panel id="chat">
+          <ResizablePanel id="chat" minSize="320px">
             <ChatPage />
-          </Panel>
+          </ResizablePanel>
 
-          {/* Task Panel - 后台任务 (手动展开) */}
+          {/* Task Panel - 后台任务（独立占据一列） */}
           {isTaskPanelOpen && (
             <>
-              <Separator className="w-1 bg-slate-800 hover:bg-indigo-500 transition-colors" />
-              <Panel
-                defaultSize={taskPanelWidth}
-                minSize={18}
-                maxSize={35}
+              <ResizableHandle withHandle />
+              <ResizablePanel
                 id="task"
-                onResize={(size: any) => {
+                minSize="260px"
+                maxSize="40%"
+                defaultSize={25}
+                onResize={(size: number | { asPercentage?: number }) => {
                   const newSize = typeof size === 'number' ? size : (size.asPercentage ?? 25)
                   setTaskPanelWidth(newSize)
                 }}
               >
                 <TaskPanel />
-              </Panel>
+              </ResizablePanel>
             </>
           )}
 
-          {/* Browser Panel - 浏览器预览 (自动展开) */}
+          {/* Browser Panel - 浏览器始终在最右侧，独立占据一列 */}
           {isBrowserPanelOpen && (
             <>
-              <Separator className="w-1 bg-slate-800 hover:bg-indigo-500 transition-colors" />
-              <Panel
-                defaultSize={browserPanelWidth}
-                minSize={25}
-                maxSize={50}
+              <ResizableHandle withHandle />
+              <ResizablePanel
                 id="browser"
-                onResize={(size: any) => {
+                minSize="360px"
+                maxSize="60%"
+                defaultSize={35}
+                onResize={(size: number | { asPercentage?: number }) => {
                   const newSize = typeof size === 'number' ? size : (size.asPercentage ?? 35)
                   setBrowserPanelWidth(newSize)
                 }}
               >
                 <BrowserPanel />
-              </Panel>
+              </ResizablePanel>
             </>
           )}
-        </Group>
-
-        {/* Floating Action Buttons */}
-        <div className="absolute bottom-4 right-4 flex gap-2">
-          <div className="flex gap-2 bg-slate-900 border border-slate-700 rounded-lg p-1 shadow-xl">
-            {/* Task Panel Toggle */}
-            <button
-              type="button"
-              onClick={toggleTaskPanel}
-              className={[
-                'p-2 rounded transition-colors',
-                isTaskPanelOpen
-                  ? 'bg-indigo-600 text-white'
-                  : 'hover:bg-slate-800 text-slate-400 hover:text-indigo-400'
-              ].join(' ')}
-              title={isTaskPanelOpen ? '关闭任务面板' : '打开任务面板'}
-            >
-              <ListTodo className="w-4 h-4" />
-            </button>
-
-            {/* Browser Panel Toggle */}
-            <button
-              type="button"
-              onClick={toggleBrowserPanel}
-              className={[
-                'p-2 rounded transition-colors',
-                isBrowserPanelOpen
-                  ? 'bg-indigo-600 text-white'
-                  : 'hover:bg-slate-800 text-slate-400 hover:text-indigo-400'
-              ].join(' ')}
-              title={isBrowserPanelOpen ? '关闭浏览器' : '打开浏览器'}
-            >
-              <Globe className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
+        </ResizablePanelGroup>
       </div>
     </div>
   )

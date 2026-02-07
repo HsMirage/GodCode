@@ -23,6 +23,7 @@ export const modelCreateSchema = z.object({
   provider: z.enum(['openai-compatible']),
   modelName: z.string().min(1),
   apiKey: z.string().optional(),
+  apiKeyId: z.string().uuid().optional(),
   baseURL: z.string().url().optional().nullable(),
   config: z.record(z.unknown()).optional()
 })
@@ -33,6 +34,7 @@ export const modelUpdateSchema = z.object({
     provider: z.enum(['openai-compatible']).optional(),
     modelName: z.string().min(1).optional(),
     apiKey: z.string().optional(),
+    apiKeyId: z.string().uuid().optional().nullable(),
     baseURL: z.string().url().optional().nullable(),
     config: z.record(z.unknown()).optional()
   })

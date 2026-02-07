@@ -86,15 +86,6 @@ export const INVOKE_CHANNELS = {
   UPDATER_DOWNLOAD_UPDATE: 'updater:download-update',
   UPDATER_QUIT_AND_INSTALL: 'updater:quit-and-install',
 
-  // Router Operations
-  ROUTER_GET_RULES: 'router:get-rules',
-  ROUTER_SAVE_RULES: 'router:save-rules',
-  // Note: 'router:set-rules' is present in preload but mapped to 'router:save-rules' logic in main if mismatched.
-  // We keep 'router:set-rules' here if it's used by frontend, or align with main.
-  // Based on analysis: preload has 'router:set-rules', main has 'router:save-rules'.
-  // We include both to reflect current codebase state, but mark distinctness.
-  ROUTER_SET_RULES: 'router:set-rules',
-
   // Dialog Operations
   DIALOG_SELECT_FOLDER: 'dialog:select-folder',
 
@@ -117,6 +108,8 @@ export const INVOKE_CHANNELS = {
   KEYCHAIN_SET_PASSWORD: 'keychain:set-password',
   KEYCHAIN_GET_PASSWORD: 'keychain:get-password',
   KEYCHAIN_DELETE_PASSWORD: 'keychain:delete-password',
+  KEYCHAIN_LIST_WITH_MODELS: 'keychain:list-with-models',
+  KEYCHAIN_GET_WITH_MODELS: 'keychain:get-with-models',
 
   // Backup Operations
   BACKUP_LIST: 'backup:list',
@@ -145,7 +138,12 @@ export const INVOKE_CHANNELS = {
   ARTIFACT_GET_DIFF: 'artifact:get-diff',
   ARTIFACT_ACCEPT: 'artifact:accept',
   ARTIFACT_REVERT: 'artifact:revert',
-  ARTIFACT_STATS: 'artifact:stats'
+  ARTIFACT_STATS: 'artifact:stats',
+
+  // System Setting Operations
+  SETTING_GET: 'setting:get',
+  SETTING_SET: 'setting:set',
+  SETTING_GET_ALL: 'setting:get-all'
 } as const
 
 /**
@@ -159,7 +157,7 @@ export const EVENT_CHANNELS = {
   BROWSER_PANEL_SHOW: 'browser:panel-show',
 
   // Task Events
-  TASK_UPDATE: 'task:update',
+  TASK_STATUS_CHANGED: 'task:status-changed',
 
   // Agent Run Events
   AGENT_RUN_UPDATE: 'agent-run:update',

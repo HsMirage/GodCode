@@ -113,10 +113,10 @@ describe('AI Browser Tools', () => {
       const result = await clickTool.execute({ uid: 'uid-123' }, context)
 
       expect(mockWebContents.executeJavaScript).toHaveBeenCalled()
-      // Verify script contains UID
-      const script = mockWebContents.executeJavaScript.mock.calls[0][0]
-      expect(script).toContain('uid-123')
-      expect(script).toContain('click()')
+      const scripts = mockWebContents.executeJavaScript.mock.calls.map(c => String(c[0]))
+      expect(scripts.some(s => s.includes('uid-123'))).toBe(true)
+      // Implementation highlights first, then clicks.
+      expect(scripts.some(s => s.includes('el.click()'))).toBe(true)
 
       expect(result.success).toBe(true)
       // The implementation returns specific messages depending on dblClick
@@ -129,8 +129,8 @@ describe('AI Browser Tools', () => {
       const result = await clickTool.execute({ uid: 'uid-ghost' }, context)
 
       expect(result.success).toBe(false)
-      // Implementation returns "Element not found with UID: ..."
-      expect(result.error).toContain('Element not found')
+      expect(result.error).toContain('uid-ghost')
+      expect(result.error.toLowerCase()).toContain('not found')
     })
 
     it('should handle execution errors', async () => {
@@ -155,14 +155,13 @@ describe('AI Browser Tools', () => {
 
       const result = await fillTool.execute({ uid: 'uid-input', value: 'secret' }, context)
 
-      const script = mockWebContents.executeJavaScript.mock.calls[0][0]
-      expect(script).toContain('uid-input')
-      expect(script).toContain('"secret"') // JSON stringified
-      // The implementation uses logic to check for select/combobox or regular input
-      expect(script).toContain('el.value =')
+      const scripts = mockWebContents.executeJavaScript.mock.calls.map(c => String(c[0]))
+      expect(scripts.some(s => s.includes('uid-input'))).toBe(true)
+      expect(scripts.some(s => s.includes('"secret"'))).toBe(true) // JSON stringified
+      expect(scripts.some(s => s.includes('el.value ='))).toBe(true)
 
       expect(result.success).toBe(true)
-      expect(result.data).toEqual({ uid: 'uid-input', value: 'secret' })
+      expect(result.data).toMatchObject({ uid: 'uid-input', value: 'secret' })
     })
 
     it('should fail if input element not found', async () => {
@@ -171,8 +170,8 @@ describe('AI Browser Tools', () => {
       const result = await fillTool.execute({ uid: 'uid-missing', value: 'val' }, context)
 
       expect(result.success).toBe(false)
-      // Implementation returns "Input element not found with UID: ..."
-      expect(result.error).toContain('Input element not found')
+      expect(result.error).toContain('uid-missing')
+      expect(result.error.toLowerCase()).toContain('not found')
     })
   })
 

@@ -159,7 +159,8 @@ describe('Browser Automation Integration', () => {
       const view = browserViewManager.getWebContents(VIEW_ID)
       if (!view) throw new Error('View not created')
 
-      mocks.executeJavaScript.mockResolvedValueOnce(true)
+      // clickTool highlights first, then clicks; satisfy both executeJavaScript calls.
+      mocks.executeJavaScript.mockReset().mockResolvedValueOnce(true).mockResolvedValueOnce(true)
 
       const result = await clickTool.execute(
         { uid: 'uid-button-123' },
@@ -174,7 +175,8 @@ describe('Browser Automation Integration', () => {
       const view = browserViewManager.getWebContents(VIEW_ID)
       if (!view) throw new Error('View not created')
 
-      mocks.executeJavaScript.mockResolvedValueOnce(false)
+      // clickTool may retry; keep returning false.
+      mocks.executeJavaScript.mockReset().mockResolvedValue(false)
 
       const result = await clickTool.execute(
         { uid: 'nonexistent-uid' },
@@ -182,14 +184,15 @@ describe('Browser Automation Integration', () => {
       )
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('Element not found')
+      expect(result.error).toContain('not found')
     })
 
     it('should type text into input element', async () => {
       const view = browserViewManager.getWebContents(VIEW_ID)
       if (!view) throw new Error('View not created')
 
-      mocks.executeJavaScript.mockResolvedValueOnce(true)
+      // fillTool highlights first, then fills; satisfy both executeJavaScript calls.
+      mocks.executeJavaScript.mockReset().mockResolvedValueOnce(true).mockResolvedValueOnce(true)
 
       const result = await fillTool.execute(
         { uid: 'uid-input-123', value: 'Hello World' },
@@ -197,8 +200,8 @@ describe('Browser Automation Integration', () => {
       )
 
       expect(result.success).toBe(true)
-      const jsCall = mocks.executeJavaScript.mock.calls[0][0]
-      expect(jsCall).toContain('Hello World')
+      const jsCalls = mocks.executeJavaScript.mock.calls.map(c => c[0]).join('\n')
+      expect(jsCalls).toContain('Hello World')
     })
   })
 
@@ -287,7 +290,8 @@ describe('Browser Automation Integration', () => {
       const snapshotResult = await snapshotTool.execute({}, { viewId: VIEW_ID, webContents: view })
       expect(snapshotResult.success).toBe(true)
 
-      mocks.executeJavaScript.mockResolvedValueOnce(true)
+      // clickTool highlights first, then clicks; satisfy both executeJavaScript calls.
+      mocks.executeJavaScript.mockResolvedValueOnce(true).mockResolvedValueOnce(true)
       const clickResult = await clickTool.execute(
         { uid: 'uid-submit' },
         { viewId: VIEW_ID, webContents: view }

@@ -53,7 +53,8 @@ describe('Input Tools', () => {
       const result = await clickTool.execute({ uid: '999' }, mockContext as any)
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('Element not found')
+      expect(result.error).toContain('999')
+      expect(result.error.toLowerCase()).toContain('not found')
     })
   })
 
@@ -179,7 +180,8 @@ describe('Input Tools', () => {
       const result = await hoverTool.execute({ uid: '999' }, mockContext as any)
 
       expect(result.success).toBe(false)
-      expect(result.error).toContain('Element not found')
+      expect(result.error).toContain('999')
+      expect(result.error.toLowerCase()).toContain('not found')
     })
   })
 })

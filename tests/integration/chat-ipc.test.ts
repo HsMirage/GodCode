@@ -14,6 +14,12 @@ vi.mock('electron', () => {
         if (name === 'userData') return '/tmp/codeall-test-userdata'
         return '/tmp'
       })
+    },
+    safeStorage: {
+      // Keep encryption disabled in tests; SecureStorageService will treat values as plaintext.
+      isEncryptionAvailable: vi.fn(() => false),
+      encryptString: vi.fn((text: string) => Buffer.from(text, 'utf-8')),
+      decryptString: vi.fn((buf: Buffer) => buf.toString('utf-8'))
     }
   }
 })

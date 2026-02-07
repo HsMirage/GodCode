@@ -3,6 +3,31 @@ import { DatabaseService } from '../../src/main/services/database'
 import { WorkforceEngine } from '../../src/main/services/workforce/workforce-engine'
 import type { PrismaClient } from '@prisma/client'
 
+// Avoid real network LLM calls in integration tests.
+process.env.CODEALL_E2E_TEST = '1'
+
+// DelegateEngine now resolves model via BindingService; mock it to avoid DB binding tables in test fakes.
+vi.mock('@/main/services/binding.service', () => ({
+  BindingService: {
+    getInstance: vi.fn(() => ({
+      getCategoryModelConfig: vi.fn(async () => ({
+        model: 'gpt-4o',
+        temperature: 0.2,
+        apiKey: 'test',
+        baseURL: 'https://api.openai.com/v1'
+      })),
+      getAgentModelConfig: vi.fn(async () => ({
+        model: 'gpt-4o',
+        temperature: 0.2,
+        apiKey: 'test',
+        baseURL: 'https://api.openai.com/v1'
+      })),
+      getCategoryBinding: vi.fn(async () => null),
+      getAgentBinding: vi.fn(async () => null)
+    }))
+  }
+}))
+
 // Mock Electron
 vi.mock('electron', () => {
   return {
@@ -116,6 +141,10 @@ const createDelegate = (modelName: string) => ({
     if (where) {
       items = items.filter((item: any) =>
         Object.entries(where).every(([k, v]) => {
+          if (v && typeof v === 'object' && 'not' in v) {
+            const filterValue = v as { not: unknown }
+            return item[k] !== filterValue.not
+          }
           if (v && typeof v === 'object' && 'in' in v) {
             return (v as { in: unknown[] }).in.includes(item[k])
           }
@@ -196,12 +225,14 @@ vi.mock('../../src/main/services/llm/factory', () => ({
                 { id: 't2', description: 'Implement validation logic', dependencies: ['t1'] },
                 { id: 't3', description: 'Create API integration', dependencies: ['t2'] }
               ]
-            })
+            }),
+            usage: { prompt_tokens: 10, completion_tokens: 20 }
           }
         }
         // Mock generic response for subtasks
         return {
-          content: 'Task executed successfully via mock'
+          content: 'Task executed successfully via mock',
+          usage: { prompt_tokens: 10, completion_tokens: 20 }
         }
       })
     }

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { toolExecutor } from '@/main/services/tools/tool-executor'
 import { toolRegistry } from '@/main/services/tools/tool-registry'
 import { defaultPolicy } from '@/main/services/tools/permission-policy'
+import { BrowserWindow } from 'electron'
 import {
   browserNavigateTool,
   browserClickTool,
@@ -36,6 +37,10 @@ const mocks = vi.hoisted(() => {
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn().mockReturnValue('/tmp/mock-user-data')
+  },
+  BrowserWindow: {
+    // browser-tools.ts uses BrowserWindow.getAllWindows() to send renderer notifications
+    getAllWindows: vi.fn().mockReturnValue([])
   }
 }))
 
@@ -76,6 +81,16 @@ describe('Browser Tools Integration', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+
+    // Some mocks use `.mockReturnValueOnce(...)` which leaves a queue behind. Clear those queues
+    // so tests don't leak state into each other.
+    mocks.browserViewManager.create.mockReset()
+    mocks.browserViewManager.navigate.mockReset()
+    mocks.browserViewManager.getWebContents.mockReset()
+    mocks.browserViewManager.getState.mockReset()
+    mocks.webContents.executeJavaScript.mockReset()
+    mocks.webContents.capturePage.mockReset()
+    ;(BrowserWindow.getAllWindows as any).mockReturnValue([])
 
     // Register tools
     toolRegistry.register(browserNavigateTool)
@@ -143,7 +158,9 @@ describe('Browser Tools Integration', () => {
 
       expect(result.success).toBe(true)
       expect(mocks.webContents.executeJavaScript).toHaveBeenCalled()
-      expect(mocks.webContents.executeJavaScript.mock.calls[0][0]).toContain('hello')
+      // Implementation highlights element first, then fills value.
+      const scripts = mocks.webContents.executeJavaScript.mock.calls.map(c => String(c[0]))
+      expect(scripts.some(s => s.includes('hello'))).toBe(true)
     })
   })
 
@@ -250,7 +267,8 @@ describe('Browser Tools Integration', () => {
         mocks.webContents.executeJavaScript.mockResolvedValue(false)
         const result = await toolExecutor.execute('browser_click', { uid: 'uid-999' }, mockContext)
         expect(result.success).toBe(false)
-        expect(result.error).toContain('Element not found')
+        expect(result.error).toContain('uid-999')
+        expect(result.error.toLowerCase()).toContain('not found')
       })
     })
 

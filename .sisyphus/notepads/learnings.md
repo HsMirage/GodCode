@@ -36,3 +36,10 @@
 - `file-write.ts` 会先 `fs.readFile` 判断 `changeType`（`created` / `modified`），测试中需在 `beforeEach` 设定 `fs.readFile` 默认 reject（如 `ENOENT`）来稳定走 `created` 分支。
 - 返回 `metadata.size` 应使用 `Buffer.byteLength(content, 'utf8')` 语义；断言建议同步校验 `changeType`。
 - 路径越界测试在 Windows 下要避免硬编码 POSIX 路径，使用 `path.resolve(...)` 与 `path.join('..', 'x')` 保持跨平台稳定。
+
+## ProviderModelPanel 错误提示改进（2026-02-06）
+
+- 在前端 IPC 调用失败时，仅 `console.error` 会导致用户无感知；应在 catch 中补充用户可见反馈（本次使用 `alert`）。
+- 统一错误展示格式可降低排障成本：`操作失败: ${error instanceof Error ? error.message : String(error)}`。
+- 涉及 `loadProviders` / `handleSaveProvider` / `handleDeleteProvider` / `handleSaveModel` / `handleDeleteModel`（额外补了 `handleEditProvider`）的失败提示。
+- 当前环境（Windows + Bun v1.3.5）LSP 工具有已知崩溃问题，`lsp_diagnostics` 无法执行；需升级 Bun 到 1.3.6+ 或切换 WSL。

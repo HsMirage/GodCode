@@ -85,10 +85,5 @@ describe('IPC Channel Alignment', () => {
       expect(INVOKE_CHANNELS.TASK_LIST).toBe('task:list')
       expect(INVOKE_CHANNELS.TASK_UPDATE).toBe('task:update')
     })
-
-    it('should include router operations with correct naming', () => {
-      expect(INVOKE_CHANNELS.ROUTER_GET_RULES).toBe('router:get-rules')
-      expect(INVOKE_CHANNELS.ROUTER_SAVE_RULES).toBe('router:save-rules')
-    })
   })
 })

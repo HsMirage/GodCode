@@ -7,13 +7,13 @@
  */
 export interface Space {
   /** UUID */
-  id: string;
+  id: string
   /** User-defined name */
-  name: string;
+  name: string
   /** Working directory path */
-  workDir: string;
-  createdAt: Date;
-  updatedAt: Date;
+  workDir: string
+  createdAt: Date
+  updatedAt: Date
 }
 
 /**
@@ -21,130 +21,132 @@ export interface Space {
  */
 export interface Session {
   /** UUID */
-  id: string;
+  id: string
   /** Owning space */
-  spaceId: string;
+  spaceId: string
   /** Auto-generated or user-defined title */
-  title: string;
-  createdAt: Date;
-  updatedAt: Date;
-  status: "active" | "archived";
+  title: string
+  createdAt: Date
+  updatedAt: Date
+  status: 'active' | 'archived'
 }
 
 /**
  * Message: a single user or agent input/output message.
  */
 export interface Message {
-  id: string;
-  sessionId: string;
-  role: "user" | "assistant" | "system";
-  content: string;
-  createdAt: Date;
+  id: string
+  sessionId: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  createdAt: Date
   /** Tool calls, thoughts, or other metadata */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown>
 }
 
 /**
  * Task: an executable work unit.
  */
 export interface Task {
-  id: string;
-  sessionId: string;
+  id: string
+  sessionId: string
   /** Supports sub-tasks */
-  parentTaskId?: string;
-  type: "user" | "delegated" | "workforce";
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  parentTaskId?: string
+  type: 'user' | 'delegated' | 'workforce'
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
   /** Task description */
-  input: string;
+  input: string
   /** Task result */
-  output?: string;
+  output?: string
   /** Assigned LLM model */
-  assignedModel?: string;
+  assignedModel?: string
   /** Assigned agent type */
-  assignedAgent?: string;
-  createdAt: Date;
-  startedAt?: Date;
-  completedAt?: Date;
+  assignedAgent?: string
+  createdAt: Date
+  startedAt?: Date
+  completedAt?: Date
   /** Dependencies, priority, etc. */
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown>
 }
 
 /**
  * Artifact: files/code/data produced by agents.
  */
 export interface Artifact {
-  id: string;
-  sessionId: string;
+  id: string
+  sessionId: string
   /** Related task */
-  taskId?: string;
-  type: "code" | "file" | "image" | "data";
+  taskId?: string
+  type: 'code' | 'file' | 'image' | 'data'
   /** Path relative to space work directory */
-  path: string;
+  path: string
   /** Inline content for small files */
-  content?: string;
-  size: number;
+  content?: string
+  size: number
   /** Change type: created, modified, or deleted */
-  changeType: "created" | "modified" | "deleted";
+  changeType: 'created' | 'modified' | 'deleted'
   /** Diff content */
-  diff?: string;
+  diff?: string
   /** Whether the artifact has been accepted */
-  accepted: boolean;
-  createdAt: Date;
-  updatedAt: Date;
+  accepted: boolean
+  createdAt: Date
+  updatedAt: Date
 }
 
 /**
  * Run: an execution record for a task.
  */
 export interface Run {
-  id: string;
-  taskId: string;
-  status: "running" | "completed" | "failed";
-  startedAt: Date;
-  completedAt?: Date;
-  logs: RunLog[];
-  tokenUsage?: { prompt: number; completion: number; total: number };
+  id: string
+  taskId: string
+  status: 'running' | 'completed' | 'failed'
+  startedAt: Date
+  completedAt?: Date
+  logs: RunLog[]
+  tokenUsage?: { prompt: number; completion: number; total: number }
   /** Estimated cost */
-  cost?: number;
+  cost?: number
 }
 
 /**
  * RunLog: execution log entry.
  */
 export interface RunLog {
-  timestamp: Date;
-  level: "debug" | "info" | "warn" | "error";
-  message: string;
-  metadata?: Record<string, unknown>;
+  timestamp: Date
+  level: 'debug' | 'info' | 'warn' | 'error'
+  message: string
+  metadata?: Record<string, unknown>
 }
 
 /**
  * Agent: agent definition.
  */
 export interface Agent {
-  id: string;
-  name: string;
-  type: "delegate" | "workforce" | "subagent";
+  id: string
+  name: string
+  type: 'delegate' | 'workforce' | 'subagent'
   /** Supported tools/capabilities */
-  capabilities: string[];
-  config: Record<string, unknown>;
+  capabilities: string[]
+  config: Record<string, unknown>
 }
 
 /**
  * Model: LLM model configuration.
  */
 export interface Model {
-  id: string;
-  provider: string;
+  id: string
+  provider: string
   /** claude-3-5-sonnet, gpt-4, etc. */
-  modelName: string;
+  modelName: string
   /** Encrypted storage */
-  apiKey?: string;
+  apiKey?: string
+  /** Link to ApiKey table */
+  apiKeyId?: string
   /** Custom endpoint */
-  baseURL?: string;
+  baseURL?: string
   config: {
-    temperature?: number;
-    maxTokens?: number;
-    timeout?: number;
-  };
+    temperature?: number
+    maxTokens?: number
+    timeout?: number
+  }
 }

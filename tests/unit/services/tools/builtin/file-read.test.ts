@@ -7,7 +7,7 @@ import fs from 'fs/promises'
 vi.mock('fs/promises')
 
 describe('fileReadTool', () => {
-  const workspaceDir = '/test/workspace'
+  const workspaceDir = path.resolve('test', 'workspace')
   const context: ToolExecutionContext = {
     workspaceDir,
     sessionId: 'test-session'

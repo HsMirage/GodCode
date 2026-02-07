@@ -63,13 +63,13 @@ const ALLOWED_CHANNELS = [
   'updater:error',
   'updater:download-progress',
   'updater:update-downloaded',
-  'router:get-rules',
-  'router:save-rules',
   // Keychain Operations
   'keychain:set-password',
   'keychain:get-password',
   'keychain:delete-password',
   'keychain:list',
+  'keychain:list-with-models',
+  'keychain:get-with-models',
   'backup:list',
   'backup:create',
   'backup:delete',
@@ -87,7 +87,7 @@ const ALLOWED_CHANNELS = [
   // Event Channels
   'browser:panel-show',
   'browser:ai-operation',
-  'task:update',
+  'task:status-changed',
   'agent-run:update',
   'artifact:created',
   // Agent Run Operations
@@ -98,7 +98,11 @@ const ALLOWED_CHANNELS = [
   'artifact:get-diff',
   'artifact:accept',
   'artifact:revert',
-  'artifact:stats'
+  'artifact:stats',
+  // System Setting Operations
+  'setting:get',
+  'setting:set',
+  'setting:get-all'
 ] as const
 
 type AllowedChannel = (typeof ALLOWED_CHANNELS)[number]
