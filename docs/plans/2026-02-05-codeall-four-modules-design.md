@@ -33,7 +33,7 @@
 | `kuafu` | 夸父 | 夸父(KuaFu) | primary | 工作计划执行器，任务分发与进度跟踪 |
 | `luban` | 鲁班 | 鲁班(LuBan) | primary | 自主深度工作者，深入研究后果断行动 |
 | `baize` | 白泽 | 白泽(BaiZe) | subagent | 架构决策、代码审查、调试专家（只读咨询） |
-| `guiguzi` | 鬼谷子 | 鬼谷子(GuiGuZi) | subagent | 预规划分析，识别隐藏意图和歧义 |
+| `chongming` | 重明 | 重明(ChongMing) | subagent | 预规划分析，识别隐藏意图和歧义 |
 | `leigong` | 雷公 | 雷公(LeiGong) | subagent | 计划审查，验证清晰度和完整性 |
 | `diting` | 谛听 | 谛听(DiTing) | subagent | 文档查找、开源实现、多仓库分析 |
 | `qianliyan` | 千里眼 | 千里眼(QianLiYan) | subagent | 快速代码库探索、上下文搜索 |

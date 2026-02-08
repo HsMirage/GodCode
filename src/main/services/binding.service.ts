@@ -6,6 +6,7 @@
 import { DatabaseService } from './database'
 import { LoggerService } from './logger'
 import { SecureStorageService } from './secure-storage.service'
+import { SchemaVersionService } from './schema-version.service'
 import { Prisma } from '@prisma/client'
 import {
   AGENT_DEFINITIONS,
@@ -94,6 +95,9 @@ export class BindingService {
     this.logger.info(`Agent definitions count: ${AGENT_DEFINITIONS.length}`)
     this.logger.info(`Category definitions count: ${CATEGORY_DEFINITIONS.length}`)
 
+    // One-time hard migration for renamed agent codes. After this, the app only uses the new codes.
+    await this.migrateAgentCodeGuiguziToChongmingOnce()
+
     // 初始化 Agent 绑定
     for (const agent of AGENT_DEFINITIONS) {
       await this.ensureAgentBinding(agent)
@@ -129,6 +133,93 @@ export class BindingService {
       })
       this.logger.debug(`Created default binding for agent: ${agent.code}`)
     }
+  }
+
+  private async migrateAgentCodeGuiguziToChongmingOnce(): Promise<void> {
+    const version = '20260208_agentcode_guiguzi_to_chongming'
+    const schemaVersion = SchemaVersionService.getInstance()
+
+    if (await schemaVersion.hasVersion(version)) {
+      return
+    }
+
+    const definition = AGENT_DEFINITIONS.find(a => a.code === 'chongming')
+    if (!definition) {
+      // If the static definition ever changes, we still prefer to no-op rather than guess.
+      this.logger.warn('[BindingService] Missing agent definition for chongming; skipping migration')
+      await schemaVersion.setVersion(version, 'Skipped: missing chongming definition')
+      return
+    }
+
+    const legacyCode = 'guiguzi'
+    const newCode = 'chongming'
+
+    const [legacy, current] = await Promise.all([
+      this.prisma.agentBinding.findUnique({ where: { agentCode: legacyCode } }),
+      this.prisma.agentBinding.findUnique({ where: { agentCode: newCode } })
+    ])
+
+    if (!legacy) {
+      await schemaVersion.setVersion(version, 'No legacy binding found')
+      return
+    }
+
+    this.logger.info(`[BindingService] Hard-migrating agent code: ${legacyCode} -> ${newCode}`)
+
+    // Update other references first (best effort; they are not unique).
+    await Promise.all([
+      this.prisma.run.updateMany({ where: { agentCode: legacyCode }, data: { agentCode: newCode } }),
+      this.prisma.task.updateMany({ where: { assignedAgent: legacyCode }, data: { assignedAgent: newCode } })
+    ])
+
+    if (!current) {
+      // Safe to rename in place.
+      await this.prisma.agentBinding.update({
+        where: { agentCode: legacyCode },
+        data: {
+          agentCode: newCode,
+          agentName: definition.name,
+          agentType: definition.type,
+          description: definition.description
+        }
+      })
+
+      await schemaVersion.setVersion(version, 'Renamed legacy AgentBinding row')
+      return
+    }
+
+    // Both exist. Merge legacy into current if current looks like default.
+    const merged = {
+      modelId: current.modelId ?? legacy.modelId,
+      temperature:
+        current.temperature === definition.defaultTemperature && legacy.temperature !== definition.defaultTemperature
+          ? legacy.temperature
+          : current.temperature,
+      tools:
+        JSON.stringify(current.tools) === JSON.stringify(definition.tools) &&
+        JSON.stringify(legacy.tools) !== JSON.stringify(definition.tools)
+          ? legacy.tools
+          : current.tools,
+      systemPrompt: current.systemPrompt ?? legacy.systemPrompt,
+      enabled: current.enabled === true && legacy.enabled === false ? legacy.enabled : current.enabled
+    }
+
+    await this.prisma.agentBinding.update({
+      where: { agentCode: newCode },
+      data: {
+        agentName: definition.name,
+        agentType: definition.type,
+        description: definition.description,
+        modelId: merged.modelId,
+        temperature: merged.temperature,
+        tools: merged.tools,
+        systemPrompt: merged.systemPrompt,
+        enabled: merged.enabled
+      }
+    })
+
+    await this.prisma.agentBinding.delete({ where: { agentCode: legacyCode } })
+    await schemaVersion.setVersion(version, 'Merged legacy into current and deleted legacy row')
   }
 
   private async ensureCategoryBinding(category: CategoryDefinition): Promise<void> {

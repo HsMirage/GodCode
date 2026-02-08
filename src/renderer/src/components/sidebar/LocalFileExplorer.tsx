@@ -134,8 +134,6 @@ export const LocalFileExplorer: React.FC<LocalFileExplorerProps> = ({ className 
     return spaces.find(s => s.id === currentSpaceId)?.workDir
   }, [spaces, currentSpaceId])
 
-  // ... (fetchNode and loadRoot remain the same)
-
   const fetchNode = useCallback(
     async (path: string = '.') => {
       if (!currentWorkDir) return null

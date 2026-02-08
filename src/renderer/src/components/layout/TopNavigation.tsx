@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useDataStore } from '../../store/data.store'
 
 export function TopNavigation() {
-  const { spaces, currentSpaceId } = useDataStore()
+  const { spaces, sessionsBySpaceId, currentSpaceId, currentSessionId } = useDataStore()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -39,6 +39,14 @@ export function TopNavigation() {
         {currentSpaceId && (
           <span className="ml-2 text-xs font-normal text-slate-500">
             / {spaces.find(s => s.id === currentSpaceId)?.name ?? 'Space'}
+            {' '}
+            /{' '}
+            {currentSessionId
+              ? (
+                  (sessionsBySpaceId[currentSpaceId] ?? []).find(s => s.id === currentSessionId)
+                    ?.title || '未命名对话'
+                ).trim()
+              : '未选择对话'}
           </span>
         )}
       </button>
@@ -46,22 +54,6 @@ export function TopNavigation() {
       <div className="flex-1" />
 
       <div className="flex items-center gap-2 ml-auto">
-        <div
-          className="hidden md:flex items-center gap-2 text-[11px] text-slate-600"
-          title={window.location.href}
-        >
-          <span
-            className={[
-              'px-2 py-1 rounded-full border',
-              import.meta.env.DEV
-                ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-                : 'border-slate-700/60 bg-slate-900/40 text-slate-500'
-            ].join(' ')}
-          >
-            {import.meta.env.DEV ? 'DEV' : 'PROD'}
-          </span>
-          <span className="font-mono">{window.location.protocol.replace(':', '')}</span>
-        </div>
         <button
           type="button"
           onClick={() => navigate('/settings')}

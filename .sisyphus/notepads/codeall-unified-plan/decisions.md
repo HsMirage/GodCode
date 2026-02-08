@@ -168,5 +168,29 @@
 5. Build model/agent management UI (6.4)
 
 ### Agent System Documentation (2026-02-01)
+
 - Created `AGENTS.md` to formalize the split between orchestration (Workforce) and execution (Delegate).
 - Defined standard workflow for adding new AI agents to the platform.
+
+## [2026-02-08] Browser tool naming for agent bindings
+
+- Decided to keep canonical browser tool names with underscore form (`browser_navigate`, etc.) because registry + ai-browser tool definitions + tests are already aligned to underscore naming.
+- Added browser tools only to executor agent (`luban`) and avoided readonly agents, matching permission intent.
+
+## [2026-02-08] Metis prompt template migration decision
+
+- Decided to port the full upstream Metis system prompt into `src/main/services/delegate/prompts/metis.ts` without structural redesign.
+- Identity was intentionally localized to `重明 (ChongMing) - The Double-Pupiled Sage` while preserving all operational sections (Phase 0, Phase 1 by intent, output format, QA/acceptance directives, critical rules).
+- Kept template export name as `metisPromptTemplate` for discoverability/continuity, while binding runtime identity through `agentCode: 'chongming'`.
+
+## [2026-02-08] DiTing (Librarian) prompt template porting strategy
+
+- Ported the full librarian system prompt into `src/main/services/delegate/prompts/librarian.ts` without redesigning phase logic or tool tables.
+- Replaced identity from "THE LIBRARIAN" to "谛听 (DiTing) - The All-Hearing Divine Beast" and added mythology context line while keeping all operational constraints intact.
+- Bound template to `agentCode: 'diting'` to match shared agent definitions and exported it via `prompts/index.ts` for registry discoverability.
+
+## [2026-02-08] BaiZe oracle template migration decision
+
+- Decided to preserve Oracle prompt behavior by porting the full system prompt text verbatim in structure and constraints, changing only identity framing required by CodeAll mythology naming.
+- Bound the new template with `agentCode: 'baize'` to match `src/shared/agent-definitions.ts` and exported it from `src/main/services/delegate/prompts/index.ts`.
+- Kept readonly consultation semantics explicit in prompt context to align with Oracle's no-write/no-edit operating model.

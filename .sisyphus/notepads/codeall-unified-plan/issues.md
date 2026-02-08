@@ -246,3 +246,41 @@ const { autoUpdater } = pkg
 ## [2026-02-03] Typecheck blocked by missing deps in environment
 
 - `pnpm typecheck` failed: missing module declarations for `lucide-react`, `@headlessui/react`, and `@xyflow/react` in this workspace.
+
+## [2026-02-08] Verification environment blockers during prompt migration
+
+- Full-repo `pnpm run typecheck` is currently failing due to pre-existing unrelated renderer import errors:
+  - `src/renderer/src/components/layout/Sidebar.tsx`: missing `../sidebar/LocalFileExplorer`
+  - `src/renderer/src/components/sidebar/LocalFileExplorer.test.tsx`: missing `./LocalFileExplorer`
+- `pnpm run build` failed in this environment because `electron-vite` is not available on PATH (`sh: 1: electron-vite: not found`).
+- Focused TypeScript verification for changed prompt files succeeded via:
+  - `pnpm exec tsc --noEmit src/main/services/delegate/prompts/explore.ts src/main/services/delegate/prompts/index.ts src/main/services/delegate/prompts/types.ts`
+
+## [2026-02-08] Browser binding task verification blockers
+
+- `pnpm typecheck` currently fails due to pre-existing unrelated workspace issues:
+  - Missing `openai` type/module resolution in `src/main/services/llm/openai.adapter.ts` and related tests.
+  - Missing renderer component import `../sidebar/LocalFileExplorer` in `src/renderer/src/components/layout/Sidebar.tsx` and corresponding test import.
+- `pnpm build` fails on unresolved renderer import `../sidebar/LocalFileExplorer` in `Sidebar.tsx` (unrelated to browser tool binding changes).
+
+## [2026-02-08] Prompt migration verification blocker notes
+
+- Full-workspace `pnpm typecheck` still fails due to unrelated dependency/type environment issues outside this task scope:
+  - Missing `openai` module/type resolution in `src/main/services/llm/openai.adapter.ts` and related tests.
+  - Node/undici type mismatch (`EventSource` missing in `undici-types`) when invoking direct `tsc` checks.
+- Build verification for this task succeeded via `pnpm build`, and LSP diagnostics for changed files were clean.
+
+## [2026-02-08] DiTing prompt migration verification blocker
+
+- Full-repo `pnpm run typecheck` remains blocked by pre-existing unrelated OpenAI module/type resolution errors:
+  - `src/main/services/llm/openai.adapter.ts` cannot resolve `openai` and `openai/resources/chat/completions`
+  - `tests/unit/services/llm/openai.adapter.test.ts` cannot resolve `openai`
+- Changed prompt files are diagnostics-clean; blocker is workspace baseline, not migration changes.
+
+## [2026-02-08] LeiGong prompt migration verification blocker
+
+- Full-repo `pnpm typecheck` is still blocked by pre-existing workspace issues unrelated to this prompt migration:
+  - `src/main/services/llm/openai.adapter.ts`: cannot find module `openai` and `openai/resources/chat/completions`
+  - `tests/unit/services/llm/openai.adapter.test.ts`: cannot find module `openai`
+  - Additional ambient type mismatch from `@types/node` vs `undici-types` (`EventSource`) also appears in focused `tsc` execution.
+- LSP diagnostics on changed files are clean (`src/main/services/delegate/prompts/momus.ts`, `src/main/services/delegate/prompts/index.ts`).

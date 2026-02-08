@@ -9,7 +9,8 @@ export interface MessageInputProps {
   disabled?: boolean
   disabledHint?: string
   /**
-   * When changed, the input clears and focuses (used for switching sessions).
+   * When changed, the input switches to the draft context for that key.
+   * Drafts are preserved per key so switching sessions won't lose unsent content.
    */
   resetKey?: string | number | null
   autoFocus?: boolean
@@ -51,6 +52,12 @@ type Attachment = {
   truncated: boolean
 }
 
+type DraftState = {
+  value: string
+  thinkingEnabled: boolean
+  attachments: Attachment[]
+}
+
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']
@@ -80,6 +87,9 @@ export function MessageInput({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const inputId = useId()
+  const draftKeyRef = useRef<string | null>(null)
+  const draftsRef = useRef<Record<string, DraftState>>({})
+  const latestRef = useRef<DraftState>({ value: '', thinkingEnabled: false, attachments: [] })
 
   const resizeTextarea = () => {
     const textarea = textareaRef.current
@@ -94,9 +104,25 @@ export function MessageInput({
   }, [value])
 
   useEffect(() => {
+    latestRef.current = { value, thinkingEnabled, attachments }
+  }, [attachments, thinkingEnabled, value])
+
+  useEffect(() => {
     if (resetKey === undefined) return
-    setValue('')
-    setAttachments([])
+
+    const prevKey = draftKeyRef.current
+    if (prevKey) {
+      draftsRef.current[prevKey] = latestRef.current
+    }
+
+    const nextKey = resetKey == null ? null : String(resetKey)
+    draftKeyRef.current = nextKey
+
+    const next = nextKey ? draftsRef.current[nextKey] : undefined
+    setValue(next?.value ?? '')
+    setThinkingEnabled(next?.thinkingEnabled ?? false)
+    setAttachments(next?.attachments ?? [])
+
     if (!autoFocus) return
 
     // Focus after the DOM updates.
@@ -140,14 +166,41 @@ export function MessageInput({
     const payload = buildPayload()
     if (!payload) return
 
+    const prevDraft: DraftState = {
+      value,
+      thinkingEnabled,
+      attachments
+    }
+
+    // Optimistically clear immediately to avoid IME/composition or async timing issues
+    // that can cause the old text to "re-appear" after a successful send.
+    setValue('')
+    setAttachments([])
+    textareaRef.current && (textareaRef.current.value = '')
+
+    const key = draftKeyRef.current
+    if (key) {
+      draftsRef.current[key] = { value: '', attachments: [], thinkingEnabled }
+    }
+
     try {
       const ok = await onSend(payload)
       if (ok) {
-        setValue('')
-        setAttachments([])
+        // Already cleared above; keep it cleared.
+        return
       }
+
+      // Not sent: restore so user can retry.
+      setValue(prevDraft.value)
+      setThinkingEnabled(prevDraft.thinkingEnabled)
+      setAttachments(prevDraft.attachments)
+      if (key) draftsRef.current[key] = prevDraft
     } catch {
       // Keep the input so user can retry.
+      setValue(prevDraft.value)
+      setThinkingEnabled(prevDraft.thinkingEnabled)
+      setAttachments(prevDraft.attachments)
+      if (key) draftsRef.current[key] = prevDraft
     }
   }
 

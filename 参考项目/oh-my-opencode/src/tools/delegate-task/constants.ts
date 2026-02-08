@@ -1,8 +1,9 @@
 import type { CategoryConfig } from "../../config/schema"
 import type {
-  AvailableCategory,
-  AvailableSkill,
-} from "../../agents/dynamic-agent-prompt-builder"
+   AvailableCategory,
+   AvailableSkill,
+ } from "../../agents/dynamic-agent-prompt-builder"
+import { truncateDescription } from "../../shared/truncate-description"
 
 export const VISUAL_CATEGORY_PROMPT_APPEND = `<Category_Context>
 You are working on VISUAL/UI tasks.
@@ -459,13 +460,13 @@ YOU MUST END YOUR RESPONSE WITH THIS SECTION.
 
 1. **Wave 1**: Fire these tasks IN PARALLEL (no dependencies)
    \`\`\`
-   delegate_task(category="...", load_skills=[...], run_in_background=false, prompt="Task 1: ...")
-   delegate_task(category="...", load_skills=[...], run_in_background=false, prompt="Task N: ...")
+   task(category="...", load_skills=[...], run_in_background=false, prompt="Task 1: ...")
+   task(category="...", load_skills=[...], run_in_background=false, prompt="Task N: ...")
    \`\`\`
 
 2. **Wave 2**: After Wave 1 completes, fire next wave IN PARALLEL
    \`\`\`
-   delegate_task(category="...", load_skills=[...], run_in_background=false, prompt="Task 2: ...")
+   task(category="...", load_skills=[...], run_in_background=false, prompt="Task 2: ...")
    \`\`\`
 
 3. Continue until all waves complete
@@ -476,7 +477,7 @@ YOU MUST END YOUR RESPONSE WITH THIS SECTION.
 WHY THIS FORMAT IS MANDATORY:
 - Caller can directly copy TODO items
 - Wave grouping enables parallel execution
-- Each task has clear delegate_task parameters
+- Each task has clear task parameters
 - QA criteria ensure verifiable completion
 </FINAL_OUTPUT_FOR_CALLER>
 
@@ -492,13 +493,12 @@ function renderPlanAgentCategoryRows(categories: AvailableCategory[]): string[] 
 }
 
 function renderPlanAgentSkillRows(skills: AvailableSkill[]): string[] {
-  const sorted = [...skills].sort((a, b) => a.name.localeCompare(b.name))
-  return sorted.map((skill) => {
-    const firstSentence = skill.description.split(".")[0] || skill.description
-    const domain = firstSentence.trim() || skill.name
-    return `| \`${skill.name}\` | ${domain} |`
-  })
-}
+   const sorted = [...skills].sort((a, b) => a.name.localeCompare(b.name))
+   return sorted.map((skill) => {
+     const domain = truncateDescription(skill.description).trim() || skill.name
+     return `| \`${skill.name}\` | ${domain} |`
+   })
+ }
 
 export function buildPlanAgentSkillsSection(
   categories: AvailableCategory[] = [],

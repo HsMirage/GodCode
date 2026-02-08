@@ -12,6 +12,7 @@ const AgentPermissionSchema = z.object({
   edit: PermissionValue.optional(),
   bash: BashPermission.optional(),
   webfetch: PermissionValue.optional(),
+  task: PermissionValue.optional(),
   doom_loop: PermissionValue.optional(),
   external_directory: PermissionValue.optional(),
 })
@@ -86,6 +87,7 @@ export const HookNameSchema = z.enum([
   "category-skill-reminder",
 
   "compaction-context-injector",
+  "compaction-todo-preserver",
   "claude-code-hooks",
   "auto-slash-command",
   "edit-error-recovery",
@@ -100,6 +102,7 @@ export const HookNameSchema = z.enum([
   "stop-continuation-guard",
   "tasks-todowrite-disabler",
   "write-existing-file-guard",
+  "anthropic-effort",
 ])
 
 export const BuiltinCommandNameSchema = z.enum([
@@ -183,7 +186,7 @@ export const SisyphusAgentConfigSchema = z.object({
 })
 
 export const CategoryConfigSchema = z.object({
-  /** Human-readable description of the category's purpose. Shown in delegate_task prompt. */
+  /** Human-readable description of the category's purpose. Shown in task prompt. */
   description: z.string().optional(),
   model: z.string().optional(),
   variant: z.string().optional(),
@@ -266,6 +269,10 @@ export const ExperimentalConfigSchema = z.object({
   dynamic_context_pruning: DynamicContextPruningConfigSchema.optional(),
   /** Enable experimental task system for Todowrite disabler hook */
   task_system: z.boolean().optional(),
+  /** Timeout in ms for loadAllPluginComponents during config handler init (default: 10000, min: 1000) */
+  plugin_load_timeout_ms: z.number().min(1000).optional(),
+  /** Wrap hook creation in try/catch to prevent one failing hook from crashing the plugin (default: true at call site) */
+  safe_hook_creation: z.boolean().optional(),
 })
 
 export const SkillSourceSchema = z.union([
@@ -333,10 +340,10 @@ export const BabysittingConfigSchema = z.object({
 })
 
 export const GitMasterConfigSchema = z.object({
-  /** Add "Ultraworked with Sisyphus" footer to commit messages (default: true) */
-  commit_footer: z.boolean().default(true),
-  /** Add "Co-authored-by: Sisyphus" trailer to commit messages (default: true) */
-  include_co_authored_by: z.boolean().default(true),
+	/** Add "Ultraworked with Sisyphus" footer to commit messages (default: true). Can be boolean or custom string. */
+	commit_footer: z.union([z.boolean(), z.string()]).default(true),
+	/** Add "Co-authored-by: Sisyphus" trailer to commit messages (default: true) */
+	include_co_authored_by: z.boolean().default(true),
 })
 
 export const BrowserAutomationProviderSchema = z.enum(["playwright", "agent-browser", "dev-browser"])
@@ -420,6 +427,8 @@ export const OhMyOpenCodeConfigSchema = z.object({
   websearch: WebsearchConfigSchema.optional(),
   tmux: TmuxConfigSchema.optional(),
   sisyphus: SisyphusConfigSchema.optional(),
+  /** Migration history to prevent re-applying migrations (e.g., model version upgrades) */
+  _migrations: z.array(z.string()).optional(),
 })
 
 export type OhMyOpenCodeConfig = z.infer<typeof OhMyOpenCodeConfigSchema>

@@ -1,9 +1,6 @@
 {
-  "active_plan": "/mnt/d/AiWork/CodeAll/.sisyphus/plans/settings-ui-fix.md",
-  "started_at": "2026-02-06T14:33:00.298Z",
-  "completed_at": "2026-02-06T14:50:00.000Z",
-  "session_ids": ["ses_3ccbea3ddffeJvMYIt3MGg94YS"],
-  "plan_name": "settings-ui-fix",
-  "status": "completed",
-  "summary": "Tailwind JIT 缓存问题已解决，通过清除缓存并重新构建修复。无需代码修改。"
+  "active_plan": "/mnt/d/AiWork/CodeAll/.sisyphus/plans/codeall-feature-fix.md",
+  "started_at": "2026-02-08T09:47:26.003Z",
+  "session_ids": ["ses_3c3724d60ffetCX285eW7iOHbZ"],
+  "plan_name": "codeall-feature-fix"
 }
