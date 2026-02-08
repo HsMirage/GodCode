@@ -144,7 +144,7 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
  */
 export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
   {
-    code: 'zhinu',
+    code: 'zhinv',
     name: '织女(ZhiNv)',
     chineseName: '织女',
     description: '前端/UI/UX、设计、样式、动画',
