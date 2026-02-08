@@ -11,17 +11,17 @@
  * Modified by CodeAll project.
  */
 
-import { AGENT_DEFINITIONS } from '@/shared/agent-definitions'
+import { AGENT_DEFINITIONS } from '../../../shared/agent-definitions'
 import {
-  explorePromptTemplate,
-  oraclePromptTemplate,
-  librarianPromptTemplate,
-  metisPromptTemplate,
-  momusPromptTemplate,
-  prometheusPromptTemplate,
-  sisyphusPromptTemplate,
-  atlasPromptTemplate,
-  hephaestusPromptTemplate
+  qianliyanPromptTemplate,
+  baizePromptTemplate,
+  ditingPromptTemplate,
+  chongmingPromptTemplate,
+  leigongPromptTemplate,
+  fuxiPromptTemplate,
+  haotianPromptTemplate,
+  kuafuPromptTemplate,
+  lubanPromptTemplate
 } from './prompts'
 import type { AgentPromptTemplate } from './prompts/types'
 
@@ -45,15 +45,15 @@ const AGENT_ALIASES: Record<string, string> = {
 }
 
 const PROMPT_MAP: Record<string, AgentPromptTemplate> = {
-  qianliyan: explorePromptTemplate,
-  baize: oraclePromptTemplate,
-  diting: librarianPromptTemplate,
-  chongming: metisPromptTemplate,
-  leigong: momusPromptTemplate,
-  fuxi: prometheusPromptTemplate,
-  haotian: sisyphusPromptTemplate,
-  kuafu: atlasPromptTemplate,
-  luban: hephaestusPromptTemplate
+  qianliyan: qianliyanPromptTemplate,
+  baize: baizePromptTemplate,
+  diting: ditingPromptTemplate,
+  chongming: chongmingPromptTemplate,
+  leigong: leigongPromptTemplate,
+  fuxi: fuxiPromptTemplate,
+  haotian: haotianPromptTemplate,
+  kuafu: kuafuPromptTemplate,
+  luban: lubanPromptTemplate
 }
 
 function determineAgentType(tools: string[]): 'readonly' | 'executor' {
