@@ -14,6 +14,8 @@ import { safeInvoke } from '../../api'
 import { cn } from '../../utils'
 import { getLastPathSegment } from '../../utils/path'
 
+import { LocalFileExplorer } from '../sidebar/LocalFileExplorer'
+
 export function Sidebar() {
   const {
     spaces,
@@ -37,7 +39,6 @@ export function Sidebar() {
   const [renameSpaceName, setRenameSpaceName] = useState('')
   const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null)
   const [renameSessionTitle, setRenameSessionTitle] = useState('')
-
 
   useEffect(() => {
     if (!currentSpaceId) return
@@ -154,7 +155,13 @@ export function Sidebar() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-2">
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+        {currentSpaceId && (
+          <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 overflow-hidden mb-4 h-64 flex flex-col">
+            <LocalFileExplorer />
+          </div>
+        )}
+
         {spaces.length === 0 ? (
           <div className="text-center py-8 text-slate-600 text-sm">No spaces yet</div>
         ) : (
@@ -168,13 +175,13 @@ export function Sidebar() {
               <div
                 key={space.id}
                 className={cn(
-                  'rounded-lg border transition-colors',
+                  'rounded-xl border transition-colors',
                   isCurrent
-                    ? 'border-slate-700/70 bg-slate-900/30'
-                    : 'border-slate-900/0 hover:border-slate-800/60'
+                    ? 'border-indigo-500/25 bg-slate-900/40 shadow-[0_0_18px_rgba(99,102,241,0.08)]'
+                    : 'border-slate-800/50 bg-slate-950/30 hover:border-slate-700/70'
                 )}
               >
-                <div className="flex items-center gap-1 px-2 py-1.5">
+                <div className="flex items-center gap-1 px-3 py-2">
                   <button
                     type="button"
                     onClick={() => void handleToggleSpace(space.id)}
@@ -214,7 +221,9 @@ export function Sidebar() {
                           className="flex-1 min-w-0 bg-slate-950/40 border border-slate-800 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
                           autoFocus
                         />
-                        <span className="flex-shrink-0 text-xs text-slate-600">{sessions.length}</span>
+                        <span className="flex-shrink-0 text-xs text-slate-600">
+                          {sessions.length}
+                        </span>
                         <button
                           type="button"
                           onClick={handleRenameCancel}
@@ -242,7 +251,9 @@ export function Sidebar() {
                           )}
                         />
                         <span className="truncate">{space.name}</span>
-                        <span className="ml-auto text-xs text-slate-600">{sessions.length}</span>
+                        <span className="ml-auto text-[11px] text-slate-600 tabular-nums">
+                          {sessions.length}
+                        </span>
                       </button>
                     )}
                   </div>
@@ -269,112 +280,110 @@ export function Sidebar() {
                   </button>
                 </div>
 
-                {/* Always-visible action under each space item (not hidden behind expand) */}
-                <div className="px-2 pb-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExpanded(prev => ({ ...prev, [space.id]: true }))
-                      void handleCreateSession(space.id)
-                    }}
-                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-900 transition-colors"
-                    title="新对话"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    新对话
-                  </button>
-                </div>
-
                 {isExpanded && (
-                  <div className="px-2 pb-2 pt-0">
-                    <div className="mt-1 space-y-1">
-                      {sessions.length === 0 ? (
-                        <div className="text-center py-3 text-slate-600 text-xs">
-                          No active sessions
-                        </div>
-                      ) : (
-                        sessions.map(session => {
-                          const isRenamingSession = renamingSessionId === session.id
-                          const title = session.title || '未命名对话'
+                  <div className="px-3 pb-3 pt-0">
+                    <div className="mt-1 ml-2 pl-3 border-l border-slate-800/70">
+                      <button
+                        type="button"
+                        onClick={() => void handleCreateSession(space.id)}
+                        className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 transition-colors"
+                        title="新对话"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        新对话
+                      </button>
 
-                          if (isRenamingSession) {
+                      <div className="mt-2 space-y-1">
+                        {sessions.length === 0 ? (
+                          <div className="text-center py-3 text-slate-600 text-xs">
+                            No active sessions
+                          </div>
+                        ) : (
+                          sessions.map(session => {
+                            const isRenamingSession = renamingSessionId === session.id
+                            const title = session.title || '未命名对话'
+
+                            if (isRenamingSession) {
+                              return (
+                                <form
+                                  key={session.id}
+                                  onSubmit={e => {
+                                    e.preventDefault()
+                                    void handleSessionRenameSubmit(space.id, session.id)
+                                  }}
+                                  className="flex items-center gap-2 px-2 py-2 rounded-md bg-slate-900/50 border border-slate-800/70"
+                                >
+                                  <input
+                                    value={renameSessionTitle}
+                                    onChange={e => setRenameSessionTitle(e.target.value)}
+                                    className="flex-1 min-w-0 bg-slate-950/40 border border-slate-800 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                                    autoFocus
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={handleSessionRenameCancel}
+                                    className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
+                                    title="Cancel"
+                                  >
+                                    <X className="h-4 w-4" />
+                                  </button>
+                                </form>
+                              )
+                            }
+
                             return (
-                              <form
+                              <div
                                 key={session.id}
-                                onSubmit={e => {
-                                  e.preventDefault()
-                                  void handleSessionRenameSubmit(space.id, session.id)
-                                }}
-                                className="flex items-center gap-2 px-2 py-2 rounded-md bg-slate-900/50 border border-slate-800/70"
+                                className={cn(
+                                  'w-full flex items-center gap-2 px-1 rounded-lg transition-colors group',
+                                  currentSessionId === session.id
+                                    ? 'bg-slate-800 text-slate-100'
+                                    : 'text-slate-400 hover:bg-slate-900/60 hover:text-slate-200'
+                                )}
                               >
-                                <input
-                                  value={renameSessionTitle}
-                                  onChange={e => setRenameSessionTitle(e.target.value)}
-                                  className="flex-1 min-w-0 bg-slate-950/40 border border-slate-800 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                                  autoFocus
-                                />
                                 <button
                                   type="button"
-                                  onClick={handleSessionRenameCancel}
-                                  className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
-                                  title="Cancel"
+                                  onClick={() => void selectSession(space.id, session.id)}
+                                  className="flex-1 min-w-0 flex items-center gap-3 px-2 py-2 text-sm text-left"
                                 >
-                                  <X className="h-4 w-4" />
+                                  <MessageSquare
+                                    className={cn(
+                                      'w-4 h-4 flex-shrink-0',
+                                      currentSessionId === session.id
+                                        ? 'text-indigo-400'
+                                        : 'text-slate-600 group-hover:text-slate-500'
+                                    )}
+                                  />
+                                  <span className="truncate">{title}</span>
                                 </button>
-                              </form>
-                            )
-                          }
 
-                          return (
-                            <div
-                              key={session.id}
-                              className={cn(
-                                'w-full flex items-center gap-2 px-1 rounded-md transition-colors group',
-                                currentSessionId === session.id
-                                  ? 'bg-slate-800 text-slate-100'
-                                  : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200'
-                              )}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => void selectSession(space.id, session.id)}
-                                className="flex-1 min-w-0 flex items-center gap-3 px-1.5 py-2 text-sm text-left"
-                              >
-                                <MessageSquare
-                                  className={cn(
-                                    'w-4 h-4 flex-shrink-0',
-                                    currentSessionId === session.id
-                                      ? 'text-indigo-400'
-                                      : 'text-slate-600 group-hover:text-slate-500'
-                                  )}
-                                />
-                                <span className="truncate">{title}</span>
-                              </button>
-
-                              <div className="flex items-center gap-1 pr-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
-                                  type="button"
-                                  onClick={() => handleSessionRenameStart(session.id, title)}
-                                  className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
-                                  title="Rename"
-                                  aria-label="Rename session"
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => void handleDeleteSession(space.id, session.id, title)}
-                                  className="p-1 rounded text-slate-500 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
-                                  title="Delete"
-                                  aria-label="Delete session"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
+                                <div className="flex items-center gap-1 pr-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSessionRenameStart(session.id, title)}
+                                    className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
+                                    title="Rename"
+                                    aria-label="Rename session"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      void handleDeleteSession(space.id, session.id, title)
+                                    }
+                                    className="p-1 rounded text-slate-500 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+                                    title="Delete"
+                                    aria-label="Delete session"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                          )
-                        })
-                      )}
+                            )
+                          })
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}

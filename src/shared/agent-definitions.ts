@@ -68,7 +68,22 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     description: '自主深度工作者，深入研究后果断行动',
     defaultModel: 'gpt-4o',
     defaultTemperature: 0.2,
-    tools: ['read', 'write', 'edit', 'bash', 'glob', 'grep', 'webfetch', 'delegate_task']
+    tools: [
+      'read',
+      'write',
+      'edit',
+      'bash',
+      'glob',
+      'grep',
+      'webfetch',
+      'delegate_task',
+      'browser_navigate',
+      'browser_click',
+      'browser_fill',
+      'browser_snapshot',
+      'browser_screenshot',
+      'browser_extract'
+    ]
   },
 
   // Subagents (辅助智能体)
@@ -83,9 +98,9 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     tools: ['read', 'glob', 'grep']
   },
   {
-    code: 'guiguzi',
-    name: '鬼谷子(GuiGuZi)',
-    chineseName: '鬼谷子',
+    code: 'chongming',
+    name: '重明(ChongMing)',
+    chineseName: '重明',
     type: 'subagent',
     description: '预规划分析，识别隐藏意图和歧义',
     defaultModel: 'claude-3-5-sonnet-20240620',
@@ -198,40 +213,40 @@ export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
  * 获取所有 Agent 代码
  */
 export function getAgentCodes(): string[] {
-  return AGENT_DEFINITIONS.map((a) => a.code)
+  return AGENT_DEFINITIONS.map(a => a.code)
 }
 
 /**
  * 获取所有 Category 代码
  */
 export function getCategoryCodes(): string[] {
-  return CATEGORY_DEFINITIONS.map((c) => c.code)
+  return CATEGORY_DEFINITIONS.map(c => c.code)
 }
 
 /**
  * 根据代码获取 Agent 定义
  */
 export function getAgentByCode(code: string): AgentDefinition | undefined {
-  return AGENT_DEFINITIONS.find((a) => a.code === code)
+  return AGENT_DEFINITIONS.find(a => a.code === code)
 }
 
 /**
  * 根据代码获取 Category 定义
  */
 export function getCategoryByCode(code: string): CategoryDefinition | undefined {
-  return CATEGORY_DEFINITIONS.find((c) => c.code === code)
+  return CATEGORY_DEFINITIONS.find(c => c.code === code)
 }
 
 /**
  * 获取主要智能体列表
  */
 export function getPrimaryAgents(): AgentDefinition[] {
-  return AGENT_DEFINITIONS.filter((a) => a.type === 'primary')
+  return AGENT_DEFINITIONS.filter(a => a.type === 'primary')
 }
 
 /**
  * 获取辅助智能体列表
  */
 export function getSubagents(): AgentDefinition[] {
-  return AGENT_DEFINITIONS.filter((a) => a.type === 'subagent')
+  return AGENT_DEFINITIONS.filter(a => a.type === 'subagent')
 }

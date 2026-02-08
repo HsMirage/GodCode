@@ -1,5 +1,10 @@
 import { BrowserWindow } from 'electron'
-import type { Tool, ToolExecutionContext, ToolExecutionResult } from '../tool.interface'
+import type {
+  Tool,
+  ToolExecutionContext,
+  ToolExecutionResult,
+  ToolParameter
+} from '../tool.interface'
 import { allTools } from '../../ai-browser/tools'
 import { browserViewManager } from '../../browser-view.service'
 import type { BrowserTool, BrowserToolContext } from '../../ai-browser/types'
@@ -13,10 +18,7 @@ function notifyBrowserPanelShow(): void {
 }
 
 // Helper function to notify renderer of AI operation status
-function notifyAIOperation(
-  toolName: string,
-  status: 'running' | 'completed' | 'error'
-): void {
+function notifyAIOperation(toolName: string, status: 'running' | 'completed' | 'error'): void {
   const windows = BrowserWindow.getAllWindows()
   if (windows.length > 0) {
     windows[0].webContents.send('browser:ai-operation', { toolName, status })
@@ -26,19 +28,21 @@ function notifyAIOperation(
 // Helper to convert BrowserTool to generic Tool
 function adaptBrowserTool(browserTool: BrowserTool): Tool {
   // Convert JSON Schema properties to ToolParameter[]
-  const parameters = Object.entries(browserTool.parameters.properties).map(([name, prop]) => ({
-    name,
-    type:
-      prop.type === 'string' ||
-      prop.type === 'number' ||
-      prop.type === 'boolean' ||
-      prop.type === 'object' ||
-      prop.type === 'array'
-        ? prop.type
-        : 'string', // Default fallback
-    description: prop.description || '',
-    required: browserTool.parameters.required?.includes(name) || false
-  })) as any[] // Using any[] to bypass strict type matching for now, verified in implementation
+  const parameters: ToolParameter[] = Object.entries(browserTool.parameters.properties).map(
+    ([name, prop]) => ({
+      name,
+      type:
+        prop.type === 'string' ||
+        prop.type === 'number' ||
+        prop.type === 'boolean' ||
+        prop.type === 'object' ||
+        prop.type === 'array'
+          ? prop.type
+          : 'string',
+      description: prop.description || '',
+      required: browserTool.parameters.required?.includes(name) || false
+    })
+  )
 
   return {
     definition: {

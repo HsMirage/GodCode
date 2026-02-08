@@ -18,6 +18,23 @@ export interface AgentConfig {
 }
 
 export const agents: Record<string, AgentConfig> = {
+  luban: {
+    type: 'executor',
+    model: 'claude-3-5-sonnet-20240620',
+    tools: [
+      'read',
+      'write',
+      'edit',
+      'grep',
+      'glob',
+      'browser_navigate',
+      'browser_click',
+      'browser_fill',
+      'browser_snapshot',
+      'browser_screenshot',
+      'browser_extract'
+    ]
+  },
   oracle: {
     type: 'readonly',
     model: 'claude-3-5-sonnet-20240620',
