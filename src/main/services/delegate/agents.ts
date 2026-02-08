@@ -32,6 +32,7 @@ export interface AgentConfig {
   promptTemplate?: AgentPromptTemplate
 }
 
+// OMO names → CodeAll pinyin codes (backward compatibility)
 const AGENT_ALIASES: Record<string, string> = {
   explore: 'qianliyan',
   oracle: 'baize',
@@ -44,17 +45,23 @@ const AGENT_ALIASES: Record<string, string> = {
   hephaestus: 'luban'
 }
 
-const PROMPT_MAP: Record<string, AgentPromptTemplate> = {
-  qianliyan: qianliyanPromptTemplate,
-  baize: baizePromptTemplate,
-  diting: ditingPromptTemplate,
-  chongming: chongmingPromptTemplate,
-  leigong: leigongPromptTemplate,
-  fuxi: fuxiPromptTemplate,
-  haotian: haotianPromptTemplate,
-  kuafu: kuafuPromptTemplate,
-  luban: lubanPromptTemplate
-}
+// All prompt templates - build map automatically from agentCode
+const ALL_PROMPTS: AgentPromptTemplate[] = [
+  qianliyanPromptTemplate,
+  baizePromptTemplate,
+  ditingPromptTemplate,
+  chongmingPromptTemplate,
+  leigongPromptTemplate,
+  fuxiPromptTemplate,
+  haotianPromptTemplate,
+  kuafuPromptTemplate,
+  lubanPromptTemplate
+]
+
+// Auto-build PROMPT_MAP from agentCode field
+const PROMPT_MAP: Record<string, AgentPromptTemplate> = Object.fromEntries(
+  ALL_PROMPTS.map(p => [p.agentCode, p])
+)
 
 function determineAgentType(tools: string[]): 'readonly' | 'executor' {
   return tools.some(t => ['write', 'edit'].includes(t)) ? 'executor' : 'readonly'
