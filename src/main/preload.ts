@@ -102,7 +102,12 @@ const ALLOWED_CHANNELS = [
   // System Setting Operations
   'setting:get',
   'setting:set',
-  'setting:get-all'
+  'setting:get-all',
+  // File Tree Operations
+  'file-tree:get',
+  'file-tree:watch',
+  'file-tree:unwatch',
+  'file-tree:changed'
 ] as const
 
 type AllowedChannel = (typeof ALLOWED_CHANNELS)[number]

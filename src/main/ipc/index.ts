@@ -53,6 +53,7 @@ import {
 } from './handlers/binding'
 import { handleAgentRunList, handleAgentRunGet, handleAgentRunGetLogs } from './handlers/agent-run'
 import { handleSettingGet, handleSettingSet, handleSettingGetAll } from './handlers/setting'
+import { registerFileTreeHandlers } from './handlers/file-tree'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('model:create', handleModelCreate)
@@ -94,6 +95,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
 
   // Space handlers
   registerSpaceHandlers()
+  registerFileTreeHandlers(mainWindow)
 
   // Artifact handlers
   registerArtifactHandlers()
