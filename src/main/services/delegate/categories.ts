@@ -11,38 +11,68 @@
  * Modified by CodeAll project.
  */
 
+import { CATEGORY_DEFINITIONS } from '../../../shared/agent-definitions'
+import { zhinv, cangjie, tianbing, guigu, maliang, guixu, tudi, dayu } from './prompts/categories'
+import type { CategoryPromptTemplate } from './prompts/types'
+
 export interface CategoryConfig {
   model: string
   temperature: number
+  promptTemplate?: CategoryPromptTemplate
 }
 
-export const categories: Record<string, CategoryConfig> = {
-  quick: {
-    model: 'claude-3-haiku-20240307',
-    temperature: 0.3
+// OMO names → CodeAll pinyin codes (backward compatibility)
+const CATEGORY_ALIASES: Record<string, string> = {
+  'visual-engineering': 'zhinv',
+  writing: 'cangjie',
+  quick: 'tianbing',
+  ultrabrain: 'guigu',
+  artistry: 'maliang',
+  deep: 'guixu',
+  'unspecified-low': 'tudi',
+  'unspecified-high': 'dayu'
+}
+
+// All prompt templates - build map automatically from categoryCode
+const ALL_CATEGORY_PROMPTS: CategoryPromptTemplate[] = [
+  zhinv,
+  cangjie,
+  tianbing,
+  guigu,
+  maliang,
+  guixu,
+  tudi,
+  dayu
+]
+
+// Auto-build CATEGORY_PROMPT_MAP from categoryCode field
+const CATEGORY_PROMPT_MAP: Record<string, CategoryPromptTemplate> = Object.fromEntries(
+  ALL_CATEGORY_PROMPTS.map(p => [p.categoryCode, p])
+)
+
+const categoriesRegistry = CATEGORY_DEFINITIONS.reduce(
+  (acc, def) => {
+    const config: CategoryConfig = {
+      model: def.defaultModel,
+      temperature: def.defaultTemperature,
+      promptTemplate: CATEGORY_PROMPT_MAP[def.code]
+    }
+    acc[def.code] = config
+    return acc
   },
-  'visual-engineering': {
-    model: 'gpt-4o',
-    temperature: 0.7
-  },
-  ultrabrain: {
-    model: 'gpt-4',
-    temperature: 0.2
-  },
-  'unspecified-low': {
-    model: 'claude-3-haiku-20240307',
-    temperature: 0.5
-  },
-  'unspecified-high': {
-    model: 'claude-3-5-sonnet-20240620',
-    temperature: 0.5
-  },
-  artistry: {
-    model: 'claude-3-5-sonnet-20240620',
-    temperature: 0.8
-  },
-  writing: {
-    model: 'claude-3-5-sonnet-20240620',
-    temperature: 0.6
+  {} as Record<string, CategoryConfig>
+)
+
+// Add OMO aliases for backward compatibility
+Object.entries(CATEGORY_ALIASES).forEach(([alias, targetCode]) => {
+  if (categoriesRegistry[targetCode]) {
+    categoriesRegistry[alias] = categoriesRegistry[targetCode]
   }
+})
+
+export const categories = categoriesRegistry
+
+export function getCategoryPromptByCode(code: string): string | undefined {
+  const resolved = CATEGORY_ALIASES[code] || code
+  return categories[resolved]?.promptTemplate?.promptAppend
 }
