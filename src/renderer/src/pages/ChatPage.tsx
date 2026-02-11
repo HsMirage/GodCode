@@ -11,7 +11,8 @@ import { SessionResumeIndicator } from '../components/session/SessionResumeIndic
 import { AgentWorkViewer } from '../components/agents/AgentWorkViewer'
 import { useAgentStore } from '../store/agent.store'
 import { useUIStore } from '../store/ui.store'
-import { Globe, ListTodo } from 'lucide-react'
+import { AGENT_DEFINITIONS, type AgentRoutingStrategy } from '@shared/agent-definitions'
+import { FileCode2, Globe, ListTodo } from 'lucide-react'
 import { useDataStore } from '../store/data.store'
 
 type ViewMode = 'chat' | 'workflow' | 'agent'
@@ -25,12 +26,26 @@ export function ChatPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
   const { isOpen: canvasIsOpen } = useCanvasLifecycle()
   const { selectedAgentId } = useAgentStore()
-  const { isTaskPanelOpen, isBrowserPanelOpen, toggleTaskPanel, toggleBrowserPanel } = useUIStore()
+  const {
+    isTaskPanelOpen,
+    isBrowserPanelOpen,
+    showArtifactRail,
+    toggleTaskPanel,
+    toggleBrowserPanel,
+    toggleArtifactRail
+  } = useUIStore()
   const { currentSpaceId, currentSessionId, bumpSessionActivity, fetchSpaces } = useDataStore()
   const activeSessionIdRef = useRef<string | null>(null)
   const messageScrollRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const [isNarrow, setIsNarrow] = useState(false)
+
+  // Helper to determine agent strategy
+  const getAgentStrategy = (agentCode?: string): AgentRoutingStrategy | undefined => {
+    if (!agentCode || agentCode === 'default') return undefined
+    const agent = AGENT_DEFINITIONS.find(a => a.code === agentCode)
+    return agent?.defaultStrategy
+  }
 
   // When ContentCanvas is visible, avoid shrinking the chat column too far.
   useEffect(() => {
@@ -62,6 +77,21 @@ export function ChatPage() {
       return
     }
   }, [currentSpaceId, fetchSpaces])
+
+  useEffect(() => {
+    if (!window.codeall || !currentSessionId) return
+
+    const removeListener = window.codeall.on('task:status-changed', (_payload: any) => {
+      // Only auto-switch once (if still in chat mode) when a task event occurs
+      // This acts as a backup trigger if the initial switch didn't happen
+      // or if tasks are generated later in the process
+      if (viewMode === 'chat') {
+        setViewMode('workflow')
+      }
+    })
+
+    return () => removeListener()
+  }, [currentSessionId, viewMode])
 
   const chatDisabled = !currentSessionId
 
@@ -120,15 +150,17 @@ export function ChatPage() {
 
       if (done) {
         const finalContent = streamingContentRef.current + content
-        setMessages(prev => [
-          ...prev,
-          {
-            id: Date.now().toString(),
-            role: 'assistant',
-            content: finalContent,
-            createdAt: new Date().toISOString()
-          }
-        ])
+        if (finalContent.trim()) {
+          setMessages(prev => [
+            ...prev,
+            {
+              id: Date.now().toString(),
+              role: 'assistant',
+              content: finalContent,
+              createdAt: new Date().toISOString()
+            }
+          ])
+        }
         streamingContentRef.current = ''
         setStreamingContent('')
         setIsLoading(false)
@@ -143,7 +175,7 @@ export function ChatPage() {
     }
   }, [])
 
-  const handleSend = async (content: string) => {
+  const handleSend = async (content: string, agentCode?: string) => {
     if (!currentSessionId || !currentSpaceId || !window.codeall) return false
 
     const userMessage: Message = {
@@ -160,10 +192,17 @@ export function ChatPage() {
     streamingContentRef.current = ''
     setStreamingContent('')
 
+    // Auto-switch to workflow view when workforce strategy is detected
+    const strategy = getAgentStrategy(agentCode)
+    if (strategy === 'workforce') {
+      setViewMode('workflow')
+    }
+
     try {
       await window.codeall.invoke('message:send', {
         sessionId: currentSessionId,
-        content
+        content,
+        agentCode
       })
       return true
     } catch (error) {
@@ -194,6 +233,18 @@ export function ChatPage() {
     }
   }
 
+  const handleStop = async () => {
+    if (!currentSessionId || !window.codeall) return
+
+    try {
+      await window.codeall.invoke('message:abort', { sessionId: currentSessionId })
+    } catch (error) {
+      console.error('Failed to stop active session:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const displayMessages = [...messages]
   if (streamingContent) {
     displayMessages.push({
@@ -208,32 +259,38 @@ export function ChatPage() {
   return (
     <div
       ref={rootRef}
-      className={['h-full', canvasIsOpen && !isNarrow ? 'flex' : 'flex flex-col'].join(' ')}
+      className={[
+        // min-h-0 is required so the message list can become the scroll container in short windows.
+        'h-full min-h-0',
+        canvasIsOpen && !isNarrow ? 'flex' : 'flex flex-col'
+      ].join(' ')}
     >
       <div
         className={[
-          'flex flex-col gap-4 py-4 transition-all',
+          // overflow-hidden prevents the whole column from becoming the scroll container;
+          // only the message list should scroll.
+          'flex flex-col gap-4 py-4 transition-all min-h-0 overflow-hidden',
           isNarrow ? 'px-4' : 'px-6',
           canvasIsOpen && !isNarrow ? 'flex-[2] min-w-0' : 'flex-1 min-w-0'
         ].join(' ')}
       >
-        <header className="flex items-center justify-between mb-2">
+        <header className="flex shrink-0 items-center justify-between mb-2">
           <div>
             <h1 className="text-xl font-semibold">{viewMode === 'chat' ? '对话' : '流程图'}</h1>
-            <p className="mt-1 text-sm text-slate-400">
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
               {viewMode === 'chat' ? '与 AI 助手进行交互' : '查看任务执行流程'}
             </p>
           </div>
 
           <div className="flex gap-2">
-            <div className="flex gap-2 rounded-xl border border-slate-800/70 bg-slate-950/70 p-1 backdrop-blur">
+            <div className="flex gap-2 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-1 backdrop-blur">
               <button
                 type="button"
                 onClick={() => setViewMode('chat')}
                 className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
                   viewMode === 'chat'
-                    ? 'bg-sky-500/20 text-sky-300 shadow-[0_0_12px_rgba(14,165,233,0.2)]'
-                    : 'text-slate-400 hover:text-slate-300'
+                    ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300 shadow-[0_0_12px_rgba(14,165,233,0.18)]'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 对话
@@ -243,8 +300,8 @@ export function ChatPage() {
                 onClick={() => setViewMode('workflow')}
                 className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
                   viewMode === 'workflow'
-                    ? 'bg-sky-500/20 text-sky-300 shadow-[0_0_12px_rgba(14,165,233,0.2)]'
-                    : 'text-slate-400 hover:text-slate-300'
+                    ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300 shadow-[0_0_12px_rgba(14,165,233,0.18)]'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 流程图
@@ -254,8 +311,8 @@ export function ChatPage() {
                 onClick={() => setViewMode('agent')}
                 className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
                   viewMode === 'agent'
-                    ? 'bg-sky-500/20 text-sky-300 shadow-[0_0_12px_rgba(14,165,233,0.2)]'
-                    : 'text-slate-400 hover:text-slate-300'
+                    ? 'bg-sky-500/15 text-sky-700 dark:text-sky-300 shadow-[0_0_12px_rgba(14,165,233,0.18)]'
+                    : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                 }`}
               >
                 代理
@@ -278,9 +335,9 @@ export function ChatPage() {
             >
               {chatDisabled ? (
                 <div className="h-full flex items-center justify-center">
-                  <div className="max-w-md text-center rounded-2xl border border-slate-800/70 bg-slate-950/60 p-6 backdrop-blur">
-                    <p className="text-slate-200 font-medium">未选择任何对话</p>
-                    <p className="mt-2 text-sm text-slate-500">
+                  <div className="max-w-md text-center rounded-2xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-6 backdrop-blur">
+                    <p className="text-[var(--text-primary)] font-medium">未选择任何对话</p>
+                    <p className="mt-2 text-sm text-[var(--text-muted)]">
                       请在左侧空间下选择一个已有对话，或点击“新对话”创建。
                     </p>
                   </div>
@@ -295,7 +352,7 @@ export function ChatPage() {
             </div>
 
             {sendError && (
-              <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+              <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-800 dark:text-rose-200">
                 发送失败: {sendError}
               </div>
             )}
@@ -306,57 +363,84 @@ export function ChatPage() {
               </div>
             )}
 
-            <MessageInput
-              isLoading={isLoading}
-              onSend={handleSend}
-              disabled={chatDisabled}
-              disabledHint="请先选择一个对话"
-              placeholder="输入消息... (Enter 发送 / Shift+Enter 换行)"
-              resetKey={currentSessionId}
-              autoFocus={!chatDisabled}
-              afterSend={
-                <>
-                  <button
-                    type="button"
-                    onClick={toggleTaskPanel}
-                    className={[
-                      'flex h-10 w-10 items-center justify-center rounded-2xl border transition',
-                      isTaskPanelOpen
-                        ? 'border-indigo-400/50 bg-indigo-500/25 text-indigo-100'
-                        : 'border-slate-700/60 bg-slate-900/40 text-slate-400 hover:text-indigo-200 hover:border-indigo-400/40'
-                    ].join(' ')}
-                    title={isTaskPanelOpen ? '关闭任务面板' : '打开任务面板'}
-                    aria-label="Toggle task panel"
-                  >
-                    <ListTodo className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={toggleBrowserPanel}
-                    className={[
-                      'flex h-10 w-10 items-center justify-center rounded-2xl border transition',
-                      isBrowserPanelOpen
-                        ? 'border-indigo-400/50 bg-indigo-500/25 text-indigo-100'
-                        : 'border-slate-700/60 bg-slate-900/40 text-slate-400 hover:text-indigo-200 hover:border-indigo-400/40'
-                    ].join(' ')}
-                    title={isBrowserPanelOpen ? '关闭浏览器' : '打开浏览器'}
-                    aria-label="Toggle browser panel"
-                  >
-                    <Globe className="h-4 w-4" />
-                  </button>
-                </>
-              }
-            />
+            <div className="shrink-0">
+              <MessageInput
+                isLoading={isLoading}
+                onSend={handleSend}
+                onStop={handleStop}
+                disabled={chatDisabled}
+                disabledHint="请先选择一个对话"
+                placeholder="输入消息... (Enter 发送 / Shift+Enter 换行)"
+                resetKey={currentSessionId}
+                autoFocus={!chatDisabled}
+                afterSend={
+                  <>
+                    <button
+                      type="button"
+                      onClick={toggleArtifactRail}
+                      className={[
+                        'flex h-10 w-10 items-center justify-center rounded-2xl border transition',
+                        showArtifactRail
+                          ? 'border-indigo-400/50 bg-indigo-500/15 text-indigo-700 dark:text-indigo-100'
+                          : 'border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-indigo-400/40 hover:bg-[var(--bg-tertiary)]'
+                      ].join(' ')}
+                      title={showArtifactRail ? '关闭产物面板' : '打开产物面板'}
+                      aria-label="Toggle artifact panel"
+                    >
+                      <FileCode2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleTaskPanel}
+                      className={[
+                        'flex h-10 w-10 items-center justify-center rounded-2xl border transition',
+                        isTaskPanelOpen
+                          ? 'border-indigo-400/50 bg-indigo-500/15 text-indigo-700 dark:text-indigo-100'
+                          : 'border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-indigo-400/40 hover:bg-[var(--bg-tertiary)]'
+                      ].join(' ')}
+                      title={isTaskPanelOpen ? '关闭任务面板' : '打开任务面板'}
+                      aria-label="Toggle task panel"
+                    >
+                      <ListTodo className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleBrowserPanel}
+                      className={[
+                        'flex h-10 w-10 items-center justify-center rounded-2xl border transition',
+                        isBrowserPanelOpen
+                          ? 'border-indigo-400/50 bg-indigo-500/15 text-indigo-700 dark:text-indigo-100'
+                          : 'border-[var(--border-primary)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-indigo-400/40 hover:bg-[var(--bg-tertiary)]'
+                      ].join(' ')}
+                      title={isBrowserPanelOpen ? '关闭浏览器' : '打开浏览器'}
+                      aria-label="Toggle browser panel"
+                    >
+                      <Globe className="h-4 w-4" />
+                    </button>
+                  </>
+                }
+              />
+            </div>
           </>
         )}
 
         {viewMode === 'workflow' && (
-          <div className="flex-1 overflow-hidden">
+          <div className="flex-1 overflow-hidden relative">
+            {isLoading && (
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10">
+                <div className="px-3 py-1.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-500 text-xs font-medium flex items-center gap-2 backdrop-blur-sm animate-in fade-in slide-in-from-top-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
+                  任务分解中...
+                </div>
+              </div>
+            )}
             {currentSessionId ? (
               <WorkflowView sessionId={currentSessionId} />
             ) : (
               <div className="h-full flex items-center justify-center">
-                <div className="text-center text-slate-500">请先在左侧选择或创建一个对话</div>
+                <div className="text-center text-[var(--text-muted)]">
+                  请先在左侧选择或创建一个对话
+                </div>
               </div>
             )}
           </div>
@@ -369,8 +453,10 @@ export function ChatPage() {
             ) : (
               <div className="flex h-full items-center justify-center">
                 <div className="text-center">
-                  <p className="text-slate-400">请选择一个代理查看工作状态</p>
-                  <p className="mt-2 text-sm text-slate-500">在右侧面板或代理列表中选择一个活动代理</p>
+                  <p className="text-[var(--text-secondary)]">请选择一个代理查看工作状态</p>
+                  <p className="mt-2 text-sm text-[var(--text-muted)]">
+                    在右侧面板或代理列表中选择一个活动代理
+                  </p>
                 </div>
               </div>
             )}
@@ -381,7 +467,7 @@ export function ChatPage() {
       {canvasIsOpen && (
         <div
           className={[
-            canvasIsOpen && !isNarrow ? 'flex-[1] min-w-0' : 'flex-none border-t border-slate-800/60',
+            canvasIsOpen && !isNarrow ? 'flex-[1] min-w-0' : 'flex-none border-t ui-border',
             isNarrow ? 'h-[44%] min-h-[260px]' : ''
           ].join(' ')}
         >

@@ -15,7 +15,7 @@ import {
   handleSessionList,
   handleSessionUpdate
 } from './handlers/session'
-import { handleMessageList, handleMessageSend } from './handlers/message'
+import { handleMessageAbort, handleMessageList, handleMessageSend } from './handlers/message'
 import {
   handleProviderCacheGetAvailableModels,
   handleProviderCacheGetStats,
@@ -54,6 +54,7 @@ import {
 import { handleAgentRunList, handleAgentRunGet, handleAgentRunGetLogs } from './handlers/agent-run'
 import { handleSettingGet, handleSettingSet, handleSettingGetAll } from './handlers/setting'
 import { registerFileTreeHandlers } from './handlers/file-tree'
+import { registerSessionContinuityHandlers } from './handlers/session-continuity'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('model:create', handleModelCreate)
@@ -75,6 +76,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   // Message handlers
   ipcMain.handle('message:send', handleMessageSend)
   ipcMain.handle('message:list', handleMessageList)
+  ipcMain.handle('message:abort', handleMessageAbort)
 
   // Provider cache handlers
   ipcMain.handle('provider-cache:get-stats', handleProviderCacheGetStats)
@@ -134,4 +136,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle('setting:get', handleSettingGet)
   ipcMain.handle('setting:set', handleSettingSet)
   ipcMain.handle('setting:get-all', handleSettingGetAll)
+
+  // Session Continuity handlers
+  registerSessionContinuityHandlers()
 }

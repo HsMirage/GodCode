@@ -7,19 +7,21 @@ import { useDataStore } from '../../store/data.store'
 import { useUIStore } from '../../store/ui.store'
 
 interface ArtifactRailProps {
+  sessionId?: string | null
   className?: string
 }
 
-export const ArtifactRail: React.FC<ArtifactRailProps> = ({ className = '' }) => {
+export const ArtifactRail: React.FC<ArtifactRailProps> = ({ sessionId, className = '' }) => {
   const { currentSessionId } = useDataStore()
+  const activeSessionId = sessionId ?? currentSessionId
   const { setView } = useUIStore()
   const { artifacts, isLoading, error, loadArtifacts, selectArtifact } = useArtifactStore()
 
   useEffect(() => {
-    if (currentSessionId) {
-      loadArtifacts(currentSessionId)
+    if (activeSessionId) {
+      loadArtifacts(activeSessionId)
     }
-  }, [currentSessionId, loadArtifacts])
+  }, [activeSessionId, loadArtifacts])
 
   const handleArtifactSelect = async (artifact: Artifact) => {
     await selectArtifact(artifact)
@@ -42,7 +44,7 @@ export const ArtifactRail: React.FC<ArtifactRailProps> = ({ className = '' }) =>
             <span className="text-sm">{error}</span>
             <button
               type="button"
-              onClick={() => currentSessionId && loadArtifacts(currentSessionId)}
+              onClick={() => activeSessionId && loadArtifacts(activeSessionId)}
               className="mt-2 px-3 py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white transition-colors"
             >
               Retry

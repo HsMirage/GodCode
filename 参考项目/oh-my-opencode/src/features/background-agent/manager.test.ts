@@ -1123,6 +1123,99 @@ describe("BackgroundManager.tryCompleteTask", () => {
     expect(task.status).toBe("completed")
     expect(getPendingByParent(manager).get(task.parentSessionID)).toBeUndefined()
   })
+
+  test("should avoid overlapping promptAsync calls when tasks complete concurrently", async () => {
+    // given
+    type PromptAsyncBody = Record<string, unknown> & { noReply?: boolean }
+
+    let resolveMessages: ((value: { data: unknown[] }) => void) | undefined
+    const messagesBarrier = new Promise<{ data: unknown[] }>((resolve) => {
+      resolveMessages = resolve
+    })
+
+    const promptBodies: PromptAsyncBody[] = []
+    let promptInFlight = false
+    let rejectedCount = 0
+    let promptCallCount = 0
+
+    let releaseFirstPrompt: (() => void) | undefined
+    let resolveFirstStarted: (() => void) | undefined
+    const firstStarted = new Promise<void>((resolve) => {
+      resolveFirstStarted = resolve
+    })
+
+    const client = {
+      session: {
+        prompt: async () => ({}),
+        abort: async () => ({}),
+        messages: async () => messagesBarrier,
+        promptAsync: async (args: { path: { id: string }; body: PromptAsyncBody }) => {
+          promptBodies.push(args.body)
+
+          if (!promptInFlight) {
+            promptCallCount += 1
+            if (promptCallCount === 1) {
+              promptInFlight = true
+              resolveFirstStarted?.()
+              return await new Promise((resolve) => {
+                releaseFirstPrompt = () => {
+                  promptInFlight = false
+                  resolve({})
+                }
+              })
+            }
+
+            return {}
+          }
+
+          rejectedCount += 1
+          throw new Error("BUSY")
+        },
+      },
+    }
+
+    manager.shutdown()
+    manager = new BackgroundManager({ client, directory: tmpdir() } as unknown as PluginInput)
+
+    const parentSessionID = "parent-session"
+    const taskA = createMockTask({
+      id: "task-a",
+      sessionID: "session-a",
+      parentSessionID,
+    })
+    const taskB = createMockTask({
+      id: "task-b",
+      sessionID: "session-b",
+      parentSessionID,
+    })
+
+    getTaskMap(manager).set(taskA.id, taskA)
+    getTaskMap(manager).set(taskB.id, taskB)
+    getPendingByParent(manager).set(parentSessionID, new Set([taskA.id, taskB.id]))
+
+    // when
+    const completionA = tryCompleteTaskForTest(manager, taskA)
+    const completionB = tryCompleteTaskForTest(manager, taskB)
+    resolveMessages?.({ data: [] })
+
+    await firstStarted
+
+    // Give the second completion a chance to attempt promptAsync while the first is in-flight.
+    // In the buggy implementation, this triggers an overlap and increments rejectedCount.
+    for (let i = 0; i < 20; i++) {
+      await Promise.resolve()
+      if (rejectedCount > 0) break
+      if (promptBodies.length >= 2) break
+    }
+
+    releaseFirstPrompt?.()
+    await Promise.all([completionA, completionB])
+
+    // then
+    expect(rejectedCount).toBe(0)
+    expect(promptBodies.length).toBe(2)
+    expect(promptBodies.some((b) => b.noReply === false)).toBe(true)
+  })
 })
 
 describe("BackgroundManager.trackTask", () => {
@@ -1319,14 +1412,14 @@ describe("BackgroundManager - Non-blocking Queue Integration", () => {
   let manager: BackgroundManager
   let mockClient: ReturnType<typeof createMockClient>
 
-   function createMockClient() {
-     return {
-       session: {
-         create: async () => ({ data: { id: `ses_${crypto.randomUUID()}` } }),
-         get: async () => ({ data: { directory: "/test/dir" } }),
-         prompt: async () => ({}),
-         promptAsync: async () => ({}),
-         messages: async () => ({ data: [] }),
+    function createMockClient() {
+      return {
+        session: {
+          create: async (_args?: any) => ({ data: { id: `ses_${crypto.randomUUID()}` } }),
+          get: async () => ({ data: { directory: "/test/dir" } }),
+          prompt: async () => ({}),
+          promptAsync: async () => ({}),
+          messages: async () => ({ data: [] }),
          todo: async () => ({ data: [] }),
          status: async () => ({ data: {} }),
          abort: async () => ({}),
@@ -1427,6 +1520,55 @@ describe("BackgroundManager - Non-blocking Queue Integration", () => {
   })
 
   describe("task transitions pending→running when slot available", () => {
+    test("should inherit parent session permission rules (and force deny question)", async () => {
+      // given
+      const createCalls: any[] = []
+      const parentPermission = [
+        { permission: "question", action: "allow" as const, pattern: "*" },
+        { permission: "plan_enter", action: "deny" as const, pattern: "*" },
+      ]
+
+      const customClient = {
+        session: {
+          create: async (args?: any) => {
+            createCalls.push(args)
+            return { data: { id: `ses_${crypto.randomUUID()}` } }
+          },
+          get: async () => ({ data: { directory: "/test/dir", permission: parentPermission } }),
+          prompt: async () => ({}),
+          promptAsync: async () => ({}),
+          messages: async () => ({ data: [] }),
+          todo: async () => ({ data: [] }),
+          status: async () => ({ data: {} }),
+          abort: async () => ({}),
+        },
+      }
+      manager.shutdown()
+      manager = new BackgroundManager({ client: customClient, directory: tmpdir() } as unknown as PluginInput, {
+        defaultConcurrency: 5,
+      })
+
+      const input = {
+        description: "Test task",
+        prompt: "Do something",
+        agent: "test-agent",
+        parentSessionID: "parent-session",
+        parentMessageID: "parent-message",
+      }
+
+      // when
+      await manager.launch(input)
+      await new Promise(resolve => setTimeout(resolve, 50))
+
+      // then
+      expect(createCalls).toHaveLength(1)
+      const permission = createCalls[0]?.body?.permission
+      expect(permission).toEqual([
+        { permission: "plan_enter", action: "deny", pattern: "*" },
+        { permission: "question", action: "deny", pattern: "*" },
+      ])
+    })
+
     test("should transition first task to running immediately", async () => {
       // given
       const config = { defaultConcurrency: 5 }

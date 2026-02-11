@@ -4,12 +4,15 @@ import {
   ChevronRight,
   Folder,
   MessageSquare,
+  Moon,
   Pencil,
   Plus,
+  Sun,
   Trash2,
   X
 } from 'lucide-react'
 import { useDataStore } from '../../store/data.store'
+import { useUIStore } from '../../store/ui.store'
 import { safeInvoke } from '../../api'
 import { cn } from '../../utils'
 import { getLastPathSegment } from '../../utils/path'
@@ -33,6 +36,8 @@ export function Sidebar() {
     updateSessionTitle,
     deleteSession
   } = useDataStore()
+
+  const { theme, toggleTheme } = useUIStore()
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [renamingSpaceId, setRenamingSpaceId] = useState<string | null>(null)
@@ -134,12 +139,12 @@ export function Sidebar() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 border-r border-slate-800">
-      <div className="p-3 border-b border-slate-800 flex items-center justify-between gap-2">
+    <div className="h-full flex flex-col ui-bg-panel border-r ui-border">
+      <div className="p-3 border-b ui-border flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Spaces</h2>
+          <h2 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">Spaces</h2>
           {currentSpaceName && (
-            <p className="mt-1 text-xs text-slate-600 truncate" title={currentSpaceName}>
+            <p className="mt-1 text-xs text-[var(--text-secondary)] truncate" title={currentSpaceName}>
               Current: {currentSpaceName}
             </p>
           )}
@@ -147,7 +152,7 @@ export function Sidebar() {
         <button
           type="button"
           onClick={handleCreateSpaceStart}
-          className="p-1 text-slate-400 hover:text-indigo-400 hover:bg-slate-900 rounded transition-colors"
+          className="p-1 text-[var(--text-secondary)] hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-[var(--bg-tertiary)] rounded transition-colors"
           title="New Space"
           aria-label="Create new space"
         >
@@ -157,13 +162,11 @@ export function Sidebar() {
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {currentSpaceId && (
-          <div className="rounded-xl border border-slate-800/50 bg-slate-950/30 overflow-hidden mb-4 h-64 flex flex-col">
-            <LocalFileExplorer />
-          </div>
+          <LocalFileExplorer className="mb-4" />
         )}
 
         {spaces.length === 0 ? (
-          <div className="text-center py-8 text-slate-600 text-sm">No spaces yet</div>
+          <div className="text-center py-8 text-[var(--text-muted)] text-sm">No spaces yet</div>
         ) : (
           spaces.map(space => {
             const isExpanded = !!expanded[space.id]
@@ -177,15 +180,15 @@ export function Sidebar() {
                 className={cn(
                   'rounded-xl border transition-colors',
                   isCurrent
-                    ? 'border-indigo-500/25 bg-slate-900/40 shadow-[0_0_18px_rgba(99,102,241,0.08)]'
-                    : 'border-slate-800/50 bg-slate-950/30 hover:border-slate-700/70'
+                    ? 'border-indigo-500/30 bg-indigo-500/5 shadow-[0_0_18px_rgba(99,102,241,0.10)]'
+                    : 'border-[var(--border-primary)] bg-[var(--bg-primary)] hover:border-[var(--border-secondary)] hover:bg-[var(--bg-tertiary)]'
                 )}
               >
                 <div className="flex items-center gap-1 px-3 py-2">
                   <button
                     type="button"
                     onClick={() => void handleToggleSpace(space.id)}
-                    className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
+                    className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                     title={isExpanded ? 'Collapse' : 'Expand'}
                     aria-label={isExpanded ? 'Collapse space' : 'Expand space'}
                   >
@@ -202,14 +205,14 @@ export function Sidebar() {
                         onSubmit={handleRenameSubmit}
                         className={cn(
                           'flex w-full min-w-0 items-center gap-2 rounded px-2 py-1 text-left text-sm transition-colors',
-                          isCurrent ? 'text-slate-100' : 'text-slate-300'
+                          isCurrent ? 'text-[var(--text-primary)]' : 'text-[var(--text-primary)]'
                         )}
                         title={space.workDir}
                       >
                         <Folder
                           className={cn(
                             'h-4 w-4 flex-shrink-0',
-                            isCurrent ? 'text-indigo-400' : 'text-slate-600'
+                            isCurrent ? 'text-indigo-500 dark:text-indigo-400' : 'text-[var(--text-secondary)]'
                           )}
                         />
                         <input
@@ -218,16 +221,16 @@ export function Sidebar() {
                           onKeyDown={e => {
                             if (e.key === 'Escape') handleRenameCancel()
                           }}
-                          className="flex-1 min-w-0 bg-slate-950/40 border border-slate-800 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                          className="flex-1 min-w-0 bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded px-2 py-1 text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
                           autoFocus
                         />
-                        <span className="flex-shrink-0 text-xs text-slate-600">
+                        <span className="flex-shrink-0 text-xs text-[var(--text-muted)]">
                           {sessions.length}
                         </span>
                         <button
                           type="button"
                           onClick={handleRenameCancel}
-                          className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
+                          className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                           title="Cancel"
                           aria-label="Cancel rename"
                         >
@@ -240,18 +243,20 @@ export function Sidebar() {
                         onClick={() => handleSelectSpace(space.id)}
                         className={cn(
                           'w-full min-w-0 flex items-center gap-2 rounded px-2 py-1 text-left text-sm transition-colors',
-                          isCurrent ? 'text-slate-100' : 'text-slate-300 hover:bg-slate-900/60'
+                          isCurrent
+                            ? 'text-[var(--text-primary)]'
+                            : 'text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                         )}
                         title={space.workDir}
                       >
                         <Folder
                           className={cn(
                             'h-4 w-4 flex-shrink-0',
-                            isCurrent ? 'text-indigo-400' : 'text-slate-600'
+                            isCurrent ? 'text-indigo-500 dark:text-indigo-400' : 'text-[var(--text-secondary)]'
                           )}
                         />
                         <span className="truncate">{space.name}</span>
-                        <span className="ml-auto text-[11px] text-slate-600 tabular-nums">
+                        <span className="ml-auto text-[11px] text-[var(--text-muted)] tabular-nums">
                           {sessions.length}
                         </span>
                       </button>
@@ -262,7 +267,7 @@ export function Sidebar() {
                     type="button"
                     onClick={() => handleRenameStart(space.id, space.name)}
                     disabled={isRenaming}
-                    className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
+                    className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                     title="Rename space"
                     aria-label="Rename space"
                   >
@@ -272,7 +277,7 @@ export function Sidebar() {
                   <button
                     type="button"
                     onClick={() => void handleDeleteSpace(space.id, space.name)}
-                    className="p-1 rounded text-slate-500 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+                    className="p-1 rounded text-[var(--text-muted)] hover:text-rose-600 dark:hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
                     title="Delete space"
                     aria-label="Delete space"
                   >
@@ -282,11 +287,11 @@ export function Sidebar() {
 
                 {isExpanded && (
                   <div className="px-3 pb-3 pt-0">
-                    <div className="mt-1 ml-2 pl-3 border-l border-slate-800/70">
+                    <div className="mt-1 ml-2 pl-3 border-l ui-border">
                       <button
                         type="button"
                         onClick={() => void handleCreateSession(space.id)}
-                        className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 transition-colors"
+                        className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                         title="新对话"
                       >
                         <Plus className="h-3.5 w-3.5" />
@@ -295,7 +300,7 @@ export function Sidebar() {
 
                       <div className="mt-2 space-y-1">
                         {sessions.length === 0 ? (
-                          <div className="text-center py-3 text-slate-600 text-xs">
+                          <div className="text-center py-3 text-[var(--text-muted)] text-xs">
                             No active sessions
                           </div>
                         ) : (
@@ -311,18 +316,18 @@ export function Sidebar() {
                                     e.preventDefault()
                                     void handleSessionRenameSubmit(space.id, session.id)
                                   }}
-                                  className="flex items-center gap-2 px-2 py-2 rounded-md bg-slate-900/50 border border-slate-800/70"
+                                  className="flex items-center gap-2 px-2 py-2 rounded-md bg-[var(--bg-secondary)] border border-[var(--border-primary)]"
                                 >
                                   <input
                                     value={renameSessionTitle}
                                     onChange={e => setRenameSessionTitle(e.target.value)}
-                                    className="flex-1 min-w-0 bg-slate-950/40 border border-slate-800 rounded px-2 py-1 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                                    className="flex-1 min-w-0 bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded px-2 py-1 text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500"
                                     autoFocus
                                   />
                                   <button
                                     type="button"
                                     onClick={handleSessionRenameCancel}
-                                    className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
+                                    className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                                     title="Cancel"
                                   >
                                     <X className="h-4 w-4" />
@@ -337,8 +342,8 @@ export function Sidebar() {
                                 className={cn(
                                   'w-full flex items-center gap-2 px-1 rounded-lg transition-colors group',
                                   currentSessionId === session.id
-                                    ? 'bg-slate-800 text-slate-100'
-                                    : 'text-slate-400 hover:bg-slate-900/60 hover:text-slate-200'
+                                    ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
+                                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'
                                 )}
                               >
                                 <button
@@ -350,8 +355,8 @@ export function Sidebar() {
                                     className={cn(
                                       'w-4 h-4 flex-shrink-0',
                                       currentSessionId === session.id
-                                        ? 'text-indigo-400'
-                                        : 'text-slate-600 group-hover:text-slate-500'
+                                        ? 'text-indigo-500 dark:text-indigo-400'
+                                        : 'text-[var(--text-muted)] group-hover:text-[var(--text-secondary)]'
                                     )}
                                   />
                                   <span className="truncate">{title}</span>
@@ -361,7 +366,7 @@ export function Sidebar() {
                                   <button
                                     type="button"
                                     onClick={() => handleSessionRenameStart(session.id, title)}
-                                    className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-900 transition-colors"
+                                    className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
                                     title="Rename"
                                     aria-label="Rename session"
                                   >
@@ -372,7 +377,7 @@ export function Sidebar() {
                                     onClick={() =>
                                       void handleDeleteSession(space.id, session.id, title)
                                     }
-                                    className="p-1 rounded text-slate-500 hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
+                                    className="p-1 rounded text-[var(--text-muted)] hover:text-rose-600 dark:hover:text-rose-300 hover:bg-rose-500/10 transition-colors"
                                     title="Delete"
                                     aria-label="Delete session"
                                   >
@@ -391,6 +396,31 @@ export function Sidebar() {
             )
           })
         )}
+      </div>
+
+      {/* Theme Toggle Button */}
+      <div className="p-3 border-t ui-border">
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className={cn(
+            'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors',
+            'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
+          )}
+          title={theme === 'dark' ? '切换到亮色模式' : '切换到深色模式'}
+        >
+          {theme === 'dark' ? (
+            <>
+              <Sun className="h-4 w-4" />
+              <span>亮色模式</span>
+            </>
+          ) : (
+            <>
+              <Moon className="h-4 w-4" />
+              <span>深色模式</span>
+            </>
+          )}
+        </button>
       </div>
     </div>
   )

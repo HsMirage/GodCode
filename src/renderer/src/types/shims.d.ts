@@ -29,6 +29,7 @@ interface CodeAllAPI {
       apiKey?: string
       apiKeyId?: string
       baseURL?: string | null
+      contextSize?: number
       config?: Record<string, unknown>
     }
   ): Promise<Model>
@@ -43,6 +44,7 @@ interface CodeAllAPI {
         apiKey?: string
         apiKeyId?: string | null
         baseURL?: string | null
+        contextSize?: number
         config?: Record<string, unknown>
       }
     }
@@ -52,8 +54,20 @@ interface CodeAllAPI {
   invoke(channel: 'session:get', id: string): Promise<Session | null>
   invoke(channel: 'session:get-or-create-default', data?: { spaceId?: string }): Promise<Session>
   invoke(channel: 'session:list', spaceId?: string): Promise<Session[]>
-  invoke(channel: 'message:send', data: { sessionId: string; content: string }): Promise<Message>
+  invoke(
+    channel: 'message:send',
+    data: { sessionId: string; content: string; agentCode?: string }
+  ): Promise<Message>
   invoke(channel: 'message:list', sessionId: string): Promise<Message[]>
+  invoke(
+    channel: 'message:abort',
+    data: { sessionId: string }
+  ): Promise<{
+    success: boolean
+    abortedStream: boolean
+    cancelledBackgroundTaskCount: number
+    cancelledTaskRows: number
+  }>
   invoke(channel: 'task:list', sessionId: string): Promise<Task[]>
   invoke(channel: 'artifact:list', sessionId: string): Promise<Artifact[]>
   invoke(
@@ -176,10 +190,6 @@ interface CodeAllAPI {
   // Fallback signature for channels without dedicated overloads.
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
   on(
-    channel: 'message:stream-chunk',
-    callback: (data: { sessionId?: string; content: string; done: boolean }) => void
-  ): () => void
-  on(
     channel: 'task:status-changed',
     callback: (data: { taskId: string; status: Task['status'] }) => void
   ): () => void
@@ -220,7 +230,14 @@ interface CodeAllAPI {
   on(channel: 'browser:panel-show', callback: () => void): () => void
   on(
     channel: 'browser:ai-operation',
-    callback: (data: { toolName: string; status: 'running' | 'completed' | 'error' }) => void
+    callback: (data: {
+      toolName: string
+      status: 'running' | 'completed' | 'error'
+      viewId: string
+      opId: string
+      args?: Record<string, any>
+      timestamp: number
+    }) => void
   ): () => void
 
   // Task Events
@@ -228,6 +245,40 @@ interface CodeAllAPI {
 
   // Artifact Events
   on(channel: 'artifact:created', callback: () => void): () => void
+
+  // Message Stream Events
+  on(
+    channel: 'message:stream-chunk',
+    callback: (data: {
+      sessionId: string
+      content: string
+      done: boolean
+      type?: 'content' | 'tool_start' | 'tool_end' | 'error' | 'done'
+      toolCall?: {
+        id: string
+        name: string
+        arguments?: Record<string, unknown>
+        result?: unknown
+      }
+      error?: {
+        message: string
+        code?: string
+      }
+    }) => void
+  ): () => void
+  on(
+    channel: 'message:stream-error',
+    callback: (data: { sessionId: string; message: string; code?: string }) => void
+  ): () => void
+  on(
+    channel: 'message:stream-usage',
+    callback: (data: {
+      sessionId: string
+      promptTokens: number
+      completionTokens: number
+      totalTokens: number
+    }) => void
+  ): () => void
 
   // Agent Run Channels
   invoke(channel: 'agent-run:list', taskId: string): Promise<any[]>
@@ -255,6 +306,9 @@ interface CodeAllAPI {
     accepted: number
     pending: number
   }>
+
+  // Fallback for on method
+  on(channel: string, callback: (...args: unknown[]) => void): () => void
 }
 
 declare global {

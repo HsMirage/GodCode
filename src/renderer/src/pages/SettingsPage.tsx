@@ -6,9 +6,9 @@ import { DataManagement } from '../components/settings/DataManagement'
 import { Key, Bot, Database, Check, AlertTriangle } from 'lucide-react'
 
 const panelClass = [
-  'rounded-2xl border border-slate-800/70',
-  'bg-slate-950/70 backdrop-blur',
-  'shadow-[0_0_24px_rgba(15,23,42,0.35)]'
+  'rounded-2xl border border-[var(--border-primary)]',
+  'bg-[var(--bg-secondary)] backdrop-blur',
+  'shadow-[0_10px_30px_rgba(0,0,0,0.06)] dark:shadow-[0_0_24px_rgba(15,23,42,0.35)]'
 ].join(' ')
 
 const TABS = [
@@ -52,7 +52,7 @@ export function SettingsPage() {
     <div className="px-6 py-4 space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <h1 className="text-2xl font-bold text-white">设置</h1>
+        <h1 className="text-2xl font-bold text-[var(--text-primary)]">设置</h1>
       </div>
 
       {/* Toast notification */}
@@ -61,8 +61,8 @@ export function SettingsPage() {
           className={[
             'flex items-center gap-2 rounded-xl px-4 py-3 text-sm animate-in fade-in slide-in-from-top-2',
             toast.type === 'success'
-              ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-              : 'border border-rose-500/20 bg-rose-500/10 text-rose-400'
+              ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400'
+              : 'border border-rose-500/20 bg-rose-500/10 text-rose-800 dark:text-rose-400'
           ].join(' ')}
         >
           {toast.type === 'success' ? (
@@ -87,8 +87,8 @@ export function SettingsPage() {
                   'flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition',
                   'border border-transparent',
                   tab.id === activeTab
-                    ? 'bg-slate-900/80 text-white shadow-[0_10px_30px_rgba(15,23,42,0.45)]'
-                    : 'text-slate-300 hover:border-slate-700/70 hover:text-white'
+                    ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] shadow-[0_10px_30px_rgba(0,0,0,0.10)] dark:shadow-[0_10px_30px_rgba(15,23,42,0.45)]'
+                    : 'text-[var(--text-secondary)] hover:border-[var(--border-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
                 ].join(' ')}
               >
                 <Icon className="w-4 h-4" />
@@ -103,10 +103,10 @@ export function SettingsPage() {
         <div className={`${panelClass} p-6`}>
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Provider & Models</p>
-              <h2 className="mt-2 text-xl font-semibold text-white">API服务商</h2>
+              <p className="text-xs uppercase tracking-[0.3em] text-[var(--text-muted)]">Provider & Models</p>
+              <h2 className="mt-2 text-xl font-semibold text-[var(--text-primary)]">API服务商</h2>
             </div>
-            <div className="text-right text-xs text-slate-500">配置 OpenAI 兼容的服务商及模型</div>
+            <div className="text-right text-xs text-[var(--text-muted)]">配置 OpenAI 兼容的服务商及模型</div>
           </div>
           <ProviderModelPanel />
         </div>
@@ -115,8 +115,8 @@ export function SettingsPage() {
       {activeTab === 'agent' ? (
         <div className={`${panelClass} p-6`}>
           <div className="mb-6">
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Agent Studio</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">智能体配置</h2>
+            <p className="text-xs uppercase tracking-[0.3em] text-[var(--text-muted)]">Agent Studio</p>
+            <h2 className="mt-2 text-xl font-semibold text-[var(--text-primary)]">智能体配置</h2>
           </div>
           <AgentBindingPanel />
         </div>

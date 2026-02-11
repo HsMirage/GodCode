@@ -576,6 +576,42 @@ async function ensureBindingSchemaCompatibility(
       CREATE INDEX IF NOT EXISTS "SystemSetting_key_idx" ON "SystemSetting"("key")
     `)
   }
+
+  // Ensure SessionState table exists
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const sessionStateTableRows = await client.$queryRawUnsafe(
+    `SELECT 1
+     FROM information_schema.tables
+     WHERE table_schema = 'public'
+       AND table_name = 'SessionState'
+     LIMIT 1`
+  )
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+  const sessionStateExists = Array.isArray(sessionStateTableRows) && sessionStateTableRows.length > 0
+  if (!sessionStateExists) {
+    console.warn('[Database] Creating SessionState table')
+    await client.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "SessionState" (
+        "id" TEXT NOT NULL,
+        "sessionId" TEXT NOT NULL,
+        "status" TEXT NOT NULL DEFAULT 'active',
+        "checkpoint" JSONB NOT NULL DEFAULT '{}',
+        "context" JSONB NOT NULL DEFAULT '{}',
+        "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "SessionState_pkey" PRIMARY KEY ("id")
+      )
+    `)
+    await client.$executeRawUnsafe(`
+      CREATE UNIQUE INDEX IF NOT EXISTS "SessionState_sessionId_key" ON "SessionState"("sessionId")
+    `)
+    await client.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "SessionState_sessionId_idx" ON "SessionState"("sessionId")
+    `)
+    await client.$executeRawUnsafe(`
+      CREATE INDEX IF NOT EXISTS "SessionState_status_idx" ON "SessionState"("status")
+    `)
+  }
 }
 
 async function tableExists(

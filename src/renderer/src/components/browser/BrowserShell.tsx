@@ -21,7 +21,7 @@ export function BrowserShell() {
     isBrowserPanelOpen,
     openBrowserPanel,
     browserOperationHistory,
-    addBrowserOperation
+    upsertBrowserOperation
   } = useUIStore()
 
   const [zoomLevel, setZoomLevel] = useState(1)
@@ -49,11 +49,19 @@ export function BrowserShell() {
     if (!window.codeall) return
 
     const init = async () => {
-      // Get initial tabs
-      await syncTabs()
+      // Read source-of-truth tabs list from backend (avoid stale closure on browserTabs)
+      const result = (await window.codeall.invoke('browser:list-tabs')) as any
+      const tabs = result?.success ? (result.data as any[]) : []
 
-      // If no tabs exist, create one
-      if (browserTabs.length === 0) {
+      if (result?.success) {
+        setBrowserTabs(tabs)
+        if (!activeBrowserTabId && tabs.length > 0) {
+          setActiveBrowserTab(tabs[0].id)
+        }
+      }
+
+      // If no tabs exist in backend, create one
+      if (tabs.length === 0) {
         const viewId = `tab-${Date.now()}`
         await window.codeall.invoke('browser:create', { viewId, url: 'https://google.com' })
         setActiveBrowserTab(viewId)
@@ -121,6 +129,11 @@ export function BrowserShell() {
     const removeAIListener = window.codeall.on('browser:ai-operation', data => {
       setAIOperation(data.toolName, data.status)
 
+      // Always switch to the BrowserView that AI is operating on
+      if (data.viewId && data.viewId !== activeBrowserTabId) {
+        setActiveBrowserTab(data.viewId)
+      }
+
       // Auto open panel and add log
       if (data.status === 'running') {
         openBrowserPanel()
@@ -128,12 +141,12 @@ export function BrowserShell() {
         setShowLogs(true)
       }
 
-      // Add operation to history
-      addBrowserOperation({
-        id: Date.now().toString(),
-        timestamp: Date.now(),
+      // Upsert operation to history (running -> completed/error should update same item)
+      upsertBrowserOperation({
+        id: data.opId || Date.now().toString(),
+        timestamp: data.timestamp || Date.now(),
         action: data.toolName,
-        target: ((data as any).args && JSON.stringify((data as any).args)) || undefined,
+        target: (data.args && JSON.stringify(data.args)) || undefined,
         status: data.status === 'error' ? 'failed' : data.status
       })
 
@@ -156,8 +169,9 @@ export function BrowserShell() {
     setBrowserNavState,
     setAIOperation,
     syncTabs,
-    addBrowserOperation,
+    upsertBrowserOperation,
     openBrowserPanel,
+    setActiveBrowserTab,
     isBrowserPanelOpen
   ])
 

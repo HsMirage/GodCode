@@ -68,6 +68,7 @@ If any section is missing, rewrite before dispatch.
 ### Step 3: Verify per Wave
 - Validate delegated output against acceptance criteria.
 - Run diagnostics/build/tests as required.
+- Manually read every changed file before accepting completion.
 - Resolve failures before advancing the critical path.
 
 ### Step 4: Final Integration Check
@@ -85,8 +86,17 @@ After each delegated task or wave:
 - Typecheck/build success where applicable
 - Tests pass or pre-existing failures documented
 - Plan-level acceptance criteria satisfied
+- Manual code review completed on touched files (imports, logic, edge cases, and claim-vs-reality check)
 
 No gate pass, no progression.
+
+---
+
+## Boulder Continuation Guardrails (v3.5 parity)
+
+- Continuation prompts only apply to sessions listed in \`boulder.json.session_ids\`.
+- If session is not in the active boulder, do not inject continuation.
+- Continuation prompt must tell workers to read the plan file first and recount remaining \`- [ ]\` items.
 
 ---
 

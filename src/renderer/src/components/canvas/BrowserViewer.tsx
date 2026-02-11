@@ -84,13 +84,13 @@ export function BrowserViewer({ tab }: BrowserViewerProps) {
   }, [tab.browserViewId])
 
   return (
-    <div className="flex flex-col h-full bg-slate-950">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-900/50">
+    <div className="flex flex-col h-full ui-bg-panel">
+      <div className="flex items-center gap-2 px-3 py-2 border-b ui-border bg-[var(--bg-tertiary)]">
         <button
           type="button"
           onClick={handleBack}
           disabled={!browserState.canGoBack}
-          className="p-1.5 rounded hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="p-1.5 rounded hover:bg-[var(--bg-secondary)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           title="后退"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -99,7 +99,7 @@ export function BrowserViewer({ tab }: BrowserViewerProps) {
           type="button"
           onClick={handleForward}
           disabled={!browserState.canGoForward}
-          className="p-1.5 rounded hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="p-1.5 rounded hover:bg-[var(--bg-secondary)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           title="前进"
         >
           <ArrowRight className="w-4 h-4" />
@@ -107,7 +107,7 @@ export function BrowserViewer({ tab }: BrowserViewerProps) {
         <button
           type="button"
           onClick={handleReload}
-          className="p-1.5 rounded hover:bg-slate-800 transition-colors"
+          className="p-1.5 rounded hover:bg-[var(--bg-secondary)] transition-colors"
           title={browserState.isLoading ? '停止' : '刷新'}
         >
           {browserState.isLoading ? <X className="w-4 h-4" /> : <RotateCw className="w-4 h-4" />}
@@ -115,7 +115,7 @@ export function BrowserViewer({ tab }: BrowserViewerProps) {
         <button
           type="button"
           onClick={handleHome}
-          className="p-1.5 rounded hover:bg-slate-800 transition-colors"
+          className="p-1.5 rounded hover:bg-[var(--bg-secondary)] transition-colors"
           title="主页"
         >
           <Home className="w-4 h-4" />
@@ -127,17 +127,17 @@ export function BrowserViewer({ tab }: BrowserViewerProps) {
             value={addressBarValue}
             onChange={e => setAddressBarValue(e.target.value)}
             placeholder="输入URL..."
-            className="w-full px-3 py-1.5 rounded-full bg-slate-800/50 border border-slate-700 text-sm outline-none focus:border-sky-500 transition-colors"
+            className="w-full px-3 py-1.5 rounded-full bg-[var(--bg-secondary)] border border-[var(--border-primary)] text-sm outline-none focus:border-sky-500 transition-colors text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
           />
         </form>
       </div>
 
       <div ref={containerRef} className="flex-1 relative bg-white" style={{ minHeight: '200px' }}>
         {!tab.browserViewId && (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+          <div className="absolute inset-0 flex items-center justify-center bg-[var(--bg-secondary)]">
             <div className="flex flex-col items-center gap-3">
               <div className="w-8 h-8 border-2 border-sky-500/30 border-t-sky-500 rounded-full animate-spin" />
-              <p className="text-sm text-slate-400">正在打开...</p>
+              <p className="text-sm text-[var(--text-secondary)]">正在打开...</p>
             </div>
           </div>
         )}

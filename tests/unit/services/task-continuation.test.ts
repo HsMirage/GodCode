@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { TaskContinuationService, type Todo } from '@/main/services/task-continuation.service'
+import fs from 'fs'
+
+vi.mock('fs', () => ({
+  default: {
+    existsSync: vi.fn(),
+    readFileSync: vi.fn()
+  }
+}))
 
 describe('TaskContinuationService', () => {
   let service: TaskContinuationService
@@ -8,6 +16,8 @@ describe('TaskContinuationService', () => {
   beforeEach(() => {
     service = new TaskContinuationService()
     vi.useFakeTimers()
+    vi.mocked(fs.existsSync).mockReturnValue(false)
+    vi.mocked(fs.readFileSync).mockReturnValue('{}')
   })
 
   afterEach(() => {
@@ -89,6 +99,23 @@ describe('TaskContinuationService', () => {
       const prompt = service.getContinuationPrompt(sessionId)
       expect(prompt).toContain('[SYSTEM REMINDER - TODO CONTINUATION]')
       expect(prompt).toContain('[Status: 1/2 completed, 1 remaining]')
+      expect(prompt).toContain('Read the active plan file')
+    })
+
+    it('should include plan path from boulder state when available', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          active_plan: '/tmp/.sisyphus/plans/demo.md',
+          session_ids: [sessionId]
+        })
+      )
+
+      service.setTodos(sessionId, [
+        { id: '1', content: 'pending', status: 'pending', priority: 'medium' }
+      ])
+      const prompt = service.getContinuationPrompt(sessionId)
+      expect(prompt).toContain('/tmp/.sisyphus/plans/demo.md')
     })
   })
 
@@ -193,6 +220,22 @@ describe('TaskContinuationService', () => {
       expect(onContinue).not.toHaveBeenCalled()
       expect(service.getState(sessionId).countdownTimer).toBeUndefined()
     })
+
+    it('should dedupe duplicate idle continuation triggers in short window', () => {
+      vi.setSystemTime(10_000)
+      service.setTodos(sessionId, [
+        { id: '1', content: 'pending', status: 'pending', priority: 'medium' }
+      ])
+
+      const state = service.getState(sessionId)
+      state.lastContinuationTriggeredAt = Date.now() + 1800
+      const onContinue = vi.fn()
+
+      service.startCountdown(sessionId, onContinue)
+      vi.advanceTimersByTime(2000)
+
+      expect(onContinue).not.toHaveBeenCalled()
+    })
   })
 
   describe('cleanup', () => {
@@ -226,6 +269,25 @@ describe('TaskContinuationService', () => {
 
       service.updateTodoStatus(sessionId, 'non-existent', 'completed')
       expect(service.getState(sessionId).todos[0].status).toBe('pending')
+    })
+  })
+
+  describe('boulder session filter', () => {
+    it('should block continuation for sessions not listed in boulder session_ids', () => {
+      vi.mocked(fs.existsSync).mockReturnValue(true)
+      vi.mocked(fs.readFileSync).mockReturnValue(
+        JSON.stringify({
+          active_plan: '/tmp/.sisyphus/plans/demo.md',
+          session_ids: ['ses_other']
+        })
+      )
+
+      service.setTodos(sessionId, [
+        { id: '1', content: 'pending', status: 'pending', priority: 'medium' }
+      ])
+
+      expect(service.shouldContinue(sessionId)).toBe(false)
+      expect(service.getContinuationPrompt(sessionId)).toBeNull()
     })
   })
 })

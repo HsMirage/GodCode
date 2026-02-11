@@ -68,6 +68,7 @@ describe('LLM Providers Integration', () => {
     }
   ]
   const mockConfig = {
+    model: 'gpt-4',
     maxTokens: 100,
     temperature: 0.7
   }

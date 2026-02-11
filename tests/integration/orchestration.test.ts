@@ -13,6 +13,12 @@ const mocks = vi.hoisted(() => {
       findMany: vi.fn(),
       findFirst: vi.fn()
     },
+    agentBinding: {
+      findUnique: vi.fn()
+    },
+    categoryBinding: {
+      findUnique: vi.fn()
+    },
     session: {
       create: vi.fn(),
       findFirst: vi.fn()
@@ -112,13 +118,28 @@ describe('Orchestration Engines Integration', () => {
 
     mocks.bindingService.getCategoryModelConfig.mockImplementation(async (category: string) => {
       if (category === 'quick') {
-        return { model: 'gpt-4o', temperature: 0.3, apiKey: 'test-key' }
+        return {
+          model: 'gpt-4o',
+          provider: 'openai-compatible',
+          temperature: 0.3,
+          apiKey: 'test-key'
+        }
       }
-      return { model: 'gpt-4o', temperature: 0.5, apiKey: 'test-key' }
+      return {
+        model: 'gpt-4o',
+        provider: 'openai-compatible',
+        temperature: 0.5,
+        apiKey: 'test-key'
+      }
     })
     mocks.bindingService.getAgentModelConfig.mockImplementation(async (agentCode: string) => {
       if (agentCode) {
-        return { model: 'gpt-4o', temperature: 0.5, apiKey: 'test-key' }
+        return {
+          model: 'gpt-4o',
+          provider: 'openai-compatible',
+          temperature: 0.5,
+          apiKey: 'test-key'
+        }
       }
       return null
     })
@@ -158,7 +179,8 @@ describe('Orchestration Engines Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Test task',
         prompt: 'Do this',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       })
 
       expect(result.success).toBe(true)
@@ -184,7 +206,8 @@ describe('Orchestration Engines Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Research task',
         prompt: 'Search this',
-        subagent_type: 'oracle'
+        subagent_type: 'oracle',
+        sessionId: 'test-session-123'
       })
 
       expect(result.success).toBe(true)
@@ -206,18 +229,18 @@ describe('Orchestration Engines Integration', () => {
         usage: { input_tokens: 10, output_tokens: 10 }
       })
 
-      mocks.prisma.session.findFirst.mockResolvedValueOnce({ id: 'existing_session_id' })
-
       await delegateEngine.delegateTask({
         description: 'Test',
         prompt: 'Test',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       })
 
+      // With session isolation, the engine uses the provided sessionId directly
       expect(mocks.prisma.task.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            sessionId: 'existing_session_id'
+            sessionId: 'test-session-123'
           })
         })
       )
@@ -229,7 +252,8 @@ describe('Orchestration Engines Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Test',
         prompt: 'Test',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       })
 
       expect(result.success).toBe(false)
@@ -303,7 +327,7 @@ describe('Orchestration Engines Integration', () => {
           usage: { input_tokens: 10, output_tokens: 10 }
         })
 
-      const result = await workforceEngine.executeWorkflow('Do project')
+      const result = await workforceEngine.executeWorkflow('Do project', 'test-session-123')
 
       expect(result.success).toBe(true)
       expect(result.results.get('t1')).toBe('Result 1')
@@ -344,7 +368,7 @@ describe('Orchestration Engines Integration', () => {
           usage: { input_tokens: 10, output_tokens: 10 }
         })
 
-      const result = await workforceEngine.executeWorkflow('Parallel Work')
+      const result = await workforceEngine.executeWorkflow('Parallel Work', 'test-session-123')
 
       expect(result.success).toBe(true)
       expect(result.results.size).toBe(2)
@@ -443,7 +467,8 @@ describe('Orchestration Engines Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Test task',
         prompt: 'Do this',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       })
 
       expect(result.success).toBe(true)
@@ -469,7 +494,8 @@ describe('Orchestration Engines Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Research task',
         prompt: 'Search this',
-        subagent_type: 'oracle'
+        subagent_type: 'oracle',
+        sessionId: 'test-session-123'
       })
 
       expect(result.success).toBe(true)
@@ -491,18 +517,18 @@ describe('Orchestration Engines Integration', () => {
         usage: { input_tokens: 10, output_tokens: 10 }
       })
 
-      mocks.prisma.session.findFirst.mockResolvedValueOnce({ id: 'existing_session_id' })
-
       await delegateEngine.delegateTask({
         description: 'Test',
         prompt: 'Test',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       })
 
+      // With session isolation, the engine uses the provided sessionId directly
       expect(mocks.prisma.task.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            sessionId: 'existing_session_id'
+            sessionId: 'test-session-123'
           })
         })
       )
@@ -514,7 +540,8 @@ describe('Orchestration Engines Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Test',
         prompt: 'Test',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       })
 
       expect(result.success).toBe(false)
@@ -595,7 +622,7 @@ describe('Orchestration Engines Integration', () => {
           usage: { input_tokens: 10, output_tokens: 10 }
         })
 
-      const result = await workforceEngine.executeWorkflow('Do project')
+      const result = await workforceEngine.executeWorkflow('Do project', 'test-session-123')
 
       expect(result.success).toBe(true)
       expect(result.results.get('t1')).toBe('Result 1')
@@ -641,7 +668,7 @@ describe('Orchestration Engines Integration', () => {
           usage: { input_tokens: 10, output_tokens: 10 }
         })
 
-      const result = await workforceEngine.executeWorkflow('Parallel Work')
+      const result = await workforceEngine.executeWorkflow('Parallel Work', 'test-session-123')
 
       expect(result.success).toBe(true)
       expect(result.results.size).toBe(2)

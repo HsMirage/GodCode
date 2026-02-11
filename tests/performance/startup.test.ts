@@ -77,8 +77,27 @@ vi.mock('fs', async () => {
 
 // Mock Prisma Client
 vi.mock('@prisma/client', () => {
+  const delegate = () => ({
+    create: vi.fn(async ({ data }: any) => ({ id: 'mock-id', ...data })),
+    findUnique: vi.fn(async () => null),
+    findFirst: vi.fn(async () => null),
+    findMany: vi.fn(async () => []),
+    update: vi.fn(async ({ where, data }: any) => ({ id: where?.id ?? 'mock-id', ...data })),
+    delete: vi.fn(async ({ where }: any) => ({ id: where?.id ?? 'mock-id' })),
+    deleteMany: vi.fn(async () => ({ count: 0 }))
+  })
+
   return {
     PrismaClient: class {
+      space = delegate()
+      model = delegate()
+      agentBinding = delegate()
+      categoryBinding = delegate()
+      systemSetting = delegate()
+      session = delegate()
+      message = delegate()
+      task = delegate()
+      artifact = delegate()
       $connect() {
         return Promise.resolve()
       }

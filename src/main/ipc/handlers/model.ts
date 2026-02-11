@@ -35,7 +35,8 @@ export async function handleModelCreate(
       apiKey: encryptedApiKey,
       apiKeyId: input.apiKeyId ?? null,
       baseURL: input.baseURL,
-      config: input.config
+      contextSize: input.contextSize ?? undefined,
+      config: input.config ?? {}
     }
   })
 

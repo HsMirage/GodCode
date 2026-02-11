@@ -73,6 +73,8 @@ vi.mock('fs', async () => {
 const mockStore: Record<string, any[]> = {
   space: [],
   model: [],
+  agentBinding: [],
+  categoryBinding: [],
   session: [],
   message: [],
   task: [],
@@ -100,14 +102,34 @@ const createDelegate = (modelName: string) => ({
   findMany: vi.fn(async ({ where, take, skip }: any) => {
     let items = mockStore[modelName]
     if (where) {
-      items = items.filter((item: any) =>
-        Object.entries(where).every(([k, v]) => {
+      const whereAny: any = where
+      items = items.filter((item: any) => {
+        if (Array.isArray(whereAny.OR)) {
+          return whereAny.OR.some((clause: any) =>
+            Object.entries(clause).every(([k, v]) => {
+              if (v && typeof v === 'object' && 'not' in v) {
+                const filterValue = v as { not: unknown }
+                return item[k] !== filterValue.not
+              }
+              if (v && typeof v === 'object' && 'in' in v) {
+                return (v as { in: any[] }).in.includes(item[k])
+              }
+              return item[k] === v
+            })
+          )
+        }
+
+        return Object.entries(where).every(([k, v]) => {
+          if (v && typeof v === 'object' && 'not' in v) {
+            const filterValue = v as { not: unknown }
+            return item[k] !== filterValue.not
+          }
           if (v && typeof v === 'object' && 'in' in v) {
             return (v as { in: any[] }).in.includes(item[k])
           }
           return item[k] === v
         })
-      )
+      })
     }
     if (skip) items = items.slice(skip)
     if (take) items = items.slice(0, take)
@@ -175,6 +197,8 @@ vi.mock('@prisma/client', () => {
       message = createDelegate('message')
       task = createDelegate('task')
       artifact = createDelegate('artifact')
+      agentBinding = createDelegate('agentBinding')
+      categoryBinding = createDelegate('categoryBinding')
       $connect() {
         return Promise.resolve()
       }

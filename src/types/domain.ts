@@ -144,9 +144,21 @@ export interface Model {
   apiKeyId?: string
   /** Custom endpoint */
   baseURL?: string
+  /**
+   * Maximum context window size, unit: K tokens.
+   * Example: 32 means ~32K tokens.
+   */
+  contextSize?: number
   config: {
     temperature?: number
     maxTokens?: number
     timeout?: number
+    timeoutMs?: number
+    maxRetries?: number
+    baseDelayMs?: number
+    maxToolIterations?: number
+    defaultMaxTokens?: number
+    /** Provider-specific / capability toggle (e.g., Claude extended thinking). */
+    thinkingMode?: boolean
   }
 }

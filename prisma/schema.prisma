@@ -230,3 +230,17 @@ model SystemSetting {
 
   @@index([key])
 }
+
+// SessionState表 - 会话状态持久化
+model SessionState {
+  id         String   @id @default(uuid())
+  sessionId  String   @unique // 关联的 Session ID
+  status     String   @default("active") // active, idle, interrupted, crashed, completed, recovering
+  checkpoint Json     @default("{}") // 检查点数据
+  context    Json     @default("{}") // 会话上下文
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([sessionId])
+  @@index([status])
+}

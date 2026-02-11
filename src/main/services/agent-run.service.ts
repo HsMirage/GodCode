@@ -88,6 +88,22 @@ export class AgentRunService {
     runId: string,
     result: { success: boolean; tokenUsage?: UpdateRunInput['tokenUsage']; cost?: number }
   ) {
+    const existing = await this.prisma.run.findUnique({
+      where: { id: runId }
+    })
+
+    if (!existing) {
+      throw new Error(`Run not found: ${runId}`)
+    }
+
+    if (existing.status === 'completed' || existing.status === 'failed') {
+      this.logger.debug('Skipping duplicate run completion', {
+        runId,
+        existingStatus: existing.status
+      })
+      return existing
+    }
+
     const run = await this.prisma.run.update({
       where: { id: runId },
       data: {

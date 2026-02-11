@@ -23,7 +23,9 @@ function ResizablePanel({
   className,
   ...props
 }: React.ComponentProps<typeof Panel>) {
-  return <Panel className={cn('overflow-hidden', className)} {...props} />
+  // Ensure children can reliably use h-full/min-h-0 to create internal scroll areas.
+  // Without an explicit height, nested flex+overflow layouts can collapse on small windows.
+  return <Panel className={cn('overflow-hidden h-full min-h-0', className)} {...props} />
 }
 
 /**
@@ -49,8 +51,8 @@ function ResizableHandle({
       className={cn(
         'relative flex items-center justify-center transition-colors duration-150',
         isHorizontal
-          ? 'w-1 bg-slate-800 cursor-col-resize'
-          : 'h-1 bg-slate-800 cursor-row-resize',
+          ? 'w-px bg-[var(--border-primary)] cursor-col-resize'
+          : 'h-px bg-[var(--border-primary)] cursor-row-resize',
         'hover:bg-indigo-500 data-[resize-handle-active]:bg-indigo-600',
         'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-indigo-500',
         isHorizontal
@@ -61,8 +63,8 @@ function ResizableHandle({
       {...props}
     >
       {withHandle && (
-        <div className="z-10 flex h-6 w-4 items-center justify-center rounded-sm bg-slate-700 border border-slate-600 shadow-sm">
-          <GripVertical className="h-3 w-3 text-slate-400" />
+        <div className="z-10 flex h-6 w-4 items-center justify-center rounded-sm bg-[var(--bg-tertiary)] border border-[var(--border-secondary)] shadow-sm">
+          <GripVertical className="h-3 w-3 text-[var(--text-secondary)]" />
         </div>
       )}
     </Separator>
@@ -70,4 +72,3 @@ function ResizableHandle({
 }
 
 export { ResizablePanelGroup, ResizablePanel, ResizableHandle }
-

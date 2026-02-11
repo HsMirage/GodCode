@@ -9,8 +9,11 @@ import {
 import { providerCacheService } from '../provider-cache.service'
 
 export interface RouteContext {
+  sessionId?: string
   prompt?: string
   parentTaskId?: string
+  /** Selected dialog agent code (e.g. "haotian") */
+  agentCode?: string
 }
 
 export interface DirectRouteResult {
@@ -87,20 +90,30 @@ export class SmartRouter {
 
     if (strategy === 'delegate') {
       const resolved = this.resolveModel(rule.category, rule.model)
+      // If the rule doesn't pin a subagent, respect the user's selected dialog agent.
+      const selectedSubagent = rule.subagent ?? context?.agentCode
+      const modelOverride = rule.subagent ? (resolved?.model ?? rule.model) : undefined
       return await this.delegateEngine.delegateTask({
+        sessionId: context?.sessionId,
         description: input,
         prompt: context?.prompt ?? input,
         category: rule.category,
-        subagent_type: rule.subagent,
+        subagent_type: selectedSubagent,
         parentTaskId: context?.parentTaskId,
-        model: resolved?.model ?? rule.model,
+        model: modelOverride,
         baseURL: rule.baseURL,
         apiKey: rule.apiKey
       })
     }
 
     if (strategy === 'workforce') {
-      return await this.workforceEngine.executeWorkflow(input, rule.category ?? 'unspecified-high')
+      const workflowOptions = {
+        category: rule.category ?? 'unspecified-high',
+        agentCode: context?.agentCode
+      }
+      return context?.sessionId
+        ? await this.workforceEngine.executeWorkflow(input, context.sessionId, workflowOptions)
+        : await this.workforceEngine.executeWorkflow(input, workflowOptions)
     }
 
     return {

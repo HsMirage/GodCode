@@ -11,16 +11,22 @@ import type { Model } from '@renderer/types/domain'
 interface CategoryCardProps {
   category: CategoryBindingData
   models: Model[]
+  providerNameByModelId?: Record<string, string>
   onUpdate: (categoryCode: string, data: UpdateCategoryBindingInput) => Promise<void>
   onReset: (categoryCode: string) => Promise<void>
 }
 
-export function CategoryCard({ category, models, onUpdate, onReset }: CategoryCardProps) {
+export function CategoryCard({ category, models, providerNameByModelId, onUpdate, onReset }: CategoryCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [loading, setLoading] = useState(false)
   const [localTemp, setLocalTemp] = useState(category.temperature)
   const [showSystemPrompt, setShowSystemPrompt] = useState(false)
   const [systemPrompt, setSystemPrompt] = useState(category.systemPrompt || '')
+
+  const selectedModel = category.modelId ? models.find(m => m.id === category.modelId) : null
+  const selectedProvider = selectedModel
+    ? providerNameByModelId?.[selectedModel.id] ?? selectedModel.provider
+    : null
 
   const handleModelChange = async (modelId: string) => {
     setLoading(true)
@@ -81,8 +87,8 @@ export function CategoryCard({ category, models, onUpdate, onReset }: CategoryCa
       className={[
         'rounded-xl border transition-all',
         category.enabled
-          ? 'border-slate-800/70 bg-slate-950/40 hover:border-slate-700/70'
-          : 'border-slate-800/40 bg-slate-950/20 opacity-60'
+          ? 'border-[var(--border-primary)] bg-[var(--bg-secondary)] hover:border-[var(--border-secondary)]'
+          : 'border-[var(--border-primary)] bg-[var(--bg-secondary)] opacity-60'
       ].join(' ')}
     >
       {/* Header */}
@@ -91,19 +97,19 @@ export function CategoryCard({ category, models, onUpdate, onReset }: CategoryCa
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/15 flex items-center justify-center">
             <Layers className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-medium text-slate-200">{category.categoryName}</h3>
-            <p className="text-xs text-slate-500">{category.description}</p>
+            <h3 className="font-medium text-[var(--text-primary)]">{category.categoryName}</h3>
+            <p className="text-xs text-[var(--text-muted)]">{category.description}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
           {/* Model badge */}
-          <span className="text-xs text-slate-400 bg-slate-800/50 px-2 py-1 rounded">
-            {category.modelName || '默认模型'}
+          <span className="text-xs text-[var(--text-secondary)] bg-[var(--bg-tertiary)] px-2 py-1 rounded border border-[var(--border-primary)]">
+            {selectedModel ? `${selectedModel.modelName} (${selectedProvider})` : category.modelName || '默认模型'}
           </span>
 
           {/* Enable toggle */}
@@ -118,7 +124,7 @@ export function CategoryCard({ category, models, onUpdate, onReset }: CategoryCa
               'p-1.5 rounded-lg transition-colors',
               category.enabled
                 ? 'text-emerald-400 hover:bg-emerald-500/20'
-                : 'text-slate-500 hover:bg-slate-800'
+                : 'text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)]'
             ].join(' ')}
             title={category.enabled ? '已启用' : '已禁用'}
           >
@@ -127,29 +133,29 @@ export function CategoryCard({ category, models, onUpdate, onReset }: CategoryCa
 
           {/* Expand toggle */}
           {expanded ? (
-            <ChevronUp className="w-4 h-4 text-slate-500" />
+            <ChevronUp className="w-4 h-4 text-[var(--text-muted)]" />
           ) : (
-            <ChevronDown className="w-4 h-4 text-slate-500" />
+            <ChevronDown className="w-4 h-4 text-[var(--text-muted)]" />
           )}
         </div>
       </div>
 
       {/* Expanded content */}
       {expanded && (
-        <div className="px-4 pb-4 pt-2 border-t border-slate-800/50 space-y-4">
+        <div className="px-4 pb-4 pt-2 border-t ui-border space-y-4">
           {/* Model selector */}
           <div className="space-y-1.5">
-            <label className="text-xs text-slate-400 font-medium">绑定模型</label>
+            <label className="text-xs text-[var(--text-secondary)] font-medium">绑定模型</label>
             <select
               value={category.modelId || ''}
               onChange={e => handleModelChange(e.target.value)}
               disabled={loading}
-              className="w-full rounded-lg border border-slate-800/70 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 focus:border-slate-500/80 focus:outline-none"
+              className="w-full rounded-lg border border-[var(--border-primary)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-amber-500/50 focus:outline-none"
             >
               <option value="">使用默认模型</option>
               {models.map(model => (
                 <option key={model.id} value={model.id}>
-                  {model.modelName} ({model.provider})
+                  {model.modelName} ({providerNameByModelId?.[model.id] ?? model.provider})
                 </option>
               ))}
             </select>
@@ -158,8 +164,8 @@ export function CategoryCard({ category, models, onUpdate, onReset }: CategoryCa
           {/* Temperature slider */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs text-slate-400 font-medium">温度</label>
-              <span className="text-xs text-slate-500">{localTemp.toFixed(2)}</span>
+              <label className="text-xs text-[var(--text-secondary)] font-medium">温度</label>
+              <span className="text-xs text-[var(--text-muted)]">{localTemp.toFixed(2)}</span>
             </div>
             <input
               type="range"
@@ -171,14 +177,14 @@ export function CategoryCard({ category, models, onUpdate, onReset }: CategoryCa
               onMouseUp={handleTemperatureChange}
               onTouchEnd={handleTemperatureChange}
               disabled={loading}
-              className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+              className="w-full h-2 bg-[var(--bg-tertiary)] rounded-lg appearance-none cursor-pointer accent-amber-500"
             />
           </div>
 
           {/* System Prompt Section */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-xs text-slate-400 font-medium">
+              <label className="text-xs text-[var(--text-secondary)] font-medium">
                 系统提示词 (System Prompt)
               </label>
               <button
@@ -201,14 +207,14 @@ export function CategoryCard({ category, models, onUpdate, onReset }: CategoryCa
                   placeholder="输入系统提示词..."
                   disabled={loading}
                   rows={6}
-                  className="w-full rounded-lg border border-slate-800/70 bg-slate-950/40 px-3 py-2 text-sm text-slate-100 focus:border-amber-500/50 focus:outline-none resize-none font-mono"
+                  className="w-full rounded-lg border border-[var(--border-primary)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-primary)] focus:border-amber-500/50 focus:outline-none resize-none font-mono placeholder:text-[var(--text-muted)]"
                 />
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setShowSystemPrompt(false)}
                     disabled={loading}
-                    className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                    className="px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
                   >
                     取消
                   </button>
@@ -225,7 +231,7 @@ export function CategoryCard({ category, models, onUpdate, onReset }: CategoryCa
             ) : (
               category.systemPrompt && (
                 <div
-                  className="p-3 rounded-lg bg-slate-950/20 border border-slate-800/40 text-xs text-slate-400 font-mono line-clamp-3 cursor-pointer hover:border-slate-700/50 transition-colors"
+                  className="p-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--border-primary)] text-xs text-[var(--text-secondary)] font-mono line-clamp-3 cursor-pointer hover:border-[var(--border-secondary)] transition-colors"
                   onClick={() => {
                     setSystemPrompt(category.systemPrompt || '')
                     setShowSystemPrompt(true)
@@ -243,7 +249,7 @@ export function CategoryCard({ category, models, onUpdate, onReset }: CategoryCa
               type="button"
               onClick={handleReset}
               disabled={loading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-800/70 text-xs text-slate-400 hover:text-slate-200 hover:border-slate-600 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border-primary)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               重置默认

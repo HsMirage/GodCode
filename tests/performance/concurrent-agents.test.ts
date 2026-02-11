@@ -22,12 +22,14 @@ vi.mock('@/main/services/binding.service', () => ({
     getInstance: vi.fn(() => ({
       getCategoryModelConfig: vi.fn(async () => ({
         model: 'gpt-4o',
+        provider: 'openai-compatible',
         temperature: 0.2,
         apiKey: 'test',
         baseURL: 'https://api.openai.com/v1'
       })),
       getAgentModelConfig: vi.fn(async () => ({
         model: 'gpt-4o',
+        provider: 'openai-compatible',
         temperature: 0.2,
         apiKey: 'test',
         baseURL: 'https://api.openai.com/v1'
@@ -113,6 +115,8 @@ vi.mock('fs', async () => {
 const mockStore: any = {
   space: [],
   model: [],
+  agentBinding: [],
+  categoryBinding: [],
   session: [],
   message: [],
   task: [],
@@ -129,6 +133,12 @@ const createDelegate = (modelName: string) => ({
     mockStore[modelName].push(entry)
     return entry
   }),
+  findUnique: vi.fn(async ({ where }: any) => {
+    if (!where) return null
+    const key = Object.keys(where)[0]
+    const value = (where as any)[key]
+    return mockStore[modelName].find((item: any) => item[key] === value) || null
+  }),
   findFirst: vi.fn(async ({ where }: any) => {
     const items = mockStore[modelName]
     if (where) {
@@ -141,8 +151,25 @@ const createDelegate = (modelName: string) => ({
   findMany: vi.fn(async ({ where }: any) => {
     let items = mockStore[modelName]
     if (where) {
-      items = items.filter((item: any) =>
-        Object.entries(where).every(([k, v]) => {
+      const whereAny: any = where
+      items = items.filter((item: any) => {
+        if (Array.isArray(whereAny.OR)) {
+          return whereAny.OR.some((clause: any) =>
+            Object.entries(clause).every(([k, v]) => {
+              if (v && typeof v === 'object' && 'not' in v) {
+                const filterValue = v as { not: unknown }
+                return item[k] !== filterValue.not
+              }
+              if (v && typeof v === 'object' && 'in' in v) {
+                const filterValue = v as { in: any[] }
+                return filterValue.in.includes(item[k])
+              }
+              return item[k] === v
+            })
+          )
+        }
+
+        return Object.entries(where).every(([k, v]) => {
           if (v && typeof v === 'object' && 'not' in v) {
             const filterValue = v as { not: unknown }
             return item[k] !== filterValue.not
@@ -153,7 +180,7 @@ const createDelegate = (modelName: string) => ({
           }
           return item[k] === v
         })
-      )
+      })
     }
     return items
   }),
@@ -182,6 +209,8 @@ vi.mock('@prisma/client', () => {
     PrismaClient: class {
       space = createDelegate('space')
       model = createDelegate('model')
+      agentBinding = createDelegate('agentBinding')
+      categoryBinding = createDelegate('categoryBinding')
       session = createDelegate('session')
       message = createDelegate('message')
       task = createDelegate('task')
@@ -293,7 +322,7 @@ describe('Performance: Concurrent Agent Execution', () => {
     const startMemory = getMemoryMB()
 
     // Execute 3 agents in parallel
-    const results = await Promise.all(tasks.map(t => workforceEngine.executeWorkflow(t)))
+    const results = await Promise.all(tasks.map(t => workforceEngine.executeWorkflow(t, sessionId)))
 
     const duration = Date.now() - startTime
     const endMemory = getMemoryMB()
@@ -334,7 +363,7 @@ Tasks Created: ${mockStore.task.length}
     const startMemory = getMemoryMB()
 
     // Execute 5 agents in parallel
-    const results = await Promise.all(tasks.map(t => workforceEngine.executeWorkflow(t)))
+    const results = await Promise.all(tasks.map(t => workforceEngine.executeWorkflow(t, sessionId)))
 
     const duration = Date.now() - startTime
     const endMemory = getMemoryMB()
@@ -367,10 +396,10 @@ Tasks Created: ${mockStore.task.length}
     const startTime = Date.now()
 
     const results = await Promise.all([
-      workforceEngine.executeWorkflow(heavyTask),
-      workforceEngine.executeWorkflow(lightTask),
-      workforceEngine.executeWorkflow(heavyTask),
-      workforceEngine.executeWorkflow(lightTask)
+      workforceEngine.executeWorkflow(heavyTask, sessionId),
+      workforceEngine.executeWorkflow(lightTask, sessionId),
+      workforceEngine.executeWorkflow(heavyTask, sessionId),
+      workforceEngine.executeWorkflow(lightTask, sessionId)
     ])
 
     const duration = Date.now() - startTime
@@ -392,7 +421,9 @@ All agents completed: ${results.every(r => r.success)}
       'Isolated Agent C: Create file-c.ts'
     ]
 
-    const results = await Promise.all(agentTasks.map(t => workforceEngine.executeWorkflow(t)))
+    const results = await Promise.all(
+      agentTasks.map(t => workforceEngine.executeWorkflow(t, sessionId))
+    )
 
     // Each result should be independent
     expect(results).toHaveLength(3)
@@ -417,7 +448,7 @@ All agents completed: ${results.every(r => r.success)}
     memorySnapshots.push(getMemoryMB())
 
     for (let i = 0; i < iterations; i++) {
-      await workforceEngine.executeWorkflow(`Iteration ${i + 1}: Create component-${i}`)
+      await workforceEngine.executeWorkflow(`Iteration ${i + 1}: Create component-${i}`, sessionId)
       forceGC()
       memorySnapshots.push(getMemoryMB())
     }

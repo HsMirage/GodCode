@@ -40,6 +40,7 @@ const bindingMocks = vi.hoisted(() => ({
     if (categoryCode === 'quick') {
       return {
         model: 'claude-3-haiku-20240307',
+        provider: 'openai-compatible',
         temperature: 0.3,
         apiKey: 'test-key',
         baseURL: 'https://api.openai.com/v1'
@@ -51,6 +52,7 @@ const bindingMocks = vi.hoisted(() => ({
     if (agentCode === 'explore') {
       return {
         model: 'claude-3-5-sonnet-20240620',
+        provider: 'openai-compatible',
         temperature: 0.2,
         apiKey: 'test-key',
         baseURL: 'https://api.openai.com/v1'
@@ -121,7 +123,8 @@ describe('DelegateEngine', () => {
       const input = {
         description: 'Test task',
         prompt: 'Do this task',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       }
 
       const result = await delegateEngine.delegateTask(input)
@@ -164,7 +167,8 @@ describe('DelegateEngine', () => {
       const input = {
         description: 'Research task',
         prompt: 'Research this',
-        subagent_type: 'explore'
+        subagent_type: 'explore',
+        sessionId: 'test-session-123'
       }
 
       const result = await delegateEngine.delegateTask(input)
@@ -183,24 +187,21 @@ describe('DelegateEngine', () => {
       expect(result.success).toBe(true)
     })
 
-    it('should create new session if none exists', async () => {
-      mocks.mockPrisma.session.findFirst.mockResolvedValue(null)
-      mocks.mockPrisma.space.findFirst.mockResolvedValue({ id: 'space-1' })
-      mocks.mockPrisma.session.create.mockResolvedValue({ id: 'session-new' })
-
+    it('should use provided sessionId directly', async () => {
       const input = {
         description: 'Test task',
         prompt: 'Do this task',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       }
 
       await delegateEngine.delegateTask(input)
 
-      expect(mocks.mockPrisma.session.create).toHaveBeenCalled()
+      // With the new session isolation, the engine uses the provided sessionId directly
       expect(mocks.mockPrisma.task.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            sessionId: 'session-new'
+            sessionId: 'test-session-123'
           })
         })
       )
@@ -210,11 +211,12 @@ describe('DelegateEngine', () => {
       const input = {
         description: 'Test task',
         prompt: 'Do this task',
-        category: 'unknown-category'
+        category: 'unknown-category',
+        sessionId: 'test-session-123'
       }
 
       await expect(delegateEngine.delegateTask(input)).rejects.toThrow(
-        'Category not found or disabled: unknown-category'
+        '任务类别「unknown-category」未配置可用模型'
       )
     })
 
@@ -222,18 +224,20 @@ describe('DelegateEngine', () => {
       const input = {
         description: 'Test task',
         prompt: 'Do this task',
-        subagent_type: 'unknown-agent'
+        subagent_type: 'unknown-agent',
+        sessionId: 'test-session-123'
       }
 
       await expect(delegateEngine.delegateTask(input)).rejects.toThrow(
-        'Agent not found or disabled: unknown-agent'
+        'Agent「unknown-agent」未配置可用模型'
       )
     })
 
     it('should throw error if neither category nor subagent_type provided', async () => {
       const input = {
         description: 'Test task',
-        prompt: 'Do this task'
+        prompt: 'Do this task',
+        sessionId: 'test-session-123'
       }
 
       await expect(delegateEngine.delegateTask(input)).rejects.toThrow(
@@ -242,19 +246,14 @@ describe('DelegateEngine', () => {
     })
 
     it('should handle model not found error', async () => {
-      // Force fallback to provider-level model lookup by returning a binding without apiKey/baseURL.
-      bindingMocks.getCategoryModelConfig.mockResolvedValueOnce({
-        model: 'claude-3-haiku-20240307',
-        temperature: 0.3,
-        apiKey: '',
-        baseURL: ''
-      })
+      // Force fallback to provider-level model lookup by using overrideModel without apiKey/baseURL.
       mocks.mockPrisma.model.findFirst.mockResolvedValue(null)
 
       const input = {
         description: 'Test task',
         prompt: 'Do this task',
-        category: 'quick'
+        model: 'openai-compatible/gpt-4o',
+        sessionId: 'test-session-123'
       }
 
       const result = await delegateEngine.delegateTask(input)
@@ -277,7 +276,8 @@ describe('DelegateEngine', () => {
       const input = {
         description: 'Test task',
         prompt: 'Do this task',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       }
 
       const result = await delegateEngine.delegateTask(input)

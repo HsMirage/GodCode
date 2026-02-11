@@ -94,7 +94,7 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      {}
+      { model: 'gpt-4' }
     )
 
     expect(result.content).toBe('Success')
@@ -122,7 +122,7 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      {}
+      { model: 'gpt-4' }
     )) {
       chunks.push(chunk)
     }
@@ -262,7 +262,7 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      {}
+      { model: 'gpt-4' }
     )) {
       chunks.push(chunk)
     }

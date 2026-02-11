@@ -18,6 +18,12 @@ vi.mock('@/main/services/logger', () => ({
     }))
   }
 }))
+vi.mock('@/main/services/hooks', () => ({
+  hookManager: {
+    emitToolStart: vi.fn().mockResolvedValue({ shouldSkip: false }),
+    emitToolEnd: vi.fn().mockResolvedValue({})
+  }
+}))
 
 describe('ToolExecutionService', () => {
   let service: ToolExecutionService

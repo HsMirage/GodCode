@@ -1,18 +1,21 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { Message } from '../chat/MessageCard'
 import { MessageList } from '../chat/MessageList'
 import { MessageInput } from '../chat/MessageInput'
 import { TypingIndicator } from '../chat/TypingIndicator'
 import { SessionResumeIndicator } from '../session/SessionResumeIndicator'
+import { useStreamingEvents } from '../../hooks/useStreamingEvents'
 
 export function ChatView() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
-  const streamingContentRef = useRef('')
-  const [streamingContent, setStreamingContent] = useState('')
   const messageScrollRef = useRef<HTMLDivElement>(null)
+
+  // Use the streaming events hook
+  const { isStreaming, content: streamingContent, toolCalls, error, start, reset } =
+    useStreamingEvents(sessionId)
 
   useEffect(() => {
     // Skip if not running in Electron environment
@@ -57,82 +60,83 @@ export function ChatView() {
     initializeSession()
   }, [])
 
+  // Handle streaming completion - add final message to list
+  const prevIsStreamingRef = useRef(false)
   useEffect(() => {
-    // Skip if not running in Electron environment
-    if (!window.codeall) {
-      return
-    }
-
-    const removeListener = window.codeall.on(
-      'message:stream-chunk',
-      ({ content, done }: { content: string; done: boolean }) => {
-        if (done) {
-          const finalContent = streamingContentRef.current + content
-          setMessages(prev => [
-            ...prev,
-            {
-              id: Date.now().toString(),
-              role: 'assistant',
-              content: finalContent,
-              createdAt: new Date().toISOString()
-            }
-          ])
-          streamingContentRef.current = ''
-          setStreamingContent('')
-          setIsLoading(false)
-        } else {
-          streamingContentRef.current += content
-          setStreamingContent(streamingContentRef.current)
+    // Detect transition from streaming to not streaming
+    if (prevIsStreamingRef.current && !isStreaming && streamingContent) {
+      // Streaming just completed, add the message
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          role: 'assistant' as const,
+          content: streamingContent,
+          createdAt: new Date().toISOString(),
+          error: error || undefined
         }
-      }
-    )
-
-    return () => {
-      removeListener()
-    }
-  }, [])
-
-  const handleSend = async (content: string) => {
-    if (!sessionId || !window.codeall) return false
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content,
-      createdAt: new Date().toISOString()
-    }
-    setMessages(prev => [...prev, userMessage])
-    setIsLoading(true)
-
-    streamingContentRef.current = ''
-    setStreamingContent('')
-
-    try {
-      await window.codeall.invoke('message:send', {
-        sessionId,
-        content
-      })
-      return true
-    } catch (error) {
-      console.error('Failed to send message:', error)
+      ])
+      reset()
       setIsLoading(false)
-      return true
     }
-  }
+    prevIsStreamingRef.current = isStreaming
+  }, [isStreaming, streamingContent, error, reset])
 
+  // Handle error during streaming
+  useEffect(() => {
+    if (error && !isStreaming) {
+      setIsLoading(false)
+    }
+  }, [error, isStreaming])
+
+  const handleSend = useCallback(
+    async (content: string, agentCode?: string) => {
+      if (!sessionId || !window.codeall) return false
+
+      const userMessage: Message = {
+        id: Date.now().toString(),
+        role: 'user',
+        content,
+        createdAt: new Date().toISOString()
+      }
+      setMessages((prev) => [...prev, userMessage])
+      setIsLoading(true)
+
+      // Start streaming state
+      start()
+
+      try {
+        await window.codeall.invoke('message:send', {
+          sessionId,
+          content,
+          agentCode
+        })
+        return true
+      } catch (error) {
+        console.error('Failed to send message:', error)
+        setIsLoading(false)
+        return true
+      }
+    },
+    [sessionId, start]
+  )
+
+  // Build display messages including streaming message
   const displayMessages = [...messages]
-  if (streamingContent) {
+  if (isStreaming || (streamingContent && isLoading)) {
     displayMessages.push({
       id: 'streaming',
       role: 'assistant',
       content: streamingContent,
       createdAt: new Date().toISOString(),
-      isStreaming: true
+      isStreaming: true,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      error: error || undefined
     })
   }
 
   return (
-    <div className="h-full flex flex-col bg-slate-950">
+    <div className="h-full flex flex-col ui-bg-app">
       <div
         ref={messageScrollRef}
         className="flex-1 min-h-0 overflow-y-auto scroll-smooth p-4 scrollbar-overlay"
@@ -148,17 +152,17 @@ export function ChatView() {
           scrollKey={sessionId ?? undefined}
         />
 
-        {isLoading && !streamingContent && (
+        {isLoading && !streamingContent && !isStreaming && (
           <div className="flex justify-center">
             <TypingIndicator />
           </div>
         )}
       </div>
 
-      <div className="p-4 border-t border-slate-800 bg-slate-950">
+      <div className="p-4 border-t ui-border ui-bg-panel">
         <div className="max-w-3xl mx-auto relative">
           <MessageInput isLoading={isLoading} onSend={handleSend} placeholder="Type a message..." />
-          <div className="text-xs text-center text-slate-500 mt-2">
+          <div className="text-xs text-center text-[var(--text-muted)] mt-2">
             CodeAll can make mistakes. Please verify generated code.
           </div>
         </div>

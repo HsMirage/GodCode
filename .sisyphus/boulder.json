@@ -1,6 +1,8 @@
 {
-  "active_plan": "/mnt/d/AiWork/CodeAll/.sisyphus/plans/codeall-feature-fix.md",
-  "started_at": "2026-02-08T09:47:26.003Z",
-  "session_ids": ["ses_3c3724d60ffetCX285eW7iOHbZ"],
-  "plan_name": "codeall-feature-fix"
+  "active_plan": null,
+  "completed_at": "2026-02-11T22:15:00.000Z",
+  "started_at": "2026-02-11T11:12:15.701Z",
+  "session_ids": ["ses_3b40921acffemQx1LTvQI522GX"],
+  "plan_name": "multi-agent-architecture-overhaul",
+  "status": "completed"
 }

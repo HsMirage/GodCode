@@ -1,7 +1,6 @@
 import { ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
-import { PathValidator } from '@/shared/path-validator'
 import { AuditLogService } from '../../services/audit-log.service'
 import { DatabaseService } from '../../services/database'
 import { ArtifactService } from '../../services/artifact.service'
@@ -12,6 +11,7 @@ export function registerArtifactHandlers(): void {
     action: string
     entityType: string
     entityId?: string
+    sessionId?: string
     metadata?: any
     success?: boolean
     errorMsg?: string
@@ -19,6 +19,25 @@ export function registerArtifactHandlers(): void {
     void auditLogService.log(input).catch(error => {
       console.error('Failed to write audit log:', error)
     })
+  }
+
+  const resolveWorkspacePath = (requestedPath: string, workDir: string) => {
+    const normalizedWorkDir = path.resolve(workDir)
+    const normalizedRequestedPath = path.normalize(requestedPath)
+    const resolvedPath = path.isAbsolute(normalizedRequestedPath)
+      ? path.resolve(normalizedRequestedPath)
+      : path.resolve(normalizedWorkDir, normalizedRequestedPath)
+
+    const isInsideWorkspace =
+      resolvedPath === normalizedWorkDir ||
+      resolvedPath.startsWith(`${normalizedWorkDir}${path.sep}`)
+
+    return {
+      normalizedWorkDir,
+      normalizedRequestedPath,
+      resolvedPath,
+      isInsideWorkspace
+    }
   }
 
   ipcMain.handle('file:read', async (_, filePath: string, sessionId: string) => {
@@ -34,6 +53,7 @@ export function registerArtifactHandlers(): void {
           action: 'file:read',
           entityType: 'file',
           entityId: filePath,
+          sessionId,
           metadata: { filePath, sessionId },
           success: false,
           errorMsg: 'Session not found'
@@ -42,32 +62,39 @@ export function registerArtifactHandlers(): void {
       }
 
       const workDir = session.space.workDir
-      let resolvedPath: string
+      const { normalizedRequestedPath, normalizedWorkDir, resolvedPath, isInsideWorkspace } =
+        resolveWorkspacePath(filePath, workDir)
 
-      if (!PathValidator.isPathSafe(filePath, workDir)) {
-        logAudit({
-          action: 'file:read',
-          entityType: 'file',
-          entityId: filePath,
-          metadata: { filePath, sessionId, workDir },
-          success: false,
-          errorMsg: 'Path traversal detected'
-        })
-        return { success: false, error: 'Path traversal detected' }
-      }
+      if (!isInsideWorkspace) {
+        const isDevelopment = process.env.NODE_ENV === 'development'
+        const auditMetadata = {
+          filePath,
+          normalizedRequestedPath,
+          resolvedPath,
+          sessionId,
+          workDir: normalizedWorkDir,
+          allowedInDevelopment: isDevelopment
+        }
 
-      try {
-        resolvedPath = PathValidator.resolveSafePath(filePath, workDir)
-      } catch (error) {
-        logAudit({
-          action: 'file:read',
-          entityType: 'file',
-          entityId: filePath,
-          metadata: { filePath, sessionId, workDir },
-          success: false,
-          errorMsg: (error as Error).message
+        if (!isDevelopment) {
+          logAudit({
+            action: 'file:read',
+            entityType: 'file',
+            entityId: filePath,
+            sessionId,
+            metadata: auditMetadata,
+            success: false,
+            errorMsg: 'Path outside workspace'
+          })
+          return { success: false, error: 'Path outside workspace' }
+        }
+
+        console.warn('[artifact:file:read] Allowing outside-workspace path in development mode', {
+          filePath,
+          sessionId,
+          resolvedPath,
+          workDir: normalizedWorkDir
         })
-        return { success: false, error: 'Path traversal detected' }
       }
 
       if (!fs.existsSync(resolvedPath)) {
@@ -75,7 +102,8 @@ export function registerArtifactHandlers(): void {
           action: 'file:read',
           entityType: 'file',
           entityId: filePath,
-          metadata: { filePath, sessionId, workDir },
+          sessionId,
+          metadata: { filePath, sessionId, resolvedPath, workDir: normalizedWorkDir },
           success: false,
           errorMsg: 'File not found'
         })
@@ -86,7 +114,8 @@ export function registerArtifactHandlers(): void {
         action: 'file:read',
         entityType: 'file',
         entityId: filePath,
-        metadata: { filePath, sessionId, workDir },
+        sessionId,
+        metadata: { filePath, sessionId, resolvedPath, workDir: normalizedWorkDir },
         success: true
       })
       return { success: true, content }
@@ -95,6 +124,7 @@ export function registerArtifactHandlers(): void {
         action: 'file:read',
         entityType: 'file',
         entityId: filePath,
+        sessionId,
         metadata: { filePath, sessionId },
         success: false,
         errorMsg: (error as Error).message

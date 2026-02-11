@@ -10,6 +10,9 @@ export interface OperationLogEntry {
 }
 
 interface UIState {
+  // Theme
+  theme: 'light' | 'dark'
+
   showSidebar: boolean
   showArtifactRail: boolean
   showContentCanvas: boolean
@@ -39,7 +42,7 @@ interface UIState {
 
   // Operation History
   browserOperationHistory: OperationLogEntry[]
-  addBrowserOperation: (entry: OperationLogEntry) => void
+  upsertBrowserOperation: (entry: OperationLogEntry) => void
 
   toggleSidebar: () => void
   toggleArtifactRail: () => void
@@ -70,11 +73,18 @@ interface UIState {
     tabs: Array<{ id: string; title: string; url: string; isLoading: boolean }>
   ) => void
   setActiveBrowserTab: (id: string) => void
+
+  // Theme Actions
+  setTheme: (theme: 'light' | 'dark') => void
+  toggleTheme: () => void
 }
 
 export const useUIStore = create<UIState>()(
   persist(
     set => ({
+      // Theme Initial State
+      theme: 'dark',
+
       showSidebar: true,
       showArtifactRail: false,
       showContentCanvas: false,
@@ -165,14 +175,48 @@ export const useUIStore = create<UIState>()(
         }),
       setBrowserTabs: tabs => set({ browserTabs: tabs }),
       setActiveBrowserTab: id => set({ activeBrowserTabId: id }),
-      addBrowserOperation: entry =>
-        set(state => ({
-          browserOperationHistory: [entry, ...state.browserOperationHistory].slice(0, 100)
-        }))
+      upsertBrowserOperation: entry =>
+        set(state => {
+          const idx = state.browserOperationHistory.findIndex(e => e.id === entry.id)
+          if (idx === -1) {
+            return {
+              browserOperationHistory: [entry, ...state.browserOperationHistory].slice(0, 100)
+            }
+          }
+
+          const next = [...state.browserOperationHistory]
+          next[idx] = { ...next[idx], ...entry }
+          return { browserOperationHistory: next }
+        }),
+
+      // Theme Actions
+      setTheme: theme => {
+        if (theme === 'dark') {
+          document.documentElement.classList.add('dark')
+          document.documentElement.classList.remove('light')
+        } else {
+          document.documentElement.classList.add('light')
+          document.documentElement.classList.remove('dark')
+        }
+        set({ theme })
+      },
+      toggleTheme: () =>
+        set(state => {
+          const newTheme = state.theme === 'dark' ? 'light' : 'dark'
+          if (newTheme === 'dark') {
+            document.documentElement.classList.add('dark')
+            document.documentElement.classList.remove('light')
+          } else {
+            document.documentElement.classList.add('light')
+            document.documentElement.classList.remove('dark')
+          }
+          return { theme: newTheme }
+        })
     }),
     {
       name: 'codeall-ui-storage',
       partialize: state => ({
+        theme: state.theme,
         isTaskPanelOpen: state.isTaskPanelOpen,
         isBrowserPanelOpen: state.isBrowserPanelOpen,
         taskPanelWidth: state.taskPanelWidth,

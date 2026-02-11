@@ -163,7 +163,7 @@ export function MessageList({
           <button
             type="button"
             onClick={scrollToLatest}
-            className="pointer-events-auto rounded-full border border-slate-700/70 bg-slate-950/80 px-3 py-2 text-xs text-slate-200 backdrop-blur hover:border-slate-600/70 hover:bg-slate-950/90"
+            className="pointer-events-auto rounded-full border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-primary)] backdrop-blur hover:border-[var(--border-secondary)] hover:bg-[var(--bg-tertiary)]"
             aria-label="Jump to latest message"
             title="跳到最新消息"
           >

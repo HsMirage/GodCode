@@ -7,17 +7,18 @@ import type {
 import type { LLMAdapter, LLMChunk, LLMConfig, LLMResponse } from './adapter.interface'
 import type { Message } from '@/types/domain'
 import { logger } from '@/shared/logger'
-import { allTools } from '@/main/services/ai-browser'
 import { browserViewManager } from '@/main/services/browser-view.service'
 import { toolExecutionService, type ToolCall } from '@/main/services/tools/tool-execution.service'
-
-const MAX_RETRIES = 3
-const BASE_DELAY_MS = 1000
-const TIMEOUT_MS = 30000
-const DEFAULT_MODEL = 'gpt-4'
-const MAX_TOOL_ITERATIONS = 10
+import { resolveLLMRuntimeConfig } from './runtime-config'
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+
+const isAbortRequested = (error: unknown, signal?: AbortSignal): boolean => {
+  if (signal?.aborted) return true
+  if (!(error instanceof Error)) return false
+  if (error.name === 'AbortError') return true
+  return /aborted|abort/i.test(error.message)
+}
 
 const toOpenAIMessages = (messages: Message[]): ChatCompletionMessageParam[] => {
   return messages.map(msg => ({
@@ -76,29 +77,34 @@ interface StreamingToolCall {
 
 export class OpenAIAdapter implements LLMAdapter {
   private client: OpenAI
-  private model: string
+  /**
+   * No hardcoded default model here.
+   * The effective model should be resolved upstream (DB/settings/bindings) and passed via LLMConfig.model.
+   */
+  private fallbackModel: string
 
   constructor(apiKey: string, baseURL?: string) {
     this.client = new OpenAI({ apiKey, baseURL })
-    this.model = DEFAULT_MODEL
+    this.fallbackModel = ''
   }
 
   async sendMessage(messages: Message[], config: LLMConfig): Promise<LLMResponse> {
     let openaiMessages: ChatCompletionMessageParam[] = toOpenAIMessages(messages)
-    const model = config.model || this.model
+    const runtime = resolveLLMRuntimeConfig(config)
+    const model = (config.model || this.fallbackModel || '').trim()
+    if (!model) {
+      throw new Error('No model configured. Please set a default model in Settings.')
+    }
     const tools = getOpenAITools()
-
-    // Register browser tools with execution service
-    toolExecutionService.registerBrowserTools(allTools)
 
     let fullContent = ''
     const totalUsage = { prompt_tokens: 0, completion_tokens: 0 }
 
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
+      for (let attempt = 1; attempt <= runtime.maxRetries; attempt++) {
         try {
           const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS)
+          const timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
 
           const response = await this.client.chat.completions.create(
             {
@@ -144,7 +150,12 @@ export class OpenAIAdapter implements LLMAdapter {
           const parsedToolCalls = parseToolCalls(functionToolCalls)
           const viewId = 'default'
           const webContents = browserViewManager.getWebContents(viewId)
-          const context = { viewId, webContents }
+          const context = {
+            viewId,
+            webContents,
+            workspaceDir: config.workspaceDir || process.cwd(),
+            sessionId: config.sessionId || ''
+          }
 
           const executionResult = await toolExecutionService.executeToolCalls(
             parsedToolCalls,
@@ -179,47 +190,60 @@ export class OpenAIAdapter implements LLMAdapter {
           // Continue to next iteration for follow-up response
           break // Break retry loop, continue tool loop
         } catch (error) {
-          logger.warn(`OpenAI request failed (attempt ${attempt}/${MAX_RETRIES})`, { error })
+          logger.warn(`OpenAI request failed (attempt ${attempt}/${runtime.maxRetries})`, { error })
 
-          if (attempt === MAX_RETRIES) {
+          if (attempt === runtime.maxRetries) {
             logger.error('OpenAI request failed after all retries', { error })
             throw error
           }
 
-          const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1)
+          const delay = runtime.baseDelayMs * Math.pow(2, attempt - 1)
           await sleep(delay)
         }
       }
     }
 
     // Exceeded max tool iterations
-    logger.warn('sendMessage: max tool iterations exceeded', { maxIterations: MAX_TOOL_ITERATIONS })
+    logger.warn('sendMessage: max tool iterations exceeded', {
+      maxIterations: runtime.maxToolIterations
+    })
     return { content: fullContent, usage: totalUsage }
   }
 
   async *streamMessage(messages: Message[], config: LLMConfig): AsyncGenerator<LLMChunk> {
     let openaiMessages: ChatCompletionMessageParam[] = toOpenAIMessages(messages)
-    const model = config.model || this.model
+    const runtime = resolveLLMRuntimeConfig(config)
+    const model = (config.model || this.fallbackModel || '').trim()
+    if (!model) {
+      throw new Error('No model configured. Please set a default model in Settings.')
+    }
     const tools = getOpenAITools()
 
-    // Debug: 打印请求参数
     logger.info('[OpenAIAdapter] streamMessage called', {
       model,
       configModel: config.model,
-      defaultModel: this.model,
       baseURL: this.client.baseURL,
       fullEndpoint: `${this.client.baseURL}/chat/completions`,
       messageCount: messages.length
     })
 
-    // Register browser tools with execution service
-    toolExecutionService.registerBrowserTools(allTools)
-
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
+      for (let attempt = 1; attempt <= runtime.maxRetries; attempt++) {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null
+        let externalAbortHandler: (() => void) | null = null
         try {
+          if (config.abortSignal?.aborted) {
+            yield { content: '', done: true, type: 'done' }
+            return
+          }
+
           const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS)
+          timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+
+          if (config.abortSignal) {
+            externalAbortHandler = () => controller.abort()
+            config.abortSignal.addEventListener('abort', externalAbortHandler, { once: true })
+          }
 
           const stream = await this.client.chat.completions.create(
             {
@@ -245,7 +269,7 @@ export class OpenAIAdapter implements LLMAdapter {
             // Accumulate text content
             if (delta?.content) {
               assistantContent += delta.content
-              yield { content: delta.content, done: false }
+              yield { content: delta.content, done: false, type: 'content' }
             }
 
             // Accumulate tool call deltas by index
@@ -261,6 +285,19 @@ export class OpenAIAdapter implements LLMAdapter {
                     arguments: ''
                   }
                   streamingToolCalls.set(idx, existing)
+
+                  // Emit tool_start event when we first see a tool call
+                  if (existing.name) {
+                    yield {
+                      content: '',
+                      done: false,
+                      type: 'tool_start',
+                      toolCall: {
+                        id: existing.id,
+                        name: existing.name
+                      }
+                    }
+                  }
                 }
 
                 // Update with delta values
@@ -283,11 +320,17 @@ export class OpenAIAdapter implements LLMAdapter {
           }
 
           clearTimeout(timeoutId)
+          timeoutId = null
+
+          if (config.abortSignal && externalAbortHandler) {
+            config.abortSignal.removeEventListener('abort', externalAbortHandler)
+            externalAbortHandler = null
+          }
 
           // Check if we have tool calls to execute
           if (streamingToolCalls.size === 0 || finishReason !== 'tool_calls') {
             // No tool calls or not a tool_calls finish - we're done
-            yield { content: '', done: true }
+            yield { content: '', done: true, type: 'done' }
             return
           }
 
@@ -320,7 +363,12 @@ export class OpenAIAdapter implements LLMAdapter {
 
           const viewId = 'default'
           const webContents = browserViewManager.getWebContents(viewId)
-          const context = { viewId, webContents }
+          const context = {
+            viewId,
+            webContents,
+            workspaceDir: config.workspaceDir || process.cwd(),
+            sessionId: config.sessionId || ''
+          }
 
           const executionResult = await toolExecutionService.executeToolCalls(toolCalls, context)
 
@@ -329,6 +377,21 @@ export class OpenAIAdapter implements LLMAdapter {
             allSucceeded: executionResult.allSucceeded,
             durationMs: executionResult.totalDurationMs
           })
+
+          // Emit tool_end events for each completed tool call
+          for (const output of executionResult.outputs) {
+            yield {
+              content: '',
+              done: false,
+              type: 'tool_end',
+              toolCall: {
+                id: output.toolCall.id,
+                name: output.toolCall.name,
+                arguments: output.toolCall.arguments,
+                result: output.result
+              }
+            }
+          }
 
           const openaiToolCalls: ChatCompletionMessageFunctionToolCall[] = Array.from(
             streamingToolCalls.values()
@@ -363,14 +426,40 @@ export class OpenAIAdapter implements LLMAdapter {
           // Continue to next iteration for follow-up streaming
           break // Break retry loop, continue tool loop
         } catch (error) {
-          logger.warn(`OpenAI streaming failed (attempt ${attempt}/${MAX_RETRIES})`, { error })
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+            timeoutId = null
+          }
+          if (config.abortSignal && externalAbortHandler) {
+            config.abortSignal.removeEventListener('abort', externalAbortHandler)
+            externalAbortHandler = null
+          }
 
-          if (attempt === MAX_RETRIES) {
+          if (isAbortRequested(error, config.abortSignal)) {
+            logger.info('OpenAI streaming aborted by user')
+            yield { content: '', done: true, type: 'done' }
+            return
+          }
+
+          logger.warn(`OpenAI streaming failed (attempt ${attempt}/${runtime.maxRetries})`, { error })
+
+          if (attempt === runtime.maxRetries) {
             logger.error('OpenAI streaming failed after all retries', { error })
+            // Emit error event before throwing
+            const errorMessage = error instanceof Error ? error.message : String(error)
+            yield {
+              content: '',
+              done: true,
+              type: 'error',
+              error: {
+                message: errorMessage,
+                code: 'STREAM_ERROR'
+              }
+            }
             throw error
           }
 
-          const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1)
+          const delay = runtime.baseDelayMs * Math.pow(2, attempt - 1)
           await sleep(delay)
         }
       }
@@ -378,8 +467,16 @@ export class OpenAIAdapter implements LLMAdapter {
 
     // Exceeded max tool iterations
     logger.warn('streamMessage: max tool iterations exceeded', {
-      maxIterations: MAX_TOOL_ITERATIONS
+      maxIterations: runtime.maxToolIterations
     })
-    yield { content: '', done: true }
+    yield {
+      content: '',
+      done: true,
+      type: 'error',
+      error: {
+        message: `Max tool iterations exceeded (${runtime.maxToolIterations})`,
+        code: 'MAX_ITERATIONS_EXCEEDED'
+      }
+    }
   }
 }

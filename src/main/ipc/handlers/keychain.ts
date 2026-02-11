@@ -58,7 +58,7 @@ export const handleKeychainSetPassword = async (
 
 export const handleKeychainGetPassword = async (
   _: IpcMainInvokeEvent,
-  { service, account }: { service: string; account: string }
+  { service: _service, account }: { service: string; account: string }
 ): Promise<string | null> => {
   // Legacy support for retrieving keys by provider name
   const provider = account.replace('-api-key', '')
@@ -69,7 +69,7 @@ export const handleKeychainGetPassword = async (
 
 export const handleKeychainDeletePassword = async (
   _: IpcMainInvokeEvent,
-  { service, account, id }: { service: string; account: string; id?: string }
+  { service: _service, account, id }: { service: string; account: string; id?: string }
 ): Promise<boolean> => {
   if (id) {
     await keychainService.deleteApiKey(id)

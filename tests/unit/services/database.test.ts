@@ -99,6 +99,9 @@ vi.mock('@prisma/client', () => ({
       }),
       delete: vi.fn().mockResolvedValue({ id: '1' })
     }
+    // Provide delegates used by other services so this mock can safely leak across test files.
+    agentBinding = { findUnique: vi.fn().mockResolvedValue(null) }
+    categoryBinding = { findUnique: vi.fn().mockResolvedValue(null) }
     session = {}
   }
 }))

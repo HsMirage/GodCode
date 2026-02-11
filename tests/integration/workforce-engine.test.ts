@@ -10,6 +10,12 @@ const mocks = vi.hoisted(() => {
       findMany: vi.fn(),
       findFirst: vi.fn()
     },
+    agentBinding: {
+      findUnique: vi.fn()
+    },
+    categoryBinding: {
+      findUnique: vi.fn()
+    },
     session: {
       create: vi.fn(),
       findFirst: vi.fn()
@@ -109,13 +115,28 @@ describe('Workforce Engine Integration', () => {
 
     mocks.bindingService.getCategoryModelConfig.mockImplementation(async (category: string) => {
       if (category === 'quick') {
-        return { model: 'gpt-4o', temperature: 0.3, apiKey: 'test-key' }
+        return {
+          model: 'gpt-4o',
+          provider: 'openai-compatible',
+          temperature: 0.3,
+          apiKey: 'test-key'
+        }
       }
-      return { model: 'gpt-4o', temperature: 0.5, apiKey: 'test-key' }
+      return {
+        model: 'gpt-4o',
+        provider: 'openai-compatible',
+        temperature: 0.5,
+        apiKey: 'test-key'
+      }
     })
     mocks.bindingService.getAgentModelConfig.mockImplementation(async (agentCode: string) => {
       if (agentCode) {
-        return { model: 'gpt-4o', temperature: 0.5, apiKey: 'test-key' }
+        return {
+          model: 'gpt-4o',
+          provider: 'openai-compatible',
+          temperature: 0.5,
+          apiKey: 'test-key'
+        }
       }
       return null
     })
@@ -196,7 +217,8 @@ describe('Workforce Engine Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Quick task',
         prompt: 'Do something quickly',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       })
 
       expect(result.success).toBe(true)
@@ -222,7 +244,8 @@ describe('Workforce Engine Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Research task',
         prompt: 'Research this topic',
-        subagent_type: 'oracle'
+        subagent_type: 'oracle',
+        sessionId: 'test-session-123'
       })
 
       expect(result.success).toBe(true)
@@ -261,7 +284,7 @@ describe('Workforce Engine Integration', () => {
           usage: { input_tokens: 10, output_tokens: 10 }
         })
 
-      const result = await workforceEngine.executeWorkflow('Parallel work')
+      const result = await workforceEngine.executeWorkflow('Parallel work', 'test-session-123')
 
       expect(result.success).toBe(true)
       expect(result.results.size).toBe(2)
@@ -291,7 +314,7 @@ describe('Workforce Engine Integration', () => {
           usage: { input_tokens: 10, output_tokens: 10 }
         })
 
-      const result = await workforceEngine.executeWorkflow('Sequential work')
+      const result = await workforceEngine.executeWorkflow('Sequential work', 'test-session-123')
 
       expect(result.success).toBe(true)
       expect(result.results.get('t1')).toBe('First result')
@@ -314,7 +337,8 @@ describe('Workforce Engine Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Failing task',
         prompt: 'This will fail',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       })
 
       expect(result.success).toBe(false)
@@ -352,18 +376,18 @@ describe('Workforce Engine Integration', () => {
         usage: { input_tokens: 10, output_tokens: 10 }
       })
 
-      mocks.prisma.session.findFirst.mockResolvedValueOnce({ id: 'existing_session' })
-
       await delegateEngine.delegateTask({
         description: 'Continuing task',
         prompt: 'Continue working',
-        category: 'quick'
+        category: 'quick',
+        sessionId: 'test-session-123'
       })
 
+      // With session isolation, the engine uses the provided sessionId directly
       expect(mocks.prisma.task.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            sessionId: 'existing_session'
+            sessionId: 'test-session-123'
           })
         })
       )
@@ -379,6 +403,7 @@ describe('Workforce Engine Integration', () => {
         description: 'Child task',
         prompt: 'Execute subtask',
         category: 'quick',
+        sessionId: 'test-session-123',
         parentTaskId: 'parent-task-123'
       })
 

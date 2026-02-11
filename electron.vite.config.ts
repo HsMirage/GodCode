@@ -36,14 +36,14 @@ export default defineConfig({
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),
-        '@main': resolve(__dirname, 'src/main'),
+        '@shared': resolve(__dirname, 'src/shared'),
         '@types': resolve(__dirname, 'src/types')
       }
     },
     build: {
       rollupOptions: {
         input: {
-          preload: resolve(__dirname, 'src/main/preload.ts')
+          index: resolve(__dirname, 'src/preload/index.ts')
         },
         output: {
           format: 'cjs',

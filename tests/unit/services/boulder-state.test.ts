@@ -58,7 +58,8 @@ describe('BoulderStateService', () => {
     const service = BoulderStateService.getInstance()
     const state = await service.getState()
 
-    expect(state).toEqual(mockBoulderData)
+    expect(state).toEqual(expect.objectContaining(mockBoulderData))
+    expect(state.session_ids).toEqual([])
     expect(fs.readFileSync).toHaveBeenCalled()
   })
 
@@ -187,5 +188,41 @@ describe('BoulderStateService', () => {
     expect(state.active_plan).toBeDefined()
     expect(consoleSpy).toHaveBeenCalled()
     consoleSpy.mockRestore()
+  })
+
+  it('should normalize minimal OMO-style boulder state', async () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        active_plan: '/tmp/.sisyphus/plans/demo.md',
+        started_at: '2026-02-08T09:47:26.003Z',
+        session_ids: ['ses_abc'],
+        plan_name: 'demo'
+      })
+    )
+
+    const service = BoulderStateService.getInstance()
+    const state = await service.getState()
+
+    expect(state.active_plan).toBe('/tmp/.sisyphus/plans/demo.md')
+    expect(state.session_ids).toEqual(['ses_abc'])
+    expect(state.plan_name).toBe('demo')
+    expect(state.status).toBe('not_started')
+    expect(state.completed_tasks).toBe(0)
+    expect(state.total_tasks).toBe(0)
+    expect(state.completion_percentage).toBe('0.0%')
+  })
+
+  it('should report session tracking using boulder session_ids', async () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        active_plan: '/tmp/.sisyphus/plans/demo.md',
+        session_ids: ['ses_1', 'ses_2']
+      })
+    )
+
+    const service = BoulderStateService.getInstance()
+
+    await expect(service.isSessionTracked('ses_1')).resolves.toBe(true)
+    await expect(service.isSessionTracked('ses_3')).resolves.toBe(false)
   })
 })

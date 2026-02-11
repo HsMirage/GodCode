@@ -22,6 +22,7 @@ const ALLOWED_CHANNELS = [
   'message:send',
   'message:list',
   'message:stream',
+  'message:abort',
   'message:stream-chunk',
   'model:create',
   'model:list',

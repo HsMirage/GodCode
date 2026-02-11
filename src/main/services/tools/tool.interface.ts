@@ -4,13 +4,22 @@ export interface ToolParameter {
   description: string
   required: boolean
   default?: any
+  /**
+   * JSON schema for array items. If omitted, the runtime will default to { type: "string" }.
+   * This is important for providers/proxies that require `items` for array parameters (e.g. Gemini).
+   */
+  items?: {
+    type: 'string' | 'number' | 'boolean' | 'object' | 'array'
+    // Allow passing through additional JSON-schema-ish hints if needed later.
+    [key: string]: any
+  }
 }
 
 export interface ToolDefinition {
   name: string
   description: string
   parameters: ToolParameter[]
-  category: 'file' | 'terminal' | 'browser' | 'system'
+  category: 'file' | 'terminal' | 'browser' | 'system' | 'search'
 }
 
 export interface ToolExecutionContext {

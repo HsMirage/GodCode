@@ -81,6 +81,8 @@ vi.mock('@prisma/client', () => ({
   PrismaClient: class MockPrismaClient {
     $connect = vi.fn().mockResolvedValue(undefined)
     $disconnect = vi.fn().mockResolvedValue(undefined)
+    agentBinding = { findUnique: vi.fn().mockResolvedValue(null) }
+    categoryBinding = { findUnique: vi.fn().mockResolvedValue(null) }
   }
 }))
 

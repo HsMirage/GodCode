@@ -17,13 +17,13 @@ export function TopNavigation() {
   }
 
   return (
-    <div className="h-12 bg-slate-950 border-b border-slate-800 flex items-center px-4 gap-4 select-none">
+    <div className="h-12 ui-bg-panel border-b ui-border flex items-center px-4 gap-4 select-none">
       {!isHomePage && (
         <button
           type="button"
           data-testid="back-button"
           onClick={handleBack}
-          className="flex items-center gap-2 text-slate-400 hover:text-white transition rounded-lg px-2 py-1 hover:bg-slate-800/50 mr-2"
+          className="flex items-center gap-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition rounded-lg px-2 py-1 hover:bg-[var(--bg-tertiary)] mr-2"
         >
           <ArrowLeft className="h-4 w-4" />
           <span className="text-sm">返回</span>
@@ -31,13 +31,13 @@ export function TopNavigation() {
       )}
       <button
         type="button"
-        className="flex items-center gap-2 text-slate-100 font-semibold mr-4 cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-none p-0"
+        className="flex items-center gap-2 text-[var(--text-primary)] font-semibold mr-4 cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-none p-0"
         onClick={() => navigate('/')}
       >
         <Box className="w-5 h-5 text-indigo-500" />
         <span>CodeAll</span>
         {currentSpaceId && (
-          <span className="ml-2 text-xs font-normal text-slate-500">
+          <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">
             / {spaces.find(s => s.id === currentSpaceId)?.name ?? 'Space'}
             {' '}
             /{' '}
@@ -57,12 +57,12 @@ export function TopNavigation() {
         <button
           type="button"
           onClick={() => navigate('/settings')}
-          className="p-1.5 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+          className="p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
           title="Settings"
         >
           <Settings className="w-4 h-4" />
         </button>
-        <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs text-slate-400">
+        <div className="w-8 h-8 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center text-xs text-[var(--text-secondary)]">
           U
         </div>
       </div>

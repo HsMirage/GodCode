@@ -12,12 +12,14 @@ vi.mock('@/main/services/binding.service', () => ({
     getInstance: vi.fn(() => ({
       getCategoryModelConfig: vi.fn(async () => ({
         model: 'gpt-4o',
+        provider: 'openai-compatible',
         temperature: 0.2,
         apiKey: 'test',
         baseURL: 'https://api.openai.com/v1'
       })),
       getAgentModelConfig: vi.fn(async () => ({
         model: 'gpt-4o',
+        provider: 'openai-compatible',
         temperature: 0.2,
         apiKey: 'test',
         baseURL: 'https://api.openai.com/v1'
@@ -103,6 +105,8 @@ vi.mock('fs', async () => {
 const mockStore: any = {
   space: [],
   model: [],
+  agentBinding: [],
+  categoryBinding: [],
   session: [],
   message: [],
   task: [],
@@ -118,6 +122,12 @@ const createDelegate = (modelName: string) => ({
     const entry = { id: uuid(), ...data, createdAt: new Date(), updatedAt: new Date() }
     mockStore[modelName].push(entry)
     return entry
+  }),
+  findUnique: vi.fn(async ({ where }: any) => {
+    if (!where) return null
+    const key = Object.keys(where)[0]
+    const value = (where as any)[key]
+    return mockStore[modelName].find((item: any) => item[key] === value) || null
   }),
   findFirst: vi.fn(async ({ where, orderBy }: any) => {
     // Simple filter support
@@ -139,8 +149,26 @@ const createDelegate = (modelName: string) => ({
   findMany: vi.fn(async ({ where, orderBy }: any) => {
     let items = mockStore[modelName]
     if (where) {
-      items = items.filter((item: any) =>
-        Object.entries(where).every(([k, v]) => {
+      // Minimal Prisma-ish filtering to support tests that use `OR`.
+      items = items.filter((item: any) => {
+        const whereAny: any = where
+
+        if (Array.isArray(whereAny.OR)) {
+          return whereAny.OR.some((clause: any) =>
+            Object.entries(clause).every(([k, v]) => {
+              if (v && typeof v === 'object' && 'not' in v) {
+                const filterValue = v as { not: unknown }
+                return item[k] !== filterValue.not
+              }
+              if (v && typeof v === 'object' && 'in' in v) {
+                return (v as { in: unknown[] }).in.includes(item[k])
+              }
+              return item[k] === v
+            })
+          )
+        }
+
+        return Object.entries(where).every(([k, v]) => {
           if (v && typeof v === 'object' && 'not' in v) {
             const filterValue = v as { not: unknown }
             return item[k] !== filterValue.not
@@ -150,7 +178,7 @@ const createDelegate = (modelName: string) => ({
           }
           return item[k] === v
         })
-      )
+      })
     }
     if (orderBy) {
       const key = Object.keys(orderBy)[0]
@@ -194,6 +222,8 @@ vi.mock('@prisma/client', () => {
     PrismaClient: class {
       space = createDelegate('space')
       model = createDelegate('model')
+      agentBinding = createDelegate('agentBinding')
+      categoryBinding = createDelegate('categoryBinding')
       session = createDelegate('session')
       message = createDelegate('message')
       task = createDelegate('task')
@@ -322,7 +352,7 @@ describe('Full Workflow Integration', () => {
     })
     expect(userMessage.id).toBeDefined()
 
-    const result = await workforceEngine.executeWorkflow(userMessage.content)
+    const result = await workforceEngine.executeWorkflow(userMessage.content, session.id)
 
     expect(result.success).toBe(true)
     expect(result.tasks).toHaveLength(3)
@@ -442,7 +472,7 @@ describe('Full Workflow Integration', () => {
     })
 
     // Attempt workflow execution - should handle error
-    await expect(workforceEngine.executeWorkflow('This will fail')).rejects.toThrow(
+    await expect(workforceEngine.executeWorkflow('This will fail', session.id)).rejects.toThrow(
       'LLM API failure'
     )
 

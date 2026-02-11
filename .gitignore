@@ -68,3 +68,4 @@ dev-data/
 test-results/
 playwright-report/
 nul
+.ace-tool/

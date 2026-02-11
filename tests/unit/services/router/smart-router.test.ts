@@ -102,7 +102,7 @@ describe('SmartRouter', () => {
 
       await router.route(input)
 
-      expect(mockWorkforceEngine.executeWorkflow).toHaveBeenCalledWith(input, 'unspecified-high')
+      expect(mockWorkforceEngine.executeWorkflow).toHaveBeenCalledWith(input, { category: 'unspecified-high' })
     })
 
     it('should execute direct strategy correctly', async () => {

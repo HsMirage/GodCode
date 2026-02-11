@@ -66,29 +66,29 @@ function TaskCard({ task }: TaskCardProps) {
   const isRunning = task.status === 'running'
 
   return (
-    <div className="rounded-lg border border-slate-800/70 bg-slate-900/50 p-3 hover:border-slate-700/70 transition-colors">
+    <div className="rounded-lg border border-[var(--border-primary)] bg-[var(--bg-primary)] p-3 hover:border-[var(--border-secondary)] transition-colors">
       <div className="flex items-start gap-3">
         <div className={`p-1.5 rounded-lg ${config.bg}`}>
           <Icon className={`w-4 h-4 ${config.color} ${isRunning ? 'animate-spin' : ''}`} />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-slate-200 line-clamp-2">{task.input}</p>
+          <p className="text-sm text-[var(--text-primary)] line-clamp-2">{task.input}</p>
           <div className="flex items-center gap-2 mt-2">
             <span className={`text-xs ${config.color}`}>{config.label}</span>
             {task.assignedAgent && (
-              <span className="text-xs text-slate-500 bg-slate-800/50 px-1.5 py-0.5 rounded">
+              <span className="text-xs text-[var(--text-muted)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 rounded">
                 {task.assignedAgent}
               </span>
             )}
             {task.assignedModel && (
-              <span className="text-xs text-slate-500 font-mono">{task.assignedModel}</span>
+              <span className="text-xs text-[var(--text-muted)] font-mono">{task.assignedModel}</span>
             )}
           </div>
         </div>
       </div>
       {task.output && task.status === 'completed' && (
-        <div className="mt-2 pt-2 border-t border-slate-800/50">
-          <p className="text-xs text-slate-400 line-clamp-3">{task.output}</p>
+        <div className="mt-2 pt-2 border-t ui-border">
+          <p className="text-xs text-[var(--text-secondary)] line-clamp-3">{task.output}</p>
         </div>
       )}
       {task.output && task.status === 'failed' && (
@@ -162,19 +162,19 @@ export function TaskPanel() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-slate-950 border-l border-slate-800/50">
+    <div className="h-full flex flex-col ui-bg-panel border-l ui-border">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800/50">
+      <div className="flex items-center justify-between px-4 py-3 border-b ui-border">
         <div className="flex items-center gap-2">
           {/* Tab Buttons */}
-          <div className="flex items-center bg-slate-800/50 rounded-lg p-0.5">
+          <div className="flex items-center bg-[var(--bg-tertiary)] rounded-lg p-0.5">
             <button
               type="button"
               onClick={() => setActiveTab('tasks')}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                 activeTab === 'tasks'
-                  ? 'bg-slate-700 text-slate-200'
-                  : 'text-slate-400 hover:text-slate-300'
+                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
               <ListTodo className="w-3.5 h-3.5" />
@@ -185,8 +185,8 @@ export function TaskPanel() {
               onClick={() => setActiveTab('artifacts')}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                 activeTab === 'artifacts'
-                  ? 'bg-slate-700 text-slate-200'
-                  : 'text-slate-400 hover:text-slate-300'
+                  ? 'bg-[var(--bg-secondary)] text-[var(--text-primary)]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
             >
               <FileCode className="w-3.5 h-3.5" />
@@ -205,7 +205,7 @@ export function TaskPanel() {
               type="button"
               onClick={loadTasks}
               disabled={loading}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-colors disabled:opacity-50"
+              className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
               title="刷新"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
@@ -214,7 +214,7 @@ export function TaskPanel() {
           <button
             type="button"
             onClick={closeTaskPanel}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-colors"
+            className="p-1.5 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
             title="关闭"
           >
             <X className="w-4 h-4" />
@@ -228,16 +228,16 @@ export function TaskPanel() {
           // Tasks Tab
           loading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-5 h-5 text-slate-500 animate-spin" />
+              <Loader2 className="w-5 h-5 text-[var(--text-muted)] animate-spin" />
             </div>
           ) : tasks.length === 0 ? (
-            <div className="text-center py-8 text-slate-500 text-sm">暂无后台任务</div>
+            <div className="text-center py-8 text-[var(--text-muted)] text-sm">暂无后台任务</div>
           ) : (
             <>
               {/* Running Tasks */}
               {runningTasks.length > 0 && (
                 <div className="space-y-2">
-                  <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wide">
+                  <h3 className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide">
                     运行中 ({runningTasks.length})
                   </h3>
                   {runningTasks.map(task => (
@@ -249,7 +249,7 @@ export function TaskPanel() {
               {/* Pending Tasks */}
               {pendingTasks.length > 0 && (
                 <div className="space-y-2">
-                  <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wide">
+                  <h3 className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide">
                     等待中 ({pendingTasks.length})
                   </h3>
                   {pendingTasks.map(task => (
@@ -261,14 +261,14 @@ export function TaskPanel() {
               {/* Completed Tasks */}
               {completedTasks.length > 0 && (
                 <div className="space-y-2">
-                  <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wide">
+                  <h3 className="text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide">
                     已完成 ({completedTasks.length})
                   </h3>
                   {completedTasks.slice(0, 10).map(task => (
                     <TaskCard key={task.id} task={task} />
                   ))}
                   {completedTasks.length > 10 && (
-                    <p className="text-xs text-slate-500 text-center py-2">
+                    <p className="text-xs text-[var(--text-muted)] text-center py-2">
                       还有 {completedTasks.length - 10} 个已完成任务
                     </p>
                   )}

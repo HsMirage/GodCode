@@ -107,6 +107,18 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
     return { nodes: flowNodes, edges: flowEdges }
   }, [])
 
+  const reloadTasks = useCallback(async () => {
+    if (!window.codeall) return
+    try {
+      const tasks = (await window.codeall.invoke('task:list', sessionId)) as Task[]
+      const { nodes: flowNodes, edges: flowEdges } = convertTasksToFlow(tasks)
+      setNodes(flowNodes)
+      setEdges(flowEdges)
+    } catch (error) {
+      console.error('Failed to reload workflow tasks:', error)
+    }
+  }, [sessionId, convertTasksToFlow, setNodes, setEdges])
+
   useEffect(() => {
     // Skip if not running in Electron environment
     if (!window.codeall) {
@@ -118,19 +130,14 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
     const loadTasks = async () => {
       setIsLoading(true)
       try {
-        const tasks = (await window.codeall.invoke('task:list', sessionId)) as Task[]
-        const { nodes: flowNodes, edges: flowEdges } = convertTasksToFlow(tasks)
-        setNodes(flowNodes)
-        setEdges(flowEdges)
-      } catch (error) {
-        console.error('Failed to load workflow tasks:', error)
+        await reloadTasks()
       } finally {
         setIsLoading(false)
       }
     }
 
     loadTasks()
-  }, [sessionId, convertTasksToFlow, setNodes, setEdges])
+  }, [reloadTasks])
 
   useEffect(() => {
     // Skip if not running in Electron environment
@@ -139,8 +146,16 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
     }
 
     const handleStatusChange = (event: { taskId: string; status: Task['status'] }) => {
-      setNodes(nds =>
-        nds.map(node => {
+      setNodes(nds => {
+        const nodeExists = nds.some(n => n.id === event.taskId)
+
+        if (!nodeExists) {
+          // New task detected - re-fetch all tasks to get the complete graph
+          void reloadTasks()
+          return nds
+        }
+
+        return nds.map(node => {
           if (node.id === event.taskId) {
             const task = node.data.task
             return {
@@ -156,7 +171,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
           }
           return node
         })
-      )
+      })
     }
 
     const removeListener = window.codeall.on('task:status-changed', handleStatusChange)

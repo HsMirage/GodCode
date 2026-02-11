@@ -1,9 +1,11 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { Atom, Paperclip, Send, X } from 'lucide-react'
+import { Atom, Paperclip, Send, Square, X } from 'lucide-react'
+import { AgentSelector } from './AgentSelector'
 
 export interface MessageInputProps {
   isLoading?: boolean
-  onSend: (message: string) => boolean | Promise<boolean>
+  onSend: (message: string, agentCode?: string) => boolean | Promise<boolean>
+  onStop?: () => void | Promise<void>
   placeholder?: string
   afterSend?: React.ReactNode
   disabled?: boolean
@@ -17,27 +19,27 @@ export interface MessageInputProps {
 }
 
 const panelClass = [
-  'rounded-2xl border border-slate-800/70 bg-slate-950/70',
-  'px-4 py-4 text-slate-100 shadow-[0_0_24px_rgba(15,23,42,0.35)]',
+  'rounded-2xl border border-[var(--border-primary)] bg-[var(--bg-secondary)]',
+  'px-4 py-4 text-[var(--text-primary)] shadow-[0_10px_30px_rgba(0,0,0,0.06)] dark:shadow-[0_0_24px_rgba(15,23,42,0.35)]',
   'backdrop-blur'
 ].join(' ')
 
 const inputShellClass = [
-  'rounded-2xl border border-slate-700/60',
-  'bg-slate-900/60 shadow-[0_0_18px_rgba(15,23,42,0.25)]',
+  'rounded-2xl border border-[var(--border-secondary)]',
+  'bg-[var(--bg-primary)] shadow-[0_10px_24px_rgba(0,0,0,0.04)] dark:shadow-[0_0_18px_rgba(15,23,42,0.25)]',
   'backdrop-blur'
 ].join(' ')
 
 const textareaClass = [
-  'w-full resize-none bg-transparent text-sm leading-relaxed text-slate-100',
-  'placeholder:text-slate-500 focus:outline-none'
+  'w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--text-primary)]',
+  'placeholder:text-[var(--text-muted)] focus:outline-none'
 ].join(' ')
 
 const iconButtonBase = [
   'h-9 flex items-center gap-1.5 px-2.5 rounded-lg border border-transparent',
-  'text-slate-300/80 hover:text-slate-200 hover:bg-slate-800/40',
+  'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]',
   'transition-colors duration-150',
-  'disabled:cursor-not-allowed disabled:text-slate-600 disabled:hover:bg-transparent'
+  'disabled:cursor-not-allowed disabled:text-[var(--text-muted)] disabled:hover:bg-transparent'
 ].join(' ')
 
 const MAX_HEIGHT = 200
@@ -56,7 +58,11 @@ type DraftState = {
   value: string
   thinkingEnabled: boolean
   attachments: Attachment[]
+  selectedAgent: string
 }
+
+const DEFAULT_AGENT_CODE = 'haotian'
+const sharedDraftCache = new Map<string, DraftState>()
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
@@ -74,6 +80,7 @@ function formatBytes(bytes: number) {
 export function MessageInput({
   isLoading = false,
   onSend,
+  onStop,
   placeholder,
   afterSend,
   disabled = false,
@@ -84,12 +91,18 @@ export function MessageInput({
   const [value, setValue] = useState('')
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [selectedAgent, setSelectedAgent] = useState(DEFAULT_AGENT_CODE)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const inputId = useId()
   const draftKeyRef = useRef<string | null>(null)
   const draftsRef = useRef<Record<string, DraftState>>({})
-  const latestRef = useRef<DraftState>({ value: '', thinkingEnabled: false, attachments: [] })
+  const latestRef = useRef<DraftState>({
+    value: '',
+    thinkingEnabled: false,
+    attachments: [],
+    selectedAgent: DEFAULT_AGENT_CODE
+  })
 
   const resizeTextarea = () => {
     const textarea = textareaRef.current
@@ -104,8 +117,8 @@ export function MessageInput({
   }, [value])
 
   useEffect(() => {
-    latestRef.current = { value, thinkingEnabled, attachments }
-  }, [attachments, thinkingEnabled, value])
+    latestRef.current = { value, thinkingEnabled, attachments, selectedAgent }
+  }, [attachments, thinkingEnabled, value, selectedAgent])
 
   useEffect(() => {
     if (resetKey === undefined) return
@@ -113,15 +126,17 @@ export function MessageInput({
     const prevKey = draftKeyRef.current
     if (prevKey) {
       draftsRef.current[prevKey] = latestRef.current
+      sharedDraftCache.set(prevKey, latestRef.current)
     }
 
     const nextKey = resetKey == null ? null : String(resetKey)
     draftKeyRef.current = nextKey
 
-    const next = nextKey ? draftsRef.current[nextKey] : undefined
+    const next = nextKey ? draftsRef.current[nextKey] ?? sharedDraftCache.get(nextKey) : undefined
     setValue(next?.value ?? '')
     setThinkingEnabled(next?.thinkingEnabled ?? false)
     setAttachments(next?.attachments ?? [])
+    setSelectedAgent(next?.selectedAgent ?? DEFAULT_AGENT_CODE)
 
     if (!autoFocus) return
 
@@ -130,6 +145,14 @@ export function MessageInput({
       textareaRef.current?.focus()
     })
   }, [autoFocus, resetKey])
+
+  useEffect(() => {
+    return () => {
+      const key = draftKeyRef.current
+      if (!key) return
+      sharedDraftCache.set(key, latestRef.current)
+    }
+  }, [])
 
   const canSend = useMemo(() => {
     if (disabled) return false
@@ -169,7 +192,8 @@ export function MessageInput({
     const prevDraft: DraftState = {
       value,
       thinkingEnabled,
-      attachments
+      attachments,
+      selectedAgent
     }
 
     // Optimistically clear immediately to avoid IME/composition or async timing issues
@@ -180,11 +204,13 @@ export function MessageInput({
 
     const key = draftKeyRef.current
     if (key) {
-      draftsRef.current[key] = { value: '', attachments: [], thinkingEnabled }
+      const clearedDraft = { value: '', attachments: [], thinkingEnabled, selectedAgent }
+      draftsRef.current[key] = clearedDraft
+      sharedDraftCache.set(key, clearedDraft)
     }
 
     try {
-      const ok = await onSend(payload)
+      const ok = await onSend(payload, selectedAgent)
       if (ok) {
         // Already cleared above; keep it cleared.
         return
@@ -194,13 +220,21 @@ export function MessageInput({
       setValue(prevDraft.value)
       setThinkingEnabled(prevDraft.thinkingEnabled)
       setAttachments(prevDraft.attachments)
-      if (key) draftsRef.current[key] = prevDraft
+      setSelectedAgent(prevDraft.selectedAgent)
+      if (key) {
+        draftsRef.current[key] = prevDraft
+        sharedDraftCache.set(key, prevDraft)
+      }
     } catch {
       // Keep the input so user can retry.
       setValue(prevDraft.value)
       setThinkingEnabled(prevDraft.thinkingEnabled)
       setAttachments(prevDraft.attachments)
-      if (key) draftsRef.current[key] = prevDraft
+      setSelectedAgent(prevDraft.selectedAgent)
+      if (key) {
+        draftsRef.current[key] = prevDraft
+        sharedDraftCache.set(key, prevDraft)
+      }
     }
   }
 
@@ -266,7 +300,7 @@ export function MessageInput({
       <div className="flex items-stretch gap-3">
         <div className={['flex-1', inputShellClass].join(' ')}>
           {disabled && (
-            <div className="px-4 pt-3 text-xs text-slate-500">
+            <div className="px-4 pt-3 text-xs text-[var(--text-muted)]">
               {disabledHint ?? '请先选择一个对话'}
             </div>
           )}
@@ -276,16 +310,16 @@ export function MessageInput({
               {attachments.map(a => (
                 <div
                   key={a.id}
-                  className="flex items-center gap-2 rounded-xl border border-slate-700/60 bg-slate-950/40 px-3 py-2 text-xs text-slate-200"
+                  className="flex items-center gap-2 rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-primary)]"
                   title={a.truncated ? '内容已截断' : a.name}
                 >
-                  <Paperclip className="h-3.5 w-3.5 text-slate-400" />
+                  <Paperclip className="h-3.5 w-3.5 text-[var(--text-secondary)]" />
                   <span className="max-w-[240px] truncate">{a.name}</span>
-                  <span className="text-slate-500">{formatBytes(a.size)}</span>
+                  <span className="text-[var(--text-muted)]">{formatBytes(a.size)}</span>
                   <button
                     type="button"
                     onClick={() => removeAttachment(a.id)}
-                    className="ml-1 rounded-md p-1 text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
+                    className="ml-1 rounded-md p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
                     aria-label="Remove attachment"
                     disabled={isLoading}
                   >
@@ -337,7 +371,7 @@ export function MessageInput({
                 <Paperclip className="h-4 w-4" />
                 <span className="text-xs">文件</span>
                 {attachments.length > 0 && (
-                  <span className="ml-1 text-[10px] text-slate-400">{attachments.length}</span>
+                  <span className="ml-1 text-[10px] text-[var(--text-muted)]">{attachments.length}</span>
                 )}
               </button>
 
@@ -347,7 +381,7 @@ export function MessageInput({
                 className={[
                   iconButtonBase,
                   thinkingEnabled
-                    ? 'bg-sky-500/10 text-sky-200 border border-sky-500/30 hover:bg-sky-500/15'
+                    ? 'bg-sky-500/10 text-sky-700 dark:text-sky-200 border border-sky-500/30 hover:bg-sky-500/15'
                     : ''
                 ].join(' ')}
                 title={thinkingEnabled ? '关闭深度思考' : '开启深度思考'}
@@ -356,23 +390,49 @@ export function MessageInput({
                 <Atom className="h-4 w-4" />
                 <span className="text-xs">深度思考</span>
               </button>
+
+              {/* Agent Selector */}
+              <AgentSelector
+                selectedAgent={selectedAgent}
+                onAgentChange={setSelectedAgent}
+                disabled={isLoading || disabled}
+              />
             </div>
 
-            <button
-              type="button"
-              onClick={() => void handleSend()}
-              disabled={!canSend}
-              className={[
-                'h-9 w-9 flex items-center justify-center rounded-lg transition-all duration-150',
-                canSend
-                  ? 'bg-sky-500 text-white hover:bg-sky-400 active:scale-95'
-                  : 'bg-slate-800/50 text-slate-500 cursor-not-allowed'
-              ].join(' ')}
-              aria-label={thinkingEnabled ? 'Send message (Deep Thinking)' : 'Send message'}
-              title={thinkingEnabled ? '发送 (深度思考)' : '发送'}
-            >
-              <Send className="h-4 w-4" />
-            </button>
+            {isLoading && onStop ? (
+              <button
+                type="button"
+                onClick={() => void onStop()}
+                disabled={disabled}
+                className={[
+                  'h-9 px-3 flex items-center justify-center gap-1 rounded-lg transition-all duration-150 text-xs font-medium',
+                  disabled
+                    ? 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] cursor-not-allowed'
+                    : 'bg-rose-500 text-white hover:bg-rose-400 active:scale-95'
+                ].join(' ')}
+                aria-label="Stop generating response"
+                title="停止"
+              >
+                <Square className="h-3.5 w-3.5 fill-current" />
+                <span>停止</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void handleSend()}
+                disabled={!canSend}
+                className={[
+                  'h-9 w-9 flex items-center justify-center rounded-lg transition-all duration-150',
+                  canSend
+                    ? 'bg-sky-500 text-white hover:bg-sky-400 active:scale-95'
+                    : 'bg-[var(--bg-tertiary)] text-[var(--text-muted)] cursor-not-allowed'
+                ].join(' ')}
+                aria-label={thinkingEnabled ? 'Send message (Deep Thinking)' : 'Send message'}
+                title={thinkingEnabled ? '发送 (深度思考)' : '发送'}
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            )}
           </div>
         </div>
 

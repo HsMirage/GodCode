@@ -87,6 +87,9 @@ vi.mock('fs', async () => {
 const mockStore: any = {
   space: [],
   model: [],
+  systemSetting: [],
+  agentBinding: [],
+  categoryBinding: [],
   session: [],
   message: [],
   task: [],
@@ -102,6 +105,24 @@ const createDelegate = (modelName: string) => ({
     const entry = { id: uuid(), ...data, createdAt: new Date(), updatedAt: new Date() }
     mockStore[modelName].push(entry)
     return entry
+  }),
+  findUnique: vi.fn(async ({ where, include }: any) => {
+    if (!where) return null
+
+    // Support the common Prisma `findUnique({ where: { id } })` pattern in app code.
+    const key = Object.keys(where)[0]
+    const value = where[key]
+    const item = mockStore[modelName].find((it: any) => it[key] === value) || null
+    if (!item) return null
+
+    // Very small subset of `include` support used by handleMessageSend:
+    // session.findUnique({ include: { space: true } })
+    if (include && modelName === 'session' && include.space) {
+      const space = mockStore.space.find((s: any) => s.id === item.spaceId) || null
+      return { ...item, space }
+    }
+
+    return item
   }),
   findFirst: vi.fn(async ({ where, orderBy }: any) => {
     let items = mockStore[modelName]
@@ -177,6 +198,9 @@ vi.mock('@prisma/client', () => {
     PrismaClient: class {
       space = createDelegate('space')
       model = createDelegate('model')
+      systemSetting = createDelegate('systemSetting')
+      agentBinding = createDelegate('agentBinding')
+      categoryBinding = createDelegate('categoryBinding')
       session = createDelegate('session')
       message = createDelegate('message')
       task = createDelegate('task')
@@ -196,6 +220,24 @@ vi.mock('@prisma/client', () => {
     }
   }
 })
+
+let lastLLMConfig: any = null
+
+// Mock LLM factory so tests can assert on resolved model config without real network calls.
+vi.mock('@/main/services/llm/factory', () => ({
+  createLLMAdapter: vi.fn(() => ({
+    sendMessage: vi.fn(),
+    streamMessage: async function* (messages: any[], config: any) {
+      lastLLMConfig = config
+      const lastUser = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
+      let content = `[Mock Response] Received: "${String(lastUser).slice(0, 50)}"`
+      if (String(lastUser).toLowerCase().includes('tool:')) {
+        content += '\n\n[Tool Execution Result]\nfile1.ts\nfile2.ts'
+      }
+      yield { content, done: true }
+    }
+  }))
+}))
 
 // Mock Logger
 vi.mock('@/shared/logger', () => ({
@@ -244,7 +286,9 @@ vi.mock('@/main/services/tools/tool-execution.service', () => ({
     executeTool: vi.fn().mockResolvedValue({
       success: true,
       result: { output: 'file1.ts\nfile2.ts' }
-    })
+    }),
+    withAllowedTools: vi.fn(async (_tools: any, operation: any) => operation()),
+    getToolDefinitions: vi.fn().mockReturnValue([])
   }
 }))
 
@@ -285,11 +329,14 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     // Clear mock stores
     mockStore.space = []
     mockStore.model = []
+    mockStore.systemSetting = []
+    mockStore.agentBinding = []
     mockStore.session = []
     mockStore.message = []
     mockStore.task = []
     mockStore.artifact = []
     uuidCounter = 0
+    lastLLMConfig = null
 
     // Create a space and session for testing
     const space = await prisma.space.create({
@@ -308,6 +355,23 @@ describe('Chat IPC Integration - handleMessageSend', () => {
       }
     })
     sessionId = session.id
+
+    // Ensure a default model exists (enforced by handleMessageSend).
+    const model = await prisma.model.create({
+      data: {
+        provider: 'openai',
+        modelName: 'test-default-model',
+        apiKey: 'test-key',
+        baseURL: null,
+        config: {}
+      }
+    })
+    await prisma.systemSetting.create({
+      data: {
+        key: 'defaultModelId',
+        value: model.id
+      }
+    })
 
     // Create fresh mock event
     mockEvent = createMockEvent()
@@ -328,7 +392,8 @@ describe('Chat IPC Integration - handleMessageSend', () => {
 
     const result = await handleMessageSend(mockEvent, {
       sessionId,
-      content: 'Hello, how are you?'
+      content: 'Hello, how are you?',
+      agentCode: 'luban'
     })
 
     // Verify the assistant message was created
@@ -361,7 +426,8 @@ describe('Chat IPC Integration - handleMessageSend', () => {
 
     const result = await handleMessageSend(mockEvent, {
       sessionId,
-      content: 'Please run tool: file_list'
+      content: 'Please run tool: file_list',
+      agentCode: 'luban'
     })
 
     // Verify the assistant message was created
@@ -386,5 +452,102 @@ describe('Chat IPC Integration - handleMessageSend', () => {
       'message:stream-chunk',
       expect.objectContaining({ content: expect.any(String) })
     )
+  })
+
+  test('blocks when neither system default nor agent-specific model is configured', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    // Remove default model setting and ensure there is no agent binding model.
+    mockStore.systemSetting = []
+    mockStore.model = []
+    mockStore.agentBinding = []
+
+    await expect(
+      handleMessageSend(mockEvent, {
+        sessionId,
+        content: 'Hello',
+        agentCode: 'luban'
+      })
+    ).rejects.toThrow(/未配置可用模型/)
+  })
+
+  test('agent-specific model overrides system default model', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    const modelA = await prisma.model.create({
+      data: {
+        provider: 'openai',
+        modelName: 'model-A',
+        apiKey: 'key-A',
+        baseURL: null,
+        config: {}
+      }
+    })
+    const modelB = await prisma.model.create({
+      data: {
+        provider: 'openai',
+        modelName: 'model-B',
+        apiKey: 'key-B',
+        baseURL: null,
+        config: {}
+      }
+    })
+
+    // Set system default to modelA.
+    mockStore.systemSetting = []
+    await prisma.systemSetting.create({ data: { key: 'defaultModelId', value: modelA.id } })
+
+    // Bind luban to modelB.
+    await prisma.agentBinding.create({
+      data: {
+        agentCode: 'luban',
+        agentName: '昊天',
+        agentType: 'primary',
+        description: null,
+        modelId: modelB.id,
+        temperature: 0.42,
+        tools: [],
+        systemPrompt: null,
+        enabled: true
+      }
+    })
+
+    await handleMessageSend(mockEvent, {
+      sessionId,
+      content: 'Hello from luban',
+      agentCode: 'luban'
+    })
+
+    expect(lastLLMConfig).toBeTruthy()
+    expect(lastLLMConfig.model).toBe('model-B')
+    expect(lastLLMConfig.temperature).toBe(0.42)
+    expect(lastLLMConfig.agentCode).toBe('luban')
+  })
+
+  test('uses system default model when selected agent has no bound model', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    const modelA = await prisma.model.create({
+      data: {
+        provider: 'openai',
+        modelName: 'model-A2',
+        apiKey: 'key-A2',
+        baseURL: null,
+        config: {}
+      }
+    })
+
+    mockStore.systemSetting = []
+    await prisma.systemSetting.create({ data: { key: 'defaultModelId', value: modelA.id } })
+
+    await handleMessageSend(mockEvent, {
+      sessionId,
+      content: 'Hello from other agent',
+      agentCode: 'luban'
+    })
+
+    expect(lastLLMConfig).toBeTruthy()
+    expect(lastLLMConfig.model).toBe('model-A2')
+    expect(lastLLMConfig.agentCode).toBe('luban')
   })
 })

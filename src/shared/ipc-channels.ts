@@ -32,7 +32,7 @@ export const INVOKE_CHANNELS = {
   MESSAGE_SEND: 'message:send',
   MESSAGE_LIST: 'message:list',
   MESSAGE_STREAM: 'message:stream',
-  MESSAGE_STREAM_CHUNK: 'message:stream-chunk',
+  MESSAGE_ABORT: 'message:abort',
 
   // Model Operations
   MODEL_CREATE: 'model:create',
@@ -59,6 +59,9 @@ export const INVOKE_CHANNELS = {
 
   // File Operations
   FILE_READ: 'file:read',
+  FILE_TREE_GET: 'file-tree:get',
+  FILE_TREE_WATCH: 'file-tree:watch',
+  FILE_TREE_UNWATCH: 'file-tree:unwatch',
 
   // Shell Operations
   SHELL_OPEN_PATH: 'shell:open-path',
@@ -143,7 +146,15 @@ export const INVOKE_CHANNELS = {
   // System Setting Operations
   SETTING_GET: 'setting:get',
   SETTING_SET: 'setting:set',
-  SETTING_GET_ALL: 'setting:get-all'
+  SETTING_GET_ALL: 'setting:get-all',
+
+  // Session Continuity Operations
+  SESSION_STATE_GET: 'session-state:get',
+  SESSION_STATE_CHECKPOINT: 'session-state:checkpoint',
+  SESSION_RECOVERY_PLAN: 'session-recovery:plan',
+  SESSION_RECOVERY_EXECUTE: 'session-recovery:execute',
+  SESSION_RECOVERABLE_LIST: 'session-recovery:list',
+  SESSION_RESUME_PROMPT: 'session-recovery:resume-prompt'
 } as const
 
 /**
@@ -155,6 +166,7 @@ export const EVENT_CHANNELS = {
   BROWSER_ZOOM_CHANGED: 'browser:zoom-changed',
   BROWSER_STATE_CHANGED: 'browser:state-changed',
   BROWSER_PANEL_SHOW: 'browser:panel-show',
+  BROWSER_AI_OPERATION: 'browser:ai-operation',
 
   // Task Events
   TASK_STATUS_CHANGED: 'task:status-changed',
@@ -165,13 +177,26 @@ export const EVENT_CHANNELS = {
   // Artifact Events
   ARTIFACT_CREATED: 'artifact:created',
 
+  // Message Stream Events
+  MESSAGE_STREAM_CHUNK: 'message:stream-chunk',
+  MESSAGE_STREAM_ERROR: 'message:stream-error',
+  MESSAGE_STREAM_USAGE: 'message:stream-usage',
+
   // Updater Events
   UPDATER_CHECKING_FOR_UPDATE: 'updater:checking-for-update',
   UPDATER_UPDATE_AVAILABLE: 'updater:update-available',
   UPDATER_UPDATE_NOT_AVAILABLE: 'updater:update-not-available',
   UPDATER_ERROR: 'updater:error',
   UPDATER_DOWNLOAD_PROGRESS: 'updater:download-progress',
-  UPDATER_UPDATE_DOWNLOADED: 'updater:update-downloaded'
+  UPDATER_UPDATE_DOWNLOADED: 'updater:update-downloaded',
+
+  // Session Events
+  SESSION_CRASH_DETECTED: 'session:crash-detected',
+  SESSION_RECOVERY_PROGRESS: 'session:recovery-progress',
+  SESSION_RECOVERED: 'session:recovered',
+
+  // File Tree Events
+  FILE_TREE_CHANGED: 'file-tree:changed'
 } as const
 
 /**

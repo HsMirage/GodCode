@@ -15,6 +15,12 @@ const mockPrisma: any = {
     findFirst: vi.fn(),
     findMany: vi.fn()
   },
+  agentBinding: {
+    findUnique: vi.fn()
+  },
+  categoryBinding: {
+    findUnique: vi.fn()
+  },
   session: {
     findFirst: vi.fn(),
     create: vi.fn()
@@ -56,6 +62,16 @@ vi.mock('@/main/services/llm/factory', () => ({
   createLLMAdapter: vi.fn(() => mockAdapter)
 }))
 
+const mockSecureStorage = {
+  decrypt: vi.fn((s: string) => s)
+}
+
+vi.mock('@/main/services/secure-storage.service', () => ({
+  SecureStorageService: {
+    getInstance: vi.fn(() => mockSecureStorage)
+  }
+}))
+
 const mockDelegateEngine = {
   delegateTask: vi.fn()
 }
@@ -79,9 +95,12 @@ describe('WorkforceEngine', () => {
       {
         id: 'model-1',
         provider: 'anthropic',
+        modelName: 'claude-3-5-sonnet-20240620',
         apiKey: 'test-key'
       }
     ])
+    mockPrisma.agentBinding.findUnique.mockResolvedValue(null)
+    mockPrisma.categoryBinding.findUnique.mockResolvedValue(null)
     mockAdapter.sendMessage.mockResolvedValue({
       content: JSON.stringify({
         subtasks: [
@@ -109,8 +128,9 @@ describe('WorkforceEngine', () => {
       expect(mockPrisma.model.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
-            apiKey: { not: '' }
+            OR: [{ apiKeyId: { not: null } }, { apiKey: { not: null } }]
           },
+          include: { apiKeyRef: true },
           orderBy: { createdAt: 'desc' }
         })
       )
@@ -124,6 +144,31 @@ describe('WorkforceEngine', () => {
       expect(subtasks).toHaveLength(2)
       expect(subtasks[0].id).toBe('task-1')
       expect(subtasks[1].dependencies).toContain('task-1')
+    })
+
+    it('should use agent-bound model when agentCode is provided', async () => {
+      mockPrisma.model.findMany.mockResolvedValue([])
+      mockPrisma.agentBinding.findUnique.mockResolvedValue({
+        enabled: true,
+        temperature: 0.2,
+        model: {
+          provider: 'openai-compatible',
+          modelName: 'gpt-4o-mini',
+          apiKeyRef: { encryptedKey: 'encrypted-key', baseURL: 'https://example.test' },
+          apiKey: null,
+          baseURL: null
+        }
+      })
+      mockSecureStorage.decrypt.mockReturnValue('decrypted-key')
+
+      const subtasks = await workforceEngine.decomposeTask('input', { agentCode: 'haotian' })
+
+      expect(mockPrisma.agentBinding.findUnique).toHaveBeenCalled()
+      expect(createLLMAdapter).toHaveBeenCalledWith(
+        'openai-compatible',
+        expect.objectContaining({ apiKey: 'decrypted-key' })
+      )
+      expect(subtasks).toHaveLength(2)
     })
 
     it('should handle model not found error', async () => {
@@ -149,7 +194,7 @@ describe('WorkforceEngine', () => {
     it('should execute tasks in dependency order', async () => {
       const input = 'Do workflow'
 
-      await workforceEngine.executeWorkflow(input)
+      await workforceEngine.executeWorkflow(input, 'test-session-123')
 
       expect(mockPrisma.task.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -210,7 +255,7 @@ describe('WorkforceEngine', () => {
         return { taskId: 'id', output: 'done', success: true }
       })
 
-      await workforceEngine.executeWorkflow('Concurrent workflow')
+      await workforceEngine.executeWorkflow('Concurrent workflow', 'test-session-123')
 
       // Since we can't easily check realtime concurrency in unit test without complex setup,
       // we verify that all tasks were executed eventually
@@ -228,9 +273,9 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      await expect(workforceEngine.executeWorkflow('Deadlock workflow')).rejects.toThrow(
-        'Deadlock detected'
-      )
+      await expect(
+        workforceEngine.executeWorkflow('Deadlock workflow', 'test-session-123')
+      ).rejects.toThrow('Deadlock detected')
 
       expect(mockPrisma.task.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -246,9 +291,9 @@ describe('WorkforceEngine', () => {
     it('should handle subtask failure', async () => {
       mockDelegateEngine.delegateTask.mockRejectedValueOnce(new Error('Subtask failed'))
 
-      await expect(workforceEngine.executeWorkflow('Failed workflow')).rejects.toThrow(
-        'Subtask failed'
-      )
+      await expect(
+        workforceEngine.executeWorkflow('Failed workflow', 'test-session-123')
+      ).rejects.toThrow('Subtask failed')
 
       expect(mockPrisma.task.update).toHaveBeenCalledWith(
         expect.objectContaining({

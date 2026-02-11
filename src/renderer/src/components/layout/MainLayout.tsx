@@ -5,21 +5,26 @@ import { Sidebar } from './Sidebar'
 import { TopNavigation } from './TopNavigation'
 import { BrowserPanel } from '../panels/BrowserPanel'
 import { TaskPanel } from '../panels/TaskPanel'
+import { ArtifactRail } from '../artifact/ArtifactRail'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../ui/resizable'
 import { UpdaterManager } from '../updater/UpdaterManager'
 import { ChatPage } from '../../pages/ChatPage'
 import { useUIStore } from '../../store/ui.store'
+import { useDataStore } from '../../store/data.store'
 
 export function MainLayout() {
   const {
     showSidebar,
+    showArtifactRail,
     isTaskPanelOpen,
     isBrowserPanelOpen,
     openBrowserPanel,
+    setActiveBrowserTab,
     setPanelSizes,
     setTaskPanelWidth,
     setBrowserPanelWidth
   } = useUIStore()
+  const { currentSessionId } = useDataStore()
 
   // 监听浏览器面板自动展开事件
   useEffect(() => {
@@ -29,18 +34,28 @@ export function MainLayout() {
       openBrowserPanel()
     })
 
-    return () => removeListener()
-  }, [openBrowserPanel])
+    const removeAIListener = window.codeall.on('browser:ai-operation', data => {
+      // Make sure panel opens and AI-controlled view is focused even if BrowserShell isn't mounted yet.
+      openBrowserPanel()
+      if (data.viewId) setActiveBrowserTab(data.viewId)
+    })
+
+    return () => {
+      removeListener()
+      removeAIListener()
+    }
+  }, [openBrowserPanel, setActiveBrowserTab])
 
   // Panels are conditionally mounted; panelIds must match rendered panels
   const outerPanelIds = useMemo(
     () => [
       ...(showSidebar ? ['sidebar'] : []),
       'chat',
+      ...(showArtifactRail ? ['artifact'] : []),
       ...(isTaskPanelOpen ? ['task'] : []),
       ...(isBrowserPanelOpen ? ['browser'] : [])
     ],
-    [showSidebar, isTaskPanelOpen, isBrowserPanelOpen]
+    [showSidebar, showArtifactRail, isTaskPanelOpen, isBrowserPanelOpen]
   )
 
   const outerLayout = useDefaultLayout({
@@ -49,7 +64,7 @@ export function MainLayout() {
   })
 
   return (
-    <div className="h-screen flex flex-col bg-slate-950 text-slate-200 overflow-hidden">
+    <div className="h-screen flex flex-col ui-bg-app ui-text-primary overflow-hidden">
       <UpdaterManager />
       <TopNavigation />
 
@@ -83,6 +98,24 @@ export function MainLayout() {
           <ResizablePanel id="chat" minSize="420px">
             <ChatPage />
           </ResizablePanel>
+
+          {showArtifactRail && (
+            <>
+              <ResizableHandle withHandle />
+              <ResizablePanel
+                id="artifact"
+                minSize="260px"
+                maxSize="40%"
+                defaultSize={20}
+                onResize={(size: number | { asPercentage?: number }) => {
+                  const newSize = typeof size === 'number' ? size : (size.asPercentage ?? 20)
+                  setPanelSizes({ artifact: newSize })
+                }}
+              >
+                <ArtifactRail sessionId={currentSessionId} className="h-full ui-bg-panel" />
+              </ResizablePanel>
+            </>
+          )}
 
           {/* Task Panel - 后台任务（独立占据一列） */}
           {isTaskPanelOpen && (

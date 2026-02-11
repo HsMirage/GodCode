@@ -3,6 +3,13 @@ import type { BrowserTool, BrowserToolContext, ToolResult } from '../ai-browser/
 import { toolRegistry } from './tool-registry'
 import { defaultPolicy } from './permission-policy'
 import { LoggerService } from '../logger'
+import { hookManager } from '../hooks'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import type {
+  HookContext,
+  ToolExecutionInput,
+  ToolExecutionOutput as HookToolOutput
+} from '../hooks'
 
 /**
  * Configuration for tool execution loop
@@ -74,10 +81,36 @@ function isBrowserTool(tool: UnifiedTool): tool is BrowserTool {
 export class ToolExecutionService {
   private logger = LoggerService.getInstance().getLogger()
   private browserTools: Map<string, BrowserTool> = new Map()
+  private toolScopeStorage = new AsyncLocalStorage<{ allowedToolNames: Set<string> }>()
   private defaultConfig: Required<ToolExecutionConfig> = {
     maxIterations: 10,
     timeoutMs: 30000,
     stopOnError: false
+  }
+
+  async withAllowedTools<T>(
+    toolNames: string[] | undefined,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    if (!toolNames) {
+      return operation()
+    }
+
+    const normalized = new Set(toolNames.map(name => name.trim()).filter(Boolean))
+    return this.toolScopeStorage.run({ allowedToolNames: normalized }, operation)
+  }
+
+  private getToolName(tool: UnifiedTool): string {
+    return isBrowserTool(tool) ? tool.name : tool.definition.name
+  }
+
+  private isToolAllowedInCurrentScope(toolName: string): boolean {
+    const scoped = this.toolScopeStorage.getStore()
+    if (!scoped) {
+      return true
+    }
+
+    return scoped.allowedToolNames.has(toolName)
   }
 
   /**
@@ -104,50 +137,90 @@ export class ToolExecutionService {
   getAllTools(): UnifiedTool[] {
     const registryTools = toolRegistry.list()
     const browserToolsArray = Array.from(this.browserTools.values())
-    return [...registryTools, ...browserToolsArray]
+    const allTools = [...registryTools, ...browserToolsArray]
+    return allTools.filter(tool => this.isToolAllowedInCurrentScope(this.getToolName(tool)))
   }
 
   /**
    * Get tool definitions in Anthropic/OpenAI compatible format
    */
-  getToolDefinitions(): Array<{
+  getToolDefinitions(allowedToolNames?: string[]): Array<{
     name: string
     description: string
     parameters: Record<string, unknown>
   }> {
-    return this.getAllTools().map(tool => {
-      if (isBrowserTool(tool)) {
-        return {
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.parameters
-        }
-      } else {
-        const properties: Record<string, unknown> = {}
-        const required: string[] = []
+    const explicitAllowlist =
+      allowedToolNames === undefined
+        ? null
+        : new Set(allowedToolNames.map(name => name.trim()).filter(Boolean))
 
-        for (const param of tool.definition.parameters) {
-          properties[param.name] = {
-            type: param.type,
-            description: param.description,
-            ...(param.default !== undefined && { default: param.default })
-          }
-          if (param.required) {
-            required.push(param.name)
-          }
+    return this.getAllTools()
+      .filter(tool => {
+        if (!explicitAllowlist) {
+          return true
         }
+        return explicitAllowlist.has(this.getToolName(tool))
+      })
+      .map(tool => {
+        if (isBrowserTool(tool)) {
+          return {
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.parameters
+          }
+        } else {
+          const properties: Record<string, unknown> = {}
+          const required: string[] = []
 
-        return {
-          name: tool.definition.name,
-          description: tool.definition.description,
-          parameters: {
-            type: 'object',
-            properties,
-            required: required.length > 0 ? required : undefined
+          for (const param of tool.definition.parameters) {
+            const propSchema: Record<string, unknown> = {
+              type: param.type,
+              description: param.description,
+              ...(param.default !== undefined && { default: param.default })
+            }
+
+            // Some providers/proxies (notably Gemini) require array schemas to include `items`.
+            // Default to a string array unless the tool parameter declares a more specific schema.
+            if (param.type === 'array') {
+              const explicitItems =
+                (param as { items?: Record<string, unknown> }).items &&
+                typeof param.items === 'object'
+                  ? param.items
+                  : undefined
+
+              propSchema.items =
+                explicitItems ??
+                (() => {
+                  // Best-effort inference from defaults (keeps schema stable without extra config).
+                  const def = param.default
+                  if (Array.isArray(def) && def.length > 0) {
+                    const first = def[0]
+                    const t = typeof first
+                    if (t === 'number') return { type: 'number' }
+                    if (t === 'boolean') return { type: 'boolean' }
+                    if (t === 'object' && first !== null) return { type: 'object' }
+                  }
+                  return { type: 'string' }
+                })()
+            }
+
+            properties[param.name] = propSchema
+            if (param.required) {
+              required.push(param.name)
+            }
+          }
+
+          return {
+            name: tool.definition.name,
+            description: tool.definition.description,
+            parameters: {
+              type: 'object',
+              properties,
+              required: required.length > 0 ? required : undefined
+            }
           }
         }
-      }
-    })
+      })
   }
 
   /**
@@ -160,6 +233,21 @@ export class ToolExecutionService {
   ): Promise<ToolExecutionOutput> {
     const timeoutMs = config?.timeoutMs ?? this.defaultConfig.timeoutMs
     const startTime = Date.now()
+
+    if (!this.isToolAllowedInCurrentScope(toolCall.name)) {
+      this.logger.warn('Tool execution denied by scoped allowlist', { toolName: toolCall.name })
+      return {
+        toolCall,
+        result: {
+          success: false,
+          output: '',
+          error: `Tool '${toolCall.name}' is not enabled for this agent`
+        },
+        success: false,
+        error: `Tool '${toolCall.name}' is not enabled for this agent`,
+        durationMs: Date.now() - startTime
+      }
+    }
 
     if (!defaultPolicy.isAllowed(toolCall.name)) {
       this.logger.warn('Tool execution denied by policy', { toolName: toolCall.name })
@@ -202,6 +290,7 @@ export class ToolExecutionService {
 
       const durationMs = Date.now() - startTime
       const success = 'success' in result ? result.success : true
+      const errorMsg = success ? undefined : 'error' in result ? result.error : undefined
 
       this.logger.info('Tool execution completed', {
         toolName: toolCall.name,
@@ -213,7 +302,7 @@ export class ToolExecutionService {
         toolCall,
         result,
         success,
-        error: success ? undefined : 'error' in result ? result.error : undefined,
+        error: errorMsg,
         durationMs
       }
     } catch (error) {
@@ -252,9 +341,45 @@ export class ToolExecutionService {
     const outputs: ToolExecutionOutput[] = []
     const startTime = Date.now()
     let allSucceeded = true
+    const hookContext = this.buildHookContext(context)
 
-    for (const toolCall of toolCalls) {
-      const output = await this.executeTool(toolCall, context, config)
+    for (const originalToolCall of toolCalls) {
+      let toolCall = originalToolCall
+      let hookInput = this.buildHookInput(toolCall)
+      let output: ToolExecutionOutput
+
+      try {
+        const hookResult = await hookManager.emitToolStart(hookContext, hookInput)
+        if (hookResult.modifiedInput) {
+          hookInput = hookResult.modifiedInput
+          toolCall = {
+            id: hookInput.callId,
+            name: hookInput.tool,
+            arguments: hookInput.params as Record<string, unknown>
+          }
+        }
+
+        if (hookResult.shouldSkip) {
+          this.logger.info('Tool execution skipped by hook', { toolName: toolCall.name })
+          output = this.buildSkippedOutput(toolCall)
+        } else {
+          output = await this.executeTool(toolCall, context, config)
+        }
+      } catch (hookError) {
+        this.logger.warn('Hook error', hookError)
+        output = await this.executeTool(toolCall, context, config)
+      }
+
+      try {
+        const hookOutput = this.buildHookOutput(toolCall.name, output)
+        const endHookResult = await hookManager.emitToolEnd(hookContext, hookInput, hookOutput)
+        if (endHookResult.modifiedOutput) {
+          output = this.applyModifiedHookOutput(output, endHookResult.modifiedOutput)
+        }
+      } catch (hookError) {
+        this.logger.warn('Hook error', hookError)
+      }
+
       outputs.push(output)
 
       if (!output.success) {
@@ -310,6 +435,97 @@ export class ToolExecutionService {
       })
 
       return this.executeToolCalls(toolCalls, context, mergedConfig)
+    }
+  }
+
+  private buildHookContext(context: ToolExecutionContext | BrowserToolContext): HookContext {
+    return {
+      sessionId: 'sessionId' in context ? context.sessionId : 'unknown',
+      workspaceDir: 'workspaceDir' in context ? context.workspaceDir : process.cwd()
+    }
+  }
+
+  private buildHookInput(toolCall: ToolCall): ToolExecutionInput {
+    return {
+      tool: toolCall.name,
+      callId: toolCall.id,
+      params: toolCall.arguments as Record<string, unknown>
+    }
+  }
+
+  private buildSkippedOutput(toolCall: ToolCall): ToolExecutionOutput {
+    return {
+      toolCall,
+      result: {
+        success: false,
+        output: '',
+        error: 'Tool execution skipped by hook'
+      },
+      success: false,
+      error: 'Tool execution skipped by hook',
+      durationMs: 0
+    }
+  }
+
+  private buildHookOutput(toolName: string, output: ToolExecutionOutput): HookToolOutput {
+    const resultAsRecord = this.asRecord(output.result)
+    const rawOutput =
+      resultAsRecord && 'output' in resultAsRecord ? resultAsRecord.output : output.result
+
+    return {
+      title: toolName,
+      output: typeof rawOutput === 'string' ? rawOutput : this.safeStringify(rawOutput),
+      success: output.success,
+      error: output.error,
+      metadata:
+        resultAsRecord && 'metadata' in resultAsRecord
+          ? (resultAsRecord.metadata as Record<string, unknown> | undefined)
+          : undefined
+    }
+  }
+
+  private applyModifiedHookOutput(
+    output: ToolExecutionOutput,
+    modifiedOutput: Partial<HookToolOutput>
+  ): ToolExecutionOutput {
+    const patchedResult: ToolExecutionResult = {
+      success: modifiedOutput.success ?? output.success,
+      output: modifiedOutput.output ?? this.extractOutputText(output.result),
+      error: modifiedOutput.error ?? output.error,
+      metadata: modifiedOutput.metadata
+    }
+
+    return {
+      ...output,
+      result: patchedResult,
+      success: modifiedOutput.success ?? output.success,
+      error: modifiedOutput.error ?? output.error
+    }
+  }
+
+  private extractOutputText(result: ToolExecutionResult | ToolResult): string {
+    const record = this.asRecord(result)
+    if (record && 'output' in record) {
+      const rawOutput = record.output
+      return typeof rawOutput === 'string' ? rawOutput : this.safeStringify(rawOutput)
+    }
+    return this.safeStringify(result)
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | undefined {
+    return value && typeof value === 'object'
+      ? (value as unknown as Record<string, unknown>)
+      : undefined
+  }
+
+  private safeStringify(value: unknown): string {
+    if (typeof value === 'string') {
+      return value
+    }
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
     }
   }
 

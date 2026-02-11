@@ -7,7 +7,40 @@ import { DatabaseService } from './services/database'
 import { BindingService } from './services/binding.service'
 import { processCleanupService } from './services/process-cleanup.service'
 import { browserViewManager } from './services/browser-view.service'
+import { initEventBridge } from './services/event-bridge.service'
+import { sessionContinuityService } from './services/session-continuity.service'
+import { hookManager } from './services/hooks/manager'
+import { initializeDefaultHooks } from './services/hooks'
 import { logger } from '../shared/logger'
+
+// Chromium on some Windows environments emits a misleading stderr line like:
+//   ERROR:network_change_notifier_win.cc(...) WSALookupServiceBegin failed with: 0
+// It is typically benign (Chromium fails to query NLA once and falls back) but it
+// confuses users and pollutes logs. Filter only this exact known-noise line.
+// If you need raw Chromium logs for debugging, set `CODEALL_ALLOW_CHROMIUM_NOISE=1`.
+if (process.platform === 'win32' && process.env.CODEALL_ALLOW_CHROMIUM_NOISE !== '1') {
+  const noisyLineRe =
+    /^\[\d+:\d+\/\d{6}\.\d+:ERROR:network_change_notifier_win\.cc\(\d+\)\] WSALookupServiceBegin failed with: 0\r?\n?$/gm
+
+  const origWrite = process.stderr.write.bind(process.stderr)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(process.stderr as any).write = (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    chunk: any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...args: any[]
+  ) => {
+    try {
+      const text = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk)
+      // Remove only the known-noise line(s), keep everything else intact.
+      const filtered = text.replace(noisyLineRe, '')
+      if (filtered.length === 0) return true
+      return origWrite(filtered, ...args)
+    } catch {
+      return origWrite(chunk, ...args)
+    }
+  }
+}
 
 // In dev, keep app data under the repo so it is easy to reset between runs.
 // This also prevents accidentally mixing dev/test data with the packaged app's userData.
@@ -49,10 +82,14 @@ if (!gotTheLock) {
 
   app.whenReady().then(async () => {
     logger.info('Application starting')
+    hookManager.getStats()
+    initializeDefaultHooks()
+    logger.info('HookManager initialized with default hooks registered')
 
     Menu.setApplicationMenu(null)
     mainWindow = createWindow()
     registerIpcHandlers(mainWindow)
+    initEventBridge()
     if (mainWindow) initAutoUpdater(mainWindow)
 
     // Skip database initialization in E2E test environment
@@ -69,6 +106,17 @@ if (!gotTheLock) {
         const bindingService = BindingService.getInstance()
         await bindingService.initializeDefaults()
         logger.info('Agent and category bindings initialized')
+
+        // Initialize session continuity service for crash recovery
+        const crashInfo = await sessionContinuityService.initialize()
+        if (crashInfo.detected) {
+          logger.warn(`Session crash detected: ${crashInfo.sessionIds.length} sessions affected`)
+          // Notify renderer about crash recovery
+          if (mainWindow) {
+            mainWindow.webContents.send('session:crash-detected', crashInfo)
+          }
+        }
+        logger.info('Session continuity service initialized')
       } catch (error) {
         logger.error('Database initialization failed:', error)
         const locale = app.getLocale()
@@ -124,6 +172,13 @@ if (!gotTheLock) {
     logger.info('[Main] Resource cleanup started')
 
     try {
+      await sessionContinuityService.shutdown()
+      logger.info('[Main] Session continuity service shutdown complete')
+    } catch (error) {
+      logger.error('[Main] Failed to shutdown session continuity service:', error)
+    }
+
+    try {
       await processCleanupService.cleanupAll()
       logger.info('[Main] Process cleanup complete')
     } catch (error) {
@@ -160,7 +215,7 @@ function createWindow() {
     height: 800,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, '../preload/preload.cjs'),
+      preload: path.join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       // Disable sandbox to allow file:// module loading in production

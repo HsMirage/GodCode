@@ -21,9 +21,9 @@ interface BackupMetadata {
 }
 
 const panelClass = [
-  'rounded-2xl border border-slate-800/70',
-  'bg-slate-950/70 backdrop-blur',
-  'shadow-[0_0_24px_rgba(15,23,42,0.35)]'
+  'rounded-2xl border border-[var(--border-primary)]',
+  'bg-[var(--bg-secondary)] backdrop-blur',
+  'shadow-[0_10px_30px_rgba(0,0,0,0.06)] dark:shadow-[0_0_24px_rgba(15,23,42,0.35)]'
 ].join(' ')
 
 function formatSize(bytes: number): string {
@@ -131,9 +131,9 @@ export function DataManagement() {
       <div className={`${panelClass} p-6`}>
         <div className="mb-6 flex items-start justify-between">
           <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Data & Storage</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">数据管理</h2>
-            <p className="mt-2 text-sm text-slate-400">
+            <p className="text-xs uppercase tracking-[0.3em] text-[var(--text-muted)]">Data & Storage</p>
+            <h2 className="mt-2 text-xl font-semibold text-[var(--text-primary)]">数据管理</h2>
+            <p className="mt-2 text-sm text-[var(--text-secondary)]">
               管理应用数据备份和恢复。恢复操作将覆盖当前所有数据，请谨慎操作。
             </p>
           </div>
@@ -158,8 +158,8 @@ export function DataManagement() {
             className={cn(
               'mb-6 flex items-center gap-2 rounded-xl px-4 py-3 text-sm',
               message.type === 'success'
-                ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-                : 'border border-rose-500/20 bg-rose-500/10 text-rose-400'
+                ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-800 dark:text-emerald-400'
+                : 'border border-rose-500/20 bg-rose-500/10 text-rose-800 dark:text-rose-400'
             )}
           >
             {message.type === 'success' ? (
@@ -172,17 +172,17 @@ export function DataManagement() {
         )}
 
         <div className="space-y-4">
-          <h3 className="text-sm font-medium text-slate-300 flex items-center gap-2">
+          <h3 className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-2">
             <Clock className="h-4 w-4" />
             最近备份
           </h3>
 
           {loading ? (
-            <div className="flex items-center justify-center py-8 text-slate-500">
+            <div className="flex items-center justify-center py-8 text-[var(--text-muted)]">
               <Loader2 className="h-6 w-6 animate-spin" />
             </div>
           ) : backups.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-800/50 bg-slate-900/20 py-8 text-center text-sm text-slate-500">
+            <div className="rounded-xl border border-dashed border-[var(--border-primary)] bg-[var(--bg-primary)] py-8 text-center text-sm text-[var(--text-muted)]">
               暂无备份记录
             </div>
           ) : (
@@ -190,15 +190,15 @@ export function DataManagement() {
               {backups.map(backup => (
                 <div
                   key={backup.name}
-                  className="group flex items-center justify-between rounded-xl border border-slate-800/50 bg-slate-900/40 p-4 transition hover:border-slate-700 hover:bg-slate-900/60"
+                  className="group flex items-center justify-between rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)] p-4 transition hover:border-[var(--border-secondary)] hover:bg-[var(--bg-tertiary)]"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-400 group-hover:bg-slate-800/80 group-hover:text-indigo-400 transition-colors">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--bg-tertiary)] text-[var(--text-secondary)] group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors border border-[var(--border-primary)]">
                       <FileJson className="h-5 w-5" />
                     </div>
                     <div>
-                      <div className="font-medium text-slate-200">{backup.name}</div>
-                      <div className="flex items-center gap-3 text-xs text-slate-500">
+                      <div className="font-medium text-[var(--text-primary)]">{backup.name}</div>
+                      <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
                         <span>{formatDate(backup.createdAt)}</span>
                         <span>•</span>
                         <span>{formatSize(backup.size)}</span>
@@ -225,7 +225,7 @@ export function DataManagement() {
                         </button>
                         <button
                           onClick={() => setConfirmRestore(null)}
-                          className="rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-400 hover:bg-slate-700"
+                          className="rounded-lg bg-[var(--bg-tertiary)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-primary)] border border-[var(--border-primary)]"
                         >
                           取消
                         </button>
@@ -235,7 +235,7 @@ export function DataManagement() {
                         <button
                           onClick={() => setConfirmRestore(backup.path)}
                           disabled={processing !== null}
-                          className="flex items-center gap-1.5 rounded-lg border border-slate-700/50 bg-slate-800/50 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors disabled:opacity-50"
+                          className="flex items-center gap-1.5 rounded-lg border border-[var(--border-primary)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--bg-primary)] transition-colors disabled:opacity-50"
                         >
                           <Upload className="h-3.5 w-3.5" />
                           恢复
@@ -243,7 +243,7 @@ export function DataManagement() {
                         <button
                           onClick={() => handleDelete(backup.name)}
                           disabled={processing !== null}
-                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-700/50 bg-slate-800/50 text-slate-400 hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-400 transition-colors disabled:opacity-50"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--border-primary)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 transition-colors disabled:opacity-50"
                           title="删除备份"
                         >
                           <Trash2 className="h-3.5 w-3.5" />

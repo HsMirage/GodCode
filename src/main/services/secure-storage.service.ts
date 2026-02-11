@@ -13,7 +13,17 @@ export class SecureStorageService {
   }
 
   isEncryptionAvailable(): boolean {
-    return safeStorage.isEncryptionAvailable()
+    // In unit/integration tests or non-Electron contexts, `electron.safeStorage` may be missing.
+    // Treat encryption as unavailable in that case and fall back to plaintext behavior.
+    try {
+      if (!safeStorage) return false
+      if (typeof safeStorage.isEncryptionAvailable !== 'function') return false
+      if (typeof safeStorage.encryptString !== 'function') return false
+      if (typeof safeStorage.decryptString !== 'function') return false
+      return safeStorage.isEncryptionAvailable()
+    } catch {
+      return false
+    }
   }
 
   encrypt(plaintext: string): string {

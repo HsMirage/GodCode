@@ -3,6 +3,10 @@ import path from 'path'
 
 export interface BoulderState {
   active_plan: string
+  started_at?: string
+  session_ids?: string[]
+  plan_name?: string
+  agent?: string
   status: 'not_started' | 'in_progress' | 'complete' | 'blocked'
   completed_tasks: number
   total_tasks: number
@@ -40,9 +44,8 @@ export class BoulderStateService {
 
     try {
       const content = fs.readFileSync(this.boulderPath, 'utf-8')
-      const state = JSON.parse(content) as BoulderState
-      this.validateState(state)
-      return state
+      const parsed = JSON.parse(content) as unknown
+      return this.normalizeState(parsed)
     } catch (error) {
       console.error('[BoulderState] Failed to read state file:', error)
       return this.createDefaultState()
@@ -145,8 +148,14 @@ export class BoulderStateService {
   }
 
   private createDefaultState(): BoulderState {
+    const defaultPlanName = 'codeall-unified-plan'
+    const defaultPlanPath = path.join(process.cwd(), '.sisyphus', 'plans', `${defaultPlanName}.md`)
+
     return {
-      active_plan: 'codeall-unified-plan',
+      active_plan: defaultPlanPath,
+      started_at: new Date().toISOString(),
+      session_ids: [],
+      plan_name: defaultPlanName,
       status: 'not_started',
       completed_tasks: 0,
       total_tasks: 0,
@@ -158,10 +167,113 @@ export class BoulderStateService {
     }
   }
 
-  private validateState(state: BoulderState): void {
-    if (!state.active_plan || typeof state.completed_tasks !== 'number') {
+  async isSessionTracked(sessionId: string): Promise<boolean> {
+    const state = await this.getState()
+    const sessionIds = state.session_ids || []
+    if (sessionIds.length === 0) {
+      return true
+    }
+    return sessionIds.includes(sessionId)
+  }
+
+  private normalizeState(raw: unknown): BoulderState {
+    if (!raw || typeof raw !== 'object') {
       throw new Error('Invalid boulder state structure')
     }
+
+    const record = raw as Record<string, unknown>
+    const activePlan = typeof record.active_plan === 'string' && record.active_plan.trim()
+      ? record.active_plan.trim()
+      : this.createDefaultState().active_plan
+
+    const completedTasks = this.toNonNegativeNumber(record.completed_tasks)
+    const rawTotalTasks = this.toNonNegativeNumber(record.total_tasks)
+    const totalTasks = Math.max(rawTotalTasks, completedTasks)
+    const status = this.normalizeStatus(record.status, completedTasks, totalTasks)
+    const now = new Date().toISOString()
+
+    return {
+      active_plan: activePlan,
+      started_at: this.normalizeOptionalString(record.started_at),
+      session_ids: this.normalizeStringArray(record.session_ids),
+      plan_name: this.normalizePlanName(record.plan_name, activePlan),
+      agent: this.normalizeOptionalString(record.agent),
+      status,
+      completed_tasks: completedTasks,
+      total_tasks: totalTasks,
+      completion_percentage:
+        this.normalizePercentage(record.completion_percentage) ||
+        this.calculatePercentage(completedTasks, totalTasks),
+      last_updated: this.normalizeOptionalString(record.last_updated) || now,
+      current_phase: this.normalizeOptionalString(record.current_phase),
+      phase_status: this.normalizeStringRecord(record.phase_status),
+      blockers: this.normalizeStringArray(record.blockers),
+      next_actionable_tasks: this.normalizeStringArray(record.next_actionable_tasks),
+      recent_accomplishments: this.normalizeOptionalStringArray(record.recent_accomplishments)
+    }
+  }
+
+  private normalizeStatus(
+    value: unknown,
+    completed: number,
+    total: number
+  ): BoulderState['status'] {
+    if (value === 'not_started' || value === 'in_progress' || value === 'complete' || value === 'blocked') {
+      return value
+    }
+
+    if (total === 0) return 'not_started'
+    if (completed >= total) return 'complete'
+    return 'in_progress'
+  }
+
+  private normalizeStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) return []
+    return value.filter(item => typeof item === 'string' && item.trim().length > 0)
+  }
+
+  private normalizeOptionalStringArray(value: unknown): string[] | undefined {
+    if (!Array.isArray(value)) return undefined
+    return this.normalizeStringArray(value)
+  }
+
+  private normalizeStringRecord(value: unknown): Record<string, string> {
+    if (!value || typeof value !== 'object') return {}
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => typeof v === 'string')
+      .map(([k, v]) => [k, v as string])
+    return Object.fromEntries(entries)
+  }
+
+  private normalizeOptionalString(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? trimmed : undefined
+  }
+
+  private normalizePlanName(value: unknown, activePlan: string): string | undefined {
+    const explicit = this.normalizeOptionalString(value)
+    if (explicit) return explicit
+
+    const fileName = path.basename(activePlan)
+    if (!fileName) return undefined
+
+    const ext = path.extname(fileName)
+    const baseName = ext ? fileName.slice(0, -ext.length) : fileName
+    return baseName || undefined
+  }
+
+  private normalizePercentage(value: unknown): string | null {
+    if (typeof value !== 'string') return null
+    const trimmed = value.trim()
+    return /^\d+(\.\d+)?%$/.test(trimmed) ? trimmed : null
+  }
+
+  private toNonNegativeNumber(value: unknown): number {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      return 0
+    }
+    return Math.floor(value)
   }
 
   private calculatePercentage(completed: number, total: number): string {

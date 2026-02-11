@@ -32,10 +32,13 @@ interface ProviderFormData {
 
 interface ModelFormData {
   modelName: string
+  contextSize: number
+  thinkingMode: boolean
 }
 
 export function ProviderModelPanel() {
   const [providers, setProviders] = useState<ProviderWithModels[]>([])
+  const [modelsById, setModelsById] = useState<Record<string, any>>({})
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({})
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -55,18 +58,29 @@ export function ProviderModelPanel() {
   const [editingModelId, setEditingModelId] = useState<string | null>(null)
   const [addingModelToProviderId, setAddingModelToProviderId] = useState<string | null>(null)
   const [modelForm, setModelForm] = useState<ModelFormData>({
-    modelName: ''
+    modelName: '',
+    contextSize: 32,
+    thinkingMode: false
   })
 
   // Load Data
   const loadProviders = useCallback(async () => {
     if (!window.codeall) return
     try {
-      const data = (await window.codeall.invoke('keychain:list-with-models')) as ProviderWithModels[]
-      setProviders(data)
+      const [providerData, modelData] = await Promise.all([
+        window.codeall.invoke('keychain:list-with-models') as Promise<ProviderWithModels[]>,
+        window.codeall.invoke('model:list') as Promise<any[]>
+      ])
+
+      setProviders(providerData)
+      const map: Record<string, any> = {}
+      for (const m of modelData) {
+        if (m && m.id) map[m.id] = m
+      }
+      setModelsById(map)
       setSelectedProviderId(prev => {
-        if (prev && data.some(p => p.id === prev)) return prev
-        return data[0]?.id ?? null
+        if (prev && providerData.some(p => p.id === prev)) return prev
+        return providerData[0]?.id ?? null
       })
     } catch (error) {
       console.error('Failed to load providers:', error)
@@ -180,16 +194,21 @@ export function ProviderModelPanel() {
   const handleAddModel = (providerId: string) => {
     setAddingModelToProviderId(providerId)
     setEditingModelId(null)
-    setModelForm({ modelName: '' })
+    setModelForm({ modelName: '', contextSize: 32, thinkingMode: false })
     // Ensure provider is expanded
     setExpandedProviders(prev => ({ ...prev, [providerId]: true }))
     setSelectedProviderId(providerId)
   }
 
   const handleEditModel = (model: { id: string; modelName: string }) => {
+    const details = modelsById[model.id]
     setEditingModelId(model.id)
     setAddingModelToProviderId(null)
-    setModelForm({ modelName: model.modelName })
+    setModelForm({
+      modelName: model.modelName,
+      contextSize: Number(details?.contextSize ?? 32),
+      thinkingMode: Boolean(details?.config?.thinkingMode ?? false)
+    })
   }
 
   const handleSaveModel = async (providerId: string) => {
@@ -197,10 +216,17 @@ export function ProviderModelPanel() {
     setLoading(true)
     try {
       if (editingModelId) {
+        const existing = modelsById[editingModelId]
+        const nextConfig = {
+          ...(existing?.config && typeof existing.config === 'object' ? existing.config : {}),
+          thinkingMode: modelForm.thinkingMode
+        }
         await window.codeall.invoke('model:update', {
           id: editingModelId,
           data: {
-            modelName: modelForm.modelName
+            modelName: modelForm.modelName,
+            contextSize: modelForm.contextSize,
+            config: nextConfig
             // We don't change provider/apiKey/baseURL here as they inherit from provider
           }
         })
@@ -213,7 +239,8 @@ export function ProviderModelPanel() {
           modelName: modelForm.modelName,
           apiKeyId: provider.id,
           baseURL: provider.baseURL,
-          config: {}
+          contextSize: modelForm.contextSize,
+          config: { thinkingMode: modelForm.thinkingMode }
         })
       }
       await loadProviders()
@@ -244,10 +271,10 @@ export function ProviderModelPanel() {
 
   // --- Renders ---
   const renderProviderForm = () => (
-    <div className="bg-slate-900/50 border border-indigo-500/30 rounded-xl p-4 space-y-4 animate-in fade-in slide-in-from-top-2 mb-4">
+    <div className="bg-[var(--bg-secondary)] border border-indigo-500/20 rounded-xl p-4 space-y-4 animate-in fade-in slide-in-from-top-2 mb-4 shadow-[0_10px_30px_rgba(0,0,0,0.05)] dark:shadow-none">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label htmlFor="provider-label" className="text-xs text-slate-400 font-medium ml-1">
+          <label htmlFor="provider-label" className="text-xs text-[var(--text-secondary)] font-medium ml-1">
             Label (Optional)
           </label>
           <input
@@ -256,39 +283,39 @@ export function ProviderModelPanel() {
             value={providerForm.label}
             onChange={e => setProviderForm({ ...providerForm, label: e.target.value })}
             placeholder="My Provider"
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 px-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50"
+            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg py-2 px-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500/50 placeholder:text-[var(--text-muted)]"
           />
         </div>
         <div className="space-y-1.5">
-          <label htmlFor="provider-base-url" className="text-xs text-indigo-400 font-medium ml-1">
+          <label htmlFor="provider-base-url" className="text-xs text-indigo-600 dark:text-indigo-400 font-medium ml-1">
             Base URL *
           </label>
           <div className="relative">
-            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
+            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
             <input
               id="provider-base-url"
               type="text"
               value={providerForm.baseURL}
               onChange={e => setProviderForm({ ...providerForm, baseURL: e.target.value })}
               placeholder="https://api.example.com/v1"
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 pl-9 pr-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50"
+              className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500/50 placeholder:text-[var(--text-muted)]"
             />
           </div>
         </div>
       </div>
       <div className="space-y-1.5">
-        <label htmlFor="provider-api-key" className="text-xs text-indigo-400 font-medium ml-1">
+        <label htmlFor="provider-api-key" className="text-xs text-indigo-600 dark:text-indigo-400 font-medium ml-1">
           API Key *
         </label>
         <div className="relative">
-          <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+          <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
           <input
             id="provider-api-key"
             type="password"
             value={providerForm.apiKey}
             onChange={e => setProviderForm({ ...providerForm, apiKey: e.target.value })}
             placeholder="sk-..."
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 pl-10 pr-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50 font-mono"
+            className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg py-2 pl-10 pr-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500/50 font-mono placeholder:text-[var(--text-muted)]"
           />
         </div>
       </div>
@@ -296,7 +323,7 @@ export function ProviderModelPanel() {
       {isAddingProvider && !editingProviderId && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <label className="text-xs text-slate-400 font-medium ml-1">
+            <label className="text-xs text-[var(--text-secondary)] font-medium ml-1">
               添加模型
             </label>
           </div>
@@ -306,10 +333,10 @@ export function ProviderModelPanel() {
               {providerForm.initialModels.map((model, index) => (
                 <div
                   key={index}
-                  className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-1.5 border border-slate-700/50"
+                  className="flex items-center gap-2 bg-[var(--bg-primary)] rounded-lg px-3 py-1.5 border border-[var(--border-primary)]"
                 >
-                  <Bot className="w-3.5 h-3.5 text-indigo-400" />
-                  <span className="flex-1 text-sm text-slate-300 font-mono">{model}</span>
+                  <Bot className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span className="flex-1 text-sm text-[var(--text-primary)] font-mono">{model}</span>
                   <button
                     type="button"
                     onClick={() => {
@@ -318,7 +345,7 @@ export function ProviderModelPanel() {
                         initialModels: providerForm.initialModels.filter((_, i) => i !== index)
                       })
                     }}
-                    className="p-0.5 text-slate-500 hover:text-red-400 transition-colors"
+                    className="p-0.5 text-[var(--text-muted)] hover:text-red-500 dark:hover:text-red-400 transition-colors"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -329,7 +356,7 @@ export function ProviderModelPanel() {
           {/* Add model input */}
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
-              <Bot className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <Bot className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
               <input
                 type="text"
                 value={newModelInput}
@@ -347,7 +374,7 @@ export function ProviderModelPanel() {
                   }
                 }}
                 placeholder="例如: gpt-4, claude-3-opus..."
-                className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2 pl-10 pr-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500/50"
+                className="w-full bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg py-2 pl-10 pr-3 text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500/50 placeholder:text-[var(--text-muted)]"
               />
             </div>
             <button
@@ -368,7 +395,7 @@ export function ProviderModelPanel() {
               添加模型
             </button>
           </div>
-          <p className="text-[10px] text-slate-500 ml-1">输入模型名称后点击"添加模型"按钮或按回车添加，可添加多个</p>
+          <p className="text-[10px] text-[var(--text-muted)] ml-1">输入模型名称后点击&quot;添加模型&quot;按钮或按回车添加，可添加多个</p>
         </div>
       )}
       <div className="flex justify-end gap-2 pt-2">
@@ -380,7 +407,7 @@ export function ProviderModelPanel() {
             setProviderForm({ label: '', baseURL: '', apiKey: '', initialModels: [] })
             setNewModelInput('')
           }}
-          className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs text-slate-300 hover:bg-slate-800"
+          className="px-3 py-1.5 rounded-lg border border-[var(--border-primary)] text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
         >
           Cancel
         </button>
@@ -398,47 +425,97 @@ export function ProviderModelPanel() {
   )
 
   const renderModelForm = (providerId: string) => (
-    <div className="ml-8 mt-2 p-3 bg-slate-800/30 rounded-lg border border-slate-700/50 flex items-center gap-3 animate-in fade-in">
-      <Bot className="w-4 h-4 text-indigo-400 shrink-0" />
-      <input
-        type="text"
-        value={modelForm.modelName}
-        onChange={e => setModelForm({ ...modelForm, modelName: e.target.value })}
-        placeholder="Model Name (e.g. gpt-4)"
-        className="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-slate-200 focus:border-indigo-500/50 focus:outline-none"
-        onKeyDown={e => {
-          if (e.key === 'Enter') handleSaveModel(providerId)
-          if (e.key === 'Escape') {
-            setAddingModelToProviderId(null)
-            setEditingModelId(null)
-          }
-        }}
-      />
-      <button
-        type="button"
-        onClick={() => handleSaveModel(providerId)}
-        disabled={!modelForm.modelName}
-        className="p-1 text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
-      >
-        <Save className="w-4 h-4" />
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          setAddingModelToProviderId(null)
-          setEditingModelId(null)
-        }}
-        className="p-1 text-slate-500 hover:text-slate-400"
-      >
-        <X className="w-4 h-4" />
-      </button>
+    <div className="ml-8 mt-2 p-3 bg-[var(--bg-primary)] rounded-lg border border-[var(--border-primary)] animate-in fade-in">
+      <div className="flex items-start gap-3">
+        <Bot className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-2" />
+
+        <div className="flex-1 grid grid-cols-12 gap-3">
+          <div className="col-span-12 md:col-span-6">
+            <label className="block text-[10px] text-[var(--text-muted)] mb-1">模型名称</label>
+            <input
+              type="text"
+              value={modelForm.modelName}
+              onChange={e => setModelForm({ ...modelForm, modelName: e.target.value })}
+              placeholder="例如: gpt-4o, claude-3-5-sonnet..."
+              className="w-full bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 focus:outline-none placeholder:text-[var(--text-muted)]"
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleSaveModel(providerId)
+                if (e.key === 'Escape') {
+                  setAddingModelToProviderId(null)
+                  setEditingModelId(null)
+                }
+              }}
+            />
+          </div>
+
+          <div className="col-span-12 md:col-span-3">
+            <label className="block text-[10px] text-[var(--text-muted)] mb-1">
+              最大上下文 (K tokens)
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={2000}
+              step={1}
+              value={modelForm.contextSize}
+              onChange={e => {
+                const n = Number(e.target.value)
+                setModelForm({ ...modelForm, contextSize: Number.isFinite(n) ? n : 32 })
+              }}
+              className="w-full bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 focus:outline-none"
+            />
+            <p className="mt-1 text-[10px] text-[var(--text-muted)]">范围 1-2000</p>
+          </div>
+
+          <div className="col-span-12 md:col-span-3">
+            <label className="block text-[10px] text-[var(--text-muted)] mb-1">思考模式</label>
+            <button
+              type="button"
+              onClick={() => setModelForm(v => ({ ...v, thinkingMode: !v.thinkingMode }))}
+              className={cn(
+                'w-full border rounded px-2 py-1.5 text-xs font-medium transition-colors',
+                modelForm.thinkingMode
+                  ? 'bg-indigo-600 text-white border-indigo-500'
+                  : 'bg-[var(--bg-secondary)] text-[var(--text-primary)] border-[var(--border-primary)] hover:bg-[var(--bg-tertiary)]'
+              )}
+              title={modelForm.thinkingMode ? '已启用' : '已禁用'}
+            >
+              {modelForm.thinkingMode ? '启用' : '禁用'}
+            </button>
+            <p className="mt-1 text-[10px] text-[var(--text-muted)]">Claude 可启用 extended thinking</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 pt-6">
+          <button
+            type="button"
+            onClick={() => handleSaveModel(providerId)}
+            disabled={!modelForm.modelName}
+            className="p-1 text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300 disabled:opacity-50"
+            title="Save"
+          >
+            <Save className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAddingModelToProviderId(null)
+              setEditingModelId(null)
+            }}
+            className="p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+            title="Cancel"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
     </div>
   )
 
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h3 className="text-sm font-medium text-slate-300">Model Providers</h3>
+        <h3 className="text-sm font-medium text-[var(--text-primary)]">Model Providers</h3>
         <button
           type="button"
           onClick={handleAddProvider}
@@ -455,7 +532,7 @@ export function ProviderModelPanel() {
 
       <div className="space-y-3">
         {providers.length === 0 && !isAddingProvider && (
-          <div className="text-center py-8 text-slate-500 text-sm border border-dashed border-slate-800 rounded-xl">
+          <div className="text-center py-8 text-[var(--text-muted)] text-sm border border-dashed border-[var(--border-primary)] rounded-xl bg-[var(--bg-primary)]">
             No providers configured. Add one to get started.
           </div>
         )}
@@ -471,8 +548,8 @@ export function ProviderModelPanel() {
             <div
               key={provider.id}
               className={cn(
-                'bg-slate-900/30 border border-slate-800 rounded-xl transition-all hover:border-slate-700 group',
-                isSelected ? 'ring-1 ring-indigo-500/30 border-indigo-500/30' : null
+                'bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-xl transition-all hover:border-[var(--border-secondary)] group',
+                isSelected ? 'ring-1 ring-indigo-500/20 border-indigo-500/30' : null
               )}
             >
               {/* Provider Header */}
@@ -480,7 +557,7 @@ export function ProviderModelPanel() {
                 <button
                   type="button"
                   onClick={() => toggleExpand(provider.id)}
-                  className="p-1 hover:bg-slate-800 rounded text-slate-500 hover:text-slate-300 transition-colors"
+                  className="p-1 hover:bg-[var(--bg-tertiary)] rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
                 >
                   {isExpanded ? (
                     <ChevronDown className="w-4 h-4" />
@@ -489,29 +566,29 @@ export function ProviderModelPanel() {
                   )}
                 </button>
 
-                <div className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center shrink-0 border border-slate-700/50">
-                  <span className="font-bold text-slate-400 text-xs uppercase tracking-wider">
+                <div className="w-8 h-8 rounded-lg bg-[var(--bg-tertiary)] flex items-center justify-center shrink-0 border border-[var(--border-primary)]">
+                  <span className="font-bold text-[var(--text-secondary)] text-xs uppercase tracking-wider">
                     {(provider.label || provider.provider || '??').slice(0, 2)}
                   </span>
                 </div>
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h4 className="font-medium text-slate-200 truncate text-sm">
+                    <h4 className="font-medium text-[var(--text-primary)] truncate text-sm">
                       {provider.label || 'Unnamed Provider'}
                     </h4>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-500 border border-slate-700/50">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--bg-tertiary)] text-[var(--text-muted)] border border-[var(--border-primary)]">
                       {provider.models.length} models
                     </span>
                   </div>
                   <div className="flex items-center gap-3 mt-0.5">
                     <span
-                      className="text-xs text-slate-500 truncate font-mono max-w-[200px]"
+                      className="text-xs text-[var(--text-muted)] truncate font-mono max-w-[200px]"
                       title={provider.baseURL}
                     >
                       {provider.baseURL}
                     </span>
-                    <span className="text-xs text-slate-600 font-mono">
+                    <span className="text-xs text-[var(--text-muted)] font-mono">
                       {provider.apiKeyMasked}
                     </span>
                   </div>
@@ -521,7 +598,7 @@ export function ProviderModelPanel() {
                   <button
                     type="button"
                     onClick={() => handleEditProvider(provider)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-white bg-slate-600 hover:bg-slate-500 border border-slate-400 rounded-lg transition-colors text-xs font-medium shadow-sm"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-[var(--text-primary)] bg-[var(--bg-tertiary)] hover:bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg transition-colors text-xs font-medium shadow-sm"
                     title="Edit Provider"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
@@ -550,9 +627,9 @@ export function ProviderModelPanel() {
 
               {/* Models List */}
               {isExpanded && (
-                <div className="border-t border-slate-800/50 bg-slate-950/20 px-3 pb-3 pt-1">
+                <div className="border-t ui-border bg-[var(--bg-primary)] px-3 pb-3 pt-1">
                   {provider.models.length === 0 && !addingModelToProviderId && (
-                    <div className="pl-12 py-2 text-xs text-slate-600 italic">
+                    <div className="pl-12 py-2 text-xs text-[var(--text-muted)] italic">
                       No models linked to this provider.
                     </div>
                   )}
@@ -565,10 +642,10 @@ export function ProviderModelPanel() {
                     return (
                       <div
                         key={model.id}
-                        className="flex items-center gap-3 pl-12 py-2 group/model hover:bg-slate-800/30 rounded-lg transition-colors -ml-2 px-2"
+                        className="flex items-center gap-3 pl-12 py-2 group/model hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors -ml-2 px-2"
                       >
-                        <Bot className="w-3.5 h-3.5 text-indigo-400/70" />
-                        <span className="text-sm text-slate-300 font-mono flex-1">
+                        <Bot className="w-3.5 h-3.5 text-indigo-600/70 dark:text-indigo-400/70" />
+                        <span className="text-sm text-[var(--text-primary)] font-mono flex-1">
                           {model.modelName}
                         </span>
 
@@ -576,7 +653,7 @@ export function ProviderModelPanel() {
                           <button
                             type="button"
                             onClick={() => handleEditModel(model)}
-                            className="flex items-center gap-1 px-2 py-1 text-white bg-slate-600 hover:bg-slate-500 border border-slate-400 rounded transition-colors text-xs"
+                            className="flex items-center gap-1 px-2 py-1 text-[var(--text-primary)] bg-[var(--bg-tertiary)] hover:bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded transition-colors text-xs"
                           >
                             <Edit2 className="w-3 h-3" />
                             编辑

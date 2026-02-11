@@ -30,9 +30,15 @@ export const TaskNode = memo((props: NodeProps) => {
   const colorClass = statusColors[task.status]
   const textColorClass = statusTextColors[task.status]
 
+  // Add animation class for completed tasks
+  const animationClass =
+    task.status === 'completed'
+      ? 'shadow-[0_0_15px_rgba(16,185,129,0.4)] transition-all duration-500'
+      : ''
+
   return (
     <div
-      className={`min-w-[200px] max-w-[280px] rounded-xl border backdrop-blur transition-all ${colorClass}`}
+      className={`min-w-[200px] max-w-[280px] rounded-xl border backdrop-blur transition-all ${colorClass} ${animationClass}`}
     >
       <Handle type="target" position={Position.Top} className="!bg-slate-600" />
 

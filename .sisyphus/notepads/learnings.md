@@ -43,3 +43,9 @@
 - 统一错误展示格式可降低排障成本：`操作失败: ${error instanceof Error ? error.message : String(error)}`。
 - 涉及 `loadProviders` / `handleSaveProvider` / `handleDeleteProvider` / `handleSaveModel` / `handleDeleteModel`（额外补了 `handleEditProvider`）的失败提示。
 - 当前环境（Windows + Bun v1.3.5）LSP 工具有已知崩溃问题，`lsp_diagnostics` 无法执行；需升级 Bun 到 1.3.6+ 或切换 WSL。
+
+## 2026-02-11 - Session isolation and toolExecutionService test updates
+- DelegateEngine tests now must include `sessionId` in every `delegateTask` input; tests asserting session auto-create behavior should assert provided `sessionId` usage instead.
+- WorkforceEngine tests must pass `sessionId` as the second argument in `executeWorkflow(input, sessionId, options?)`.
+- In chat IPC tests, `toolExecutionService` mocks must implement `withAllowedTools` and `getToolDefinitions` in addition to `executeTool`.
+- Strategy-sensitive chat IPC tests should use a `direct-enhanced` agent (e.g., `luban`) when asserting direct-stream path behavior (`lastLLMConfig` assertions / direct mock streaming outputs).

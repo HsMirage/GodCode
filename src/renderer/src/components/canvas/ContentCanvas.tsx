@@ -67,9 +67,9 @@ export function ContentCanvas() {
 
   if (selectedArtifact) {
     return (
-      <div className="h-full flex flex-col bg-slate-900 border-l border-slate-800">
-        <div className="h-10 bg-slate-950 border-b border-slate-800 flex items-center justify-between px-3">
-          <div className="flex items-center gap-2 text-sm text-slate-400 overflow-hidden">
+      <div className="h-full flex flex-col ui-bg-panel border-l ui-border">
+        <div className="h-10 bg-[var(--bg-tertiary)] border-b ui-border flex items-center justify-between px-3">
+          <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)] overflow-hidden">
             <Globe className="w-4 h-4 flex-shrink-0" />
             <span className="truncate" title={selectedArtifact?.path}>
               {artifactName}
@@ -80,7 +80,7 @@ export function ContentCanvas() {
             <button
               type="button"
               onClick={handleCopy}
-              className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
+              className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/10 rounded-md transition-colors"
               title="Copy content"
             >
               <Copy className="w-4 h-4" />
@@ -88,7 +88,7 @@ export function ContentCanvas() {
             <button
               type="button"
               onClick={handleDownload}
-              className="p-1.5 text-gray-400 hover:text-white hover:bg-white/10 rounded-md transition-colors"
+              className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/10 rounded-md transition-colors"
               title="Download file"
             >
               <Download className="w-4 h-4" />
@@ -101,12 +101,12 @@ export function ContentCanvas() {
             >
               <Trash2 className="w-4 h-4" />
             </button>
-            <div className="w-px h-4 bg-slate-700 mx-1" />
+            <div className="w-px h-4 bg-[var(--border-secondary)] mx-1" />
 
             <button
               type="button"
               onClick={handleClose}
-              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-white/10 rounded-md transition-colors"
+              className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/10 rounded-md transition-colors"
               title="Close panel"
             >
               <X className="w-4 h-4" />
@@ -114,7 +114,7 @@ export function ContentCanvas() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-hidden relative bg-black/20">
+        <div className="flex-1 overflow-hidden relative bg-[var(--bg-primary)]">
           {renderContent(selectedArtifact)}
         </div>
       </div>
@@ -123,7 +123,7 @@ export function ContentCanvas() {
 
   if (!activeTab) {
     return (
-      <div className="h-full flex items-center justify-center bg-slate-950 border-l border-slate-800 text-slate-500">
+      <div className="h-full flex items-center justify-center ui-bg-panel border-l ui-border text-[var(--text-muted)]">
         <div className="flex flex-col items-center gap-2">
           <p>No active content</p>
         </div>
@@ -132,8 +132,8 @@ export function ContentCanvas() {
   }
 
   return (
-    <div className="flex flex-col h-full border-l border-slate-800 bg-slate-950">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-900/50">
+    <div className="flex flex-col h-full border-l ui-border ui-bg-panel">
+      <div className="flex items-center gap-2 px-3 py-2 border-b ui-border bg-[var(--bg-tertiary)]">
         <div className="flex-1 flex items-center gap-2 overflow-x-auto">
           {tabs.map(tab => (
             <div
@@ -147,8 +147,8 @@ export function ContentCanvas() {
               }}
               className={`flex items-center gap-2 px-3 py-1.5 rounded cursor-pointer ${
                 tab.id === activeTab.id
-                  ? 'bg-slate-800 text-sky-400'
-                  : 'bg-slate-900/50 text-slate-400 hover:bg-slate-800/50'
+                  ? 'bg-[var(--bg-secondary)] text-sky-700 dark:text-sky-400'
+                  : 'bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]'
               }`}
               onClick={() => switchTab(tab.id)}
             >
@@ -159,7 +159,7 @@ export function ContentCanvas() {
                   e.stopPropagation()
                   closeTab(tab.id)
                 }}
-                className="p-0.5 rounded hover:bg-slate-700"
+                className="p-0.5 rounded hover:bg-[var(--bg-tertiary)]"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -169,7 +169,7 @@ export function ContentCanvas() {
         <button
           type="button"
           onClick={handleClose}
-          className="p-1.5 rounded hover:bg-slate-800"
+          className="p-1.5 rounded hover:bg-[var(--bg-secondary)]"
           title="关闭"
         >
           <X className="w-4 h-4" />
@@ -186,7 +186,7 @@ export function ContentCanvas() {
 function renderContent(artifact: Artifact | null) {
   if (!artifact) {
     return (
-      <div className="flex-1 h-full flex items-center justify-center text-slate-500 bg-slate-900">
+      <div className="flex-1 h-full flex items-center justify-center text-[var(--text-muted)] bg-[var(--bg-primary)]">
         <div className="flex flex-col items-center gap-3">
           <Maximize2 className="w-12 h-12 opacity-20" />
           <div className="text-center">
@@ -205,7 +205,7 @@ function renderContent(artifact: Artifact | null) {
     !artifact.path.match(/\.(png|jpg|jpeg|gif|svg|webp)$/i)
   ) {
     return (
-      <div className="flex items-center justify-center h-full text-gray-500">
+      <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
         <div className="flex flex-col items-center gap-2">
           <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
           <span>Loading content...</span>

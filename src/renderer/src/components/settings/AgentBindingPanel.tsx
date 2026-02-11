@@ -18,6 +18,15 @@ import type { Model } from '@renderer/types/domain'
 
 type SubTab = 'primary' | 'subagent' | 'category'
 
+type ProviderWithModels = {
+  id: string
+  provider: string
+  label: string | null
+  baseURL: string
+  apiKeyMasked: string
+  models: Array<{ id: string; modelName: string; provider: string }>
+}
+
 const SUB_TABS: { id: SubTab; label: string; icon: React.ReactNode }[] = [
   { id: 'primary', label: '主要智能体', icon: <Bot className="w-4 h-4" /> },
   { id: 'subagent', label: '辅助智能体', icon: <Users className="w-4 h-4" /> },
@@ -29,6 +38,7 @@ export function AgentBindingPanel() {
   const [agents, setAgents] = useState<AgentBindingData[]>([])
   const [categories, setCategories] = useState<CategoryBindingData[]>([])
   const [models, setModels] = useState<Model[]>([])
+  const [providerNameByModelId, setProviderNameByModelId] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [defaultModelId, setDefaultModelId] = useState<string | null>(null)
   const [isDefaultModelDropdownOpen, setIsDefaultModelDropdownOpen] = useState(false)
@@ -70,16 +80,19 @@ export function AgentBindingPanel() {
     }
 
     try {
-      const [agentResult, categoryResult, modelResult, defaultModelResult] = await Promise.allSettled([
+      const [agentResult, categoryResult, modelResult, providerResult, defaultModelResult] =
+        await Promise.allSettled([
         window.codeall.invoke('agent-binding:list') as Promise<AgentBindingData[]>,
         window.codeall.invoke('category-binding:list') as Promise<CategoryBindingData[]>,
         window.codeall.invoke('model:list') as Promise<Model[]>,
+        window.codeall.invoke('keychain:list-with-models') as Promise<ProviderWithModels[]>,
         window.codeall.invoke('setting:get', 'defaultModelId') as Promise<string | null>
       ])
 
       const agentList = agentResult.status === 'fulfilled' ? agentResult.value : []
       const categoryList = categoryResult.status === 'fulfilled' ? categoryResult.value : []
       const modelList = modelResult.status === 'fulfilled' ? modelResult.value : []
+      const providerList = providerResult.status === 'fulfilled' ? providerResult.value : []
       const defaultModel = defaultModelResult.status === 'fulfilled' ? defaultModelResult.value : null
 
       if (agentResult.status === 'rejected') {
@@ -90,6 +103,9 @@ export function AgentBindingPanel() {
       }
       if (modelResult.status === 'rejected') {
         console.error('Failed to load models:', modelResult.reason)
+      }
+      if (providerResult.status === 'rejected') {
+        console.error('Failed to load providers:', providerResult.reason)
       }
       if (defaultModelResult.status === 'rejected') {
         console.error('Failed to load default model setting:', defaultModelResult.reason)
@@ -133,6 +149,16 @@ export function AgentBindingPanel() {
       setCategories(mergedCategories)
       setModels(modelList)
       setDefaultModelId(defaultModel)
+
+      // Map modelId -> provider display name (prefer ApiKey label).
+      const map: Record<string, string> = {}
+      for (const p of providerList) {
+        const providerName = p.label?.trim() ? p.label.trim() : p.provider
+        for (const m of p.models || []) {
+          map[m.id] = providerName
+        }
+      }
+      setProviderNameByModelId(map)
     } catch (error) {
       console.error('Failed to load binding data:', error)
     } finally {
@@ -201,6 +227,9 @@ export function AgentBindingPanel() {
   }
 
   const defaultModel = models.find(m => m.id === defaultModelId)
+  const defaultModelProvider = defaultModel
+    ? providerNameByModelId[defaultModel.id] ?? defaultModel.provider
+    : null
 
   const primaryAgents = agents.filter(a => a.agentType === 'primary')
   const subagents = agents.filter(a => a.agentType === 'subagent')
@@ -208,7 +237,7 @@ export function AgentBindingPanel() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-slate-500 text-sm">加载中...</div>
+        <div className="text-[var(--text-muted)] text-sm">加载中...</div>
       </div>
     )
   }
@@ -216,15 +245,15 @@ export function AgentBindingPanel() {
   return (
     <div className="space-y-6">
       {/* Default Model Setting */}
-      <div className="bg-slate-900/50 border border-slate-800/70 rounded-xl p-4">
+      <div className="bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-xl p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-indigo-600/20 flex items-center justify-center">
-              <Settings className="w-5 h-5 text-indigo-400" />
+            <div className="w-10 h-10 rounded-lg bg-indigo-500/10 flex items-center justify-center border border-indigo-500/15">
+              <Settings className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
             </div>
             <div>
-              <h4 className="text-sm font-medium text-slate-200">默认模型</h4>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <h4 className="text-sm font-medium text-[var(--text-primary)]">默认模型</h4>
+              <p className="text-xs text-[var(--text-muted)] mt-0.5">
                 未单独配置模型的智能体和任务类别将使用此模型
               </p>
             </div>
@@ -233,19 +262,19 @@ export function AgentBindingPanel() {
             <button
               type="button"
               onClick={() => setIsDefaultModelDropdownOpen(!isDefaultModelDropdownOpen)}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 hover:bg-slate-700 transition-colors min-w-[200px] justify-between"
+              className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg text-sm text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors min-w-[200px] justify-between"
             >
-              <span className={defaultModel ? 'text-slate-200' : 'text-slate-500'}>
-                {defaultModel?.modelName ?? '请选择默认模型'}
+              <span className={defaultModel ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}>
+                {defaultModel ? `${defaultModel.modelName} (${defaultModelProvider})` : '请选择默认模型'}
               </span>
-              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isDefaultModelDropdownOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown className={`w-4 h-4 text-[var(--text-secondary)] transition-transform ${isDefaultModelDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
             {isDefaultModelDropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 w-72 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 max-h-64 overflow-y-auto">
+              <div className="absolute right-0 top-full mt-1 w-72 bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded-lg shadow-xl z-50 max-h-64 overflow-y-auto">
                 <button
                   type="button"
                   onClick={() => handleUpdateDefaultModel(null)}
-                  className={`w-full px-4 py-2.5 text-left text-sm hover:bg-slate-700 transition-colors ${!defaultModelId ? 'bg-indigo-600/20 text-indigo-300' : 'text-slate-400'}`}
+                  className={`w-full px-4 py-2.5 text-left text-sm hover:bg-[var(--bg-tertiary)] transition-colors ${!defaultModelId ? 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300' : 'text-[var(--text-secondary)]'}`}
                 >
                   无（使用各智能体默认配置）
                 </button>
@@ -254,16 +283,18 @@ export function AgentBindingPanel() {
                     key={model.id}
                     type="button"
                     onClick={() => handleUpdateDefaultModel(model.id)}
-                    className={`w-full px-4 py-2.5 text-left text-sm hover:bg-slate-700 transition-colors ${model.id === defaultModelId ? 'bg-indigo-600/20 text-indigo-300' : 'text-slate-200'}`}
+                    className={`w-full px-4 py-2.5 text-left text-sm hover:bg-[var(--bg-tertiary)] transition-colors ${model.id === defaultModelId ? 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300' : 'text-[var(--text-primary)]'}`}
                   >
                     <span className="font-mono">{model.modelName}</span>
                     {model.provider && (
-                      <span className="text-slate-500 text-xs ml-2">({model.provider})</span>
+                      <span className="text-[var(--text-muted)] text-xs ml-2">
+                        ({providerNameByModelId[model.id] ?? model.provider})
+                      </span>
                     )}
                   </button>
                 ))}
                 {models.length === 0 && (
-                  <div className="px-4 py-3 text-sm text-slate-500 text-center">
+                  <div className="px-4 py-3 text-sm text-[var(--text-muted)] text-center">
                     暂无可用模型，请先在 API服务商 中添加
                   </div>
                 )}
@@ -274,7 +305,7 @@ export function AgentBindingPanel() {
       </div>
 
       {/* Sub tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-800/50 pb-3">
+      <div className="flex items-center gap-2 border-b ui-border pb-3">
         {SUB_TABS.map(tab => (
           <button
             key={tab.id}
@@ -283,8 +314,8 @@ export function AgentBindingPanel() {
             className={[
               'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
               activeTab === tab.id
-                ? 'bg-slate-800/80 text-white'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]'
+                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]'
             ].join(' ')}
           >
             {tab.icon}
@@ -297,7 +328,7 @@ export function AgentBindingPanel() {
       <div className="space-y-3">
         {activeTab === 'primary' && (
           <>
-            <p className="text-xs text-slate-500 mb-4">
+            <p className="text-xs text-[var(--text-muted)] mb-4">
               主要智能体负责核心任务编排和执行，可以调用其他智能体协同工作
             </p>
             {primaryAgents.map(agent => (
@@ -305,12 +336,13 @@ export function AgentBindingPanel() {
                 key={agent.agentCode}
                 agent={agent}
                 models={models}
+                providerNameByModelId={providerNameByModelId}
                 onUpdate={handleUpdateAgent}
                 onReset={handleResetAgent}
               />
             ))}
             {primaryAgents.length === 0 && (
-              <div className="text-center py-8 text-slate-500 text-sm border border-dashed border-slate-800 rounded-xl">
+              <div className="text-center py-8 text-[var(--text-muted)] text-sm border border-dashed border-[var(--border-primary)] rounded-xl">
                 暂无主要智能体配置
               </div>
             )}
@@ -319,7 +351,7 @@ export function AgentBindingPanel() {
 
         {activeTab === 'subagent' && (
           <>
-            <p className="text-xs text-slate-500 mb-4">
+            <p className="text-xs text-[var(--text-muted)] mb-4">
               辅助智能体专注于特定任务，如代码探索、文档查找、架构咨询等
             </p>
             {subagents.map(agent => (
@@ -327,12 +359,13 @@ export function AgentBindingPanel() {
                 key={agent.agentCode}
                 agent={agent}
                 models={models}
+                providerNameByModelId={providerNameByModelId}
                 onUpdate={handleUpdateAgent}
                 onReset={handleResetAgent}
               />
             ))}
             {subagents.length === 0 && (
-              <div className="text-center py-8 text-slate-500 text-sm border border-dashed border-slate-800 rounded-xl">
+              <div className="text-center py-8 text-[var(--text-muted)] text-sm border border-dashed border-[var(--border-primary)] rounded-xl">
                 暂无辅助智能体配置
               </div>
             )}
@@ -341,7 +374,7 @@ export function AgentBindingPanel() {
 
         {activeTab === 'category' && (
           <>
-            <p className="text-xs text-slate-500 mb-4">
+            <p className="text-xs text-[var(--text-muted)] mb-4">
               任务类别定义了不同类型任务的默认处理方式和模型配置
             </p>
             {categories.map(category => (
@@ -349,12 +382,13 @@ export function AgentBindingPanel() {
                 key={category.categoryCode}
                 category={category}
                 models={models}
+                providerNameByModelId={providerNameByModelId}
                 onUpdate={handleUpdateCategory}
                 onReset={handleResetCategory}
               />
             ))}
             {categories.length === 0 && (
-              <div className="text-center py-8 text-slate-500 text-sm border border-dashed border-slate-800 rounded-xl">
+              <div className="text-center py-8 text-[var(--text-muted)] text-sm border border-dashed border-[var(--border-primary)] rounded-xl">
                 暂无任务类别配置
               </div>
             )}

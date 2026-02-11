@@ -3,8 +3,83 @@
 @tailwind utilities;
 
 @layer base {
+  /* Dark theme (default) */
+  :root,
+  .dark {
+    --bg-primary: theme('colors.slate.950');
+    --bg-secondary: theme('colors.slate.900');
+    --bg-tertiary: theme('colors.slate.800');
+    --text-primary: theme('colors.slate.100');
+    --text-secondary: theme('colors.slate.400');
+    --text-muted: theme('colors.slate.500');
+    --border-primary: theme('colors.slate.800');
+    --border-secondary: theme('colors.slate.700');
+    --accent-primary: theme('colors.indigo.500');
+    --accent-secondary: theme('colors.sky.500');
+  }
+
+  /* Light theme */
+  .light {
+    --bg-primary: theme('colors.gray.50');
+    --bg-secondary: theme('colors.white');
+    --bg-tertiary: theme('colors.gray.100');
+    --text-primary: theme('colors.gray.900');
+    --text-secondary: theme('colors.gray.600');
+    --text-muted: theme('colors.gray.400');
+    --border-primary: theme('colors.gray.200');
+    --border-secondary: theme('colors.gray.300');
+    --accent-primary: theme('colors.indigo.600');
+    --accent-secondary: theme('colors.sky.600');
+  }
+
+  /* Keep native UI (scrollbars, form controls) consistent with theme. */
+  .dark {
+    color-scheme: dark;
+  }
+
+  .light {
+    color-scheme: light;
+  }
+
+  html,
   body {
-    @apply bg-slate-950 text-slate-100;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+  }
+}
+
+@layer components {
+  /* Theme-aware semantic helpers (avoid hard-coded slate/gray in UI components). */
+  .ui-bg-app {
+    background-color: var(--bg-primary);
+  }
+
+  .ui-bg-panel {
+    background-color: var(--bg-secondary);
+  }
+
+  .ui-bg-elev {
+    background-color: var(--bg-tertiary);
+  }
+
+  .ui-text-primary {
+    color: var(--text-primary);
+  }
+
+  .ui-text-secondary {
+    color: var(--text-secondary);
+  }
+
+  .ui-text-muted {
+    color: var(--text-muted);
+  }
+
+  .ui-border {
+    border-color: var(--border-primary);
+  }
+
+  .ui-border-secondary {
+    border-color: var(--border-secondary);
   }
 }
 

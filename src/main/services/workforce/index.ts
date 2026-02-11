@@ -13,5 +13,23 @@
 
 export { WorkforceEngine } from './workforce-engine'
 export { workflowEvents, WorkflowEventEmitter } from './events'
-export type { SubTask, WorkflowResult } from './workforce-engine'
+export type { SubTask, WorkflowResult, WorkflowOptions } from './workforce-engine'
 export type { WorkflowEvent } from './events'
+
+// Retry mechanism exports
+export {
+  TaskRetryService,
+  getTaskRetryService,
+  classifyError,
+  isRetryable,
+  calculateBackoffDelay,
+  createRetryState,
+  RetryableErrorType,
+  NonRetryableErrorType
+} from './retry'
+export type {
+  RetryConfig,
+  RetryState,
+  RetryResult,
+  ErrorClassification
+} from './retry'
