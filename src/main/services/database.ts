@@ -95,6 +95,46 @@ function getBinaryPaths(): { pg_ctl: string; initdb: string; postgres: string } 
   }
 }
 
+function buildPostgresEnv(options: {
+  binPath: string
+  libDir: string
+  shareDir: string
+  password?: string
+}): NodeJS.ProcessEnv {
+  const pathValue = process.env.PATH
+    ? `${options.binPath}${path.delimiter}${process.env.PATH}`
+    : options.binPath
+
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PATH: pathValue,
+    PGLIBDIR: options.libDir,
+    PGSHAREDIR: options.shareDir,
+    LC_ALL: 'POSIX',
+    LC_COLLATE: 'POSIX',
+    LC_CTYPE: 'POSIX',
+    LC_MESSAGES: 'POSIX',
+    LANG: 'POSIX',
+    LANGUAGE: 'en'
+  }
+
+  if (options.password) {
+    env.PGPASSWORD = options.password
+  }
+
+  if (process.platform === 'darwin') {
+    env.DYLD_LIBRARY_PATH = process.env.DYLD_LIBRARY_PATH
+      ? `${options.libDir}${path.delimiter}${process.env.DYLD_LIBRARY_PATH}`
+      : options.libDir
+  } else if (process.platform === 'linux') {
+    env.LD_LIBRARY_PATH = process.env.LD_LIBRARY_PATH
+      ? `${options.libDir}${path.delimiter}${process.env.LD_LIBRARY_PATH}`
+      : options.libDir
+  }
+
+  return env
+}
+
 /**
  * Custom PostgreSQL manager that works in both development and packaged environments.
  * This bypasses embedded-postgres library's path resolution issues in Electron.
@@ -225,22 +265,7 @@ class PostgresManager {
       console.log('[PostgresManager] PGLIBDIR:', libDir)
       console.log('[PostgresManager] PGSHAREDIR:', shareDir)
 
-      // Force POSIX locale to completely avoid Chinese locale issues on Windows
-      // Remove all locale-related env vars and set to POSIX
-      const cleanEnv = {
-        PATH: `${binPath};${process.env.PATH}`,
-        SYSTEMROOT: process.env.SYSTEMROOT,
-        TEMP: process.env.TEMP,
-        TMP: process.env.TMP,
-        PGLIBDIR: libDir,
-        PGSHAREDIR: shareDir,
-        LC_ALL: 'POSIX',
-        LC_COLLATE: 'POSIX',
-        LC_CTYPE: 'POSIX',
-        LC_MESSAGES: 'POSIX',
-        LANG: 'POSIX',
-        LANGUAGE: 'en'
-      }
+      const cleanEnv = buildPostgresEnv({ binPath, libDir, shareDir })
 
       const proc = spawn(this.binaries.initdb, args, {
         env: cleanEnv,
@@ -319,6 +344,10 @@ class PostgresManager {
 
     // Clean up stale log file to prevent permission issues
     const logPath = path.join(this.dbPath, 'postgres.log')
+
+    this.normalizeConfigForCurrentPlatform()
+    this.normalizeDataDirPermissions()
+
     if (fs.existsSync(logPath)) {
       try {
         fs.unlinkSync(logPath)
@@ -346,22 +375,7 @@ class PostgresManager {
       const libDir = path.join(nativePath, 'lib')
       const shareDir = path.join(nativePath, 'share')
 
-      // Use same clean environment as initdb
-      const cleanEnv = {
-        PATH: `${binPath};${process.env.PATH}`,
-        SYSTEMROOT: process.env.SYSTEMROOT,
-        TEMP: process.env.TEMP,
-        TMP: process.env.TMP,
-        PGLIBDIR: libDir,
-        PGSHAREDIR: shareDir,
-        PGPASSWORD: this.password,
-        LC_ALL: 'POSIX',
-        LC_COLLATE: 'POSIX',
-        LC_CTYPE: 'POSIX',
-        LC_MESSAGES: 'POSIX',
-        LANG: 'POSIX',
-        LANGUAGE: 'en'
-      }
+      const cleanEnv = buildPostgresEnv({ binPath, libDir, shareDir, password: this.password })
 
       const proc = spawn(this.binaries.pg_ctl, args, {
         env: cleanEnv,
@@ -442,13 +456,55 @@ class PostgresManager {
     })
   }
 
+  private normalizeConfigForCurrentPlatform(): void {
+    if (process.platform === 'win32') return
+
+    const confPath = path.join(this.dbPath, 'postgresql.conf')
+    if (!fs.existsSync(confPath)) return
+
+    try {
+      const content = fs.readFileSync(confPath, 'utf-8')
+      const updated = content.replace(
+        /^\s*dynamic_shared_memory_type\s*=\s*windows\b.*$/m,
+        'dynamic_shared_memory_type = posix'
+      )
+
+      if (updated !== content) {
+        fs.writeFileSync(confPath, updated, 'utf-8')
+        console.log(
+          '[PostgresManager] Updated postgresql.conf for non-Windows platform: dynamic_shared_memory_type=posix'
+        )
+      }
+    } catch (error) {
+      console.warn('[PostgresManager] Failed to normalize postgresql.conf:', error)
+    }
+  }
+
+  private normalizeDataDirPermissions(): void {
+    if (process.platform === 'win32') return
+
+    try {
+      if (fs.existsSync(this.dbPath)) {
+        fs.chmodSync(this.dbPath, 0o700)
+      }
+    } catch (error) {
+      console.warn('[PostgresManager] Failed to normalize data dir permissions:', error)
+    }
+  }
+
   async stop(): Promise<void> {
     console.log('[PostgresManager] Stopping PostgreSQL...')
 
     return new Promise((resolve, reject) => {
       const args = ['-D', this.dbPath, 'stop', '-m', 'fast']
+      const binPath = path.dirname(this.binaries.pg_ctl)
+      const nativePath = path.dirname(binPath)
+      const libDir = path.join(nativePath, 'lib')
+      const shareDir = path.join(nativePath, 'share')
+      const cleanEnv = buildPostgresEnv({ binPath, libDir, shareDir })
 
       const proc = spawn(this.binaries.pg_ctl, args, {
+        env: cleanEnv,
         stdio: ['ignore', 'pipe', 'pipe']
       })
 

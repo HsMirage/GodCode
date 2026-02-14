@@ -1,20 +1,45 @@
-/**
+/**		      	    				  	  	  	 		 		       	 	 	         	 	    					 
  * Halo - Electron Main Process
  * The main entry point for the Electron application
  */
 
-// Handle EPIPE errors gracefully
-// These occur when SDK child processes are terminated during app shutdown
-// Especially common in E2E tests when app is forcefully closed
+// ========================================
+// LOGGING INITIALIZATION (must be first)
+// ========================================
+// Initialize electron-log before any other code to capture all logs
+// This replaces console.log/warn/error globally with electron-log
+// Logs are written to: ~/Library/Logs/Halo/ (macOS), %USERPROFILE%\AppData\Roaming\Halo\logs (Windows)
+import log from 'electron-log/main.js'
+
+// Initialize for renderer process support (IPC transport)
+log.initialize()
+
+// Configure log levels (industry standard)
+// - Production: 'info' (logs info/warn/error, skips debug/silly)
+// - Development: 'debug' (more verbose)
+const isDev = process.env.NODE_ENV === 'development'
+log.transports.file.level = 'info'           // Always log info+ to file
+log.transports.console.level = isDev ? 'debug' : 'info'
+log.transports.file.maxSize = 5 * 1024 * 1024 // 5MB per file, auto-rotate
+
+// Handle EPIPE errors gracefully (must be registered BEFORE electron-log's errorHandler)
+// electron-log's startCatching() registers its own uncaughtException handler that shows
+// an Electron error dialog. By registering our EPIPE filter first, we intercept EPIPE
+// errors before they reach electron-log's handler, preventing unwanted error popups.
 process.on('uncaughtException', (error) => {
-  // Ignore EPIPE errors during shutdown (common with SDK child processes)
   if (error.message?.includes('EPIPE')) {
-    console.warn('[Main] Ignored EPIPE error during shutdown')
+    log.warn('[Main] Ignored EPIPE error during shutdown')
     return
   }
-  // Re-throw other errors to show the default Electron error dialog
-  throw error
+  // Non-EPIPE errors: fall through to electron-log's handler (registered below via startCatching).
+  // Node.js calls all registered uncaughtException handlers in order — no need to re-throw.
 })
+
+// Catch unhandled errors and log them (after EPIPE filter is in place)
+log.errorHandler.startCatching()
+
+// Replace global console with electron-log (performance: direct replacement, no wrapper)
+Object.assign(console, log.functions)
 
 // Fix PATH for macOS GUI apps
 // GUI apps don't inherit shell environment variables (.zshrc, .bash_profile, etc.)
@@ -38,8 +63,9 @@ app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
 
 // Single instance lock: Prevent multiple instances of the application
 // Must be called before app.whenReady()
-// Skip in development mode to allow restart without killing process
-const gotTheLock = !app.isPackaged ? true : app.requestSingleInstanceLock()
+// Skip in development mode and E2E tests to allow multiple instances
+const gotTheLock =
+  !app.isPackaged || process.env.HALO_E2E_TEST ? true : app.requestSingleInstanceLock()
 
 if (!gotTheLock) {
   // Another instance is already running, exit immediately
@@ -52,22 +78,25 @@ if (!gotTheLock) {
 // Note: This event only fires on the primary instance
 app.on('second-instance', () => {
   // Focus the existing window when a second instance is launched
-  if (mainWindow) {
-    // Restore from hidden state if needed
-    if (!mainWindow.isVisible()) {
-      mainWindow.show()
-    }
-    // Restore from minimized state
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore()
-    }
-    // Bring to front
-    mainWindow.focus()
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
+  }
 
-    // On macOS, also show in dock
-    if (process.platform === 'darwin') {
-      app.dock?.show()
-    }
+  // Restore from hidden state if needed
+  if (!mainWindow.isVisible()) {
+    mainWindow.show()
+  }
+  // Restore from minimized state
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  // Bring to front
+  mainWindow.focus()
+
+  // On macOS, also show in dock
+  if (process.platform === 'darwin') {
+    app.dock?.show()
   }
 })
 
@@ -85,6 +114,7 @@ import { manualCheckForUpdates } from './services/updater.service'
 import { initAnalytics } from './services/analytics'
 import { registerProtocols } from './services/protocol.service'
 import { setMainWindow } from './services/window.service'
+import { initInstanceId, shutdownHealthSystem, onRendererCrash, onRendererUnresponsive } from './services/health'
 
 let mainWindow: BrowserWindow | null = null
 let isAppQuitting = false
@@ -286,10 +316,12 @@ function createWindow(): void {
   })
 
   mainWindow.on('unresponsive', () => {
+    onRendererUnresponsive()
     recoverRenderer('unresponsive')
   })
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    onRendererCrash({ reason: details.reason })
     recoverRenderer(`render-process-gone:${details.reason}`)
   })
 
@@ -313,8 +345,8 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // Open DevTools in development
-  if (is.dev) {
+  // Open DevTools in development (skip during E2E to avoid viewport interference)
+  if (is.dev && !process.env.HALO_E2E_TEST) {
     mainWindow.webContents.openDevTools()
   }
 }
@@ -334,6 +366,10 @@ app.whenReady().then(async () => {
 
   // Initialize app data directories
   await initializeApp()
+
+  // Initialize health system instance ID (synchronous, <1ms)
+  // Must be called before any subprocess is spawned
+  initInstanceId()
 
   // Create application menu
   createAppMenu()
@@ -380,28 +416,44 @@ app.whenReady().then(async () => {
 })
 
 let hasShutdown = false
+const SHUTDOWN_TIMEOUT_MS = 5000
 async function shutdownServices(): Promise<void> {
   if (hasShutdown) {
     return
   }
   hasShutdown = true
+
+  // Shutdown health system first (marks clean exit)
+  shutdownHealthSystem()
+
   await disableRemoteAccess().catch(console.error)
   await stopOpenAICompatRouter().catch(console.error)
   await cleanupExtendedServices().catch(console.error)
 }
 
+async function shutdownServicesWithTimeout(timeoutMs: number): Promise<void> {
+  const shutdownPromise = shutdownServices().catch(console.error)
+  await Promise.race([
+    shutdownPromise,
+    new Promise<void>((resolve) => {
+      setTimeout(() => {
+        console.warn(`[Main] Shutdown timeout after ${timeoutMs}ms, forcing quit`)
+        resolve()
+      }, timeoutMs)
+    })
+  ])
+}
+
 app.on('before-quit', () => {
   isAppQuitting = true
-  shutdownServices().catch(console.error)
+  shutdownServicesWithTimeout(SHUTDOWN_TIMEOUT_MS).catch(console.error)
 })
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    shutdownServices()
+    shutdownServicesWithTimeout(SHUTDOWN_TIMEOUT_MS)
       .catch(console.error)
-      .finally(() => {
-        app.quit()
-      })
+      .finally(() => app.quit())
   }
 })
 

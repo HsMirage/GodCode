@@ -21,7 +21,7 @@ interface AgentWorkViewerProps {
 }
 
 export function AgentWorkViewer({ agentId, className }: AgentWorkViewerProps) {
-  const { agents, workLogs, addWorkLog } = useAgentStore()
+  const { agents, workLogs } = useAgentStore()
   const agent = agents.find(a => a.id === agentId)
   const logs = workLogs[agentId] || []
 
@@ -52,8 +52,6 @@ export function AgentWorkViewer({ agentId, className }: AgentWorkViewerProps) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [logs.length, autoScroll, isPaused])
-
-  useEffect(() => {}, [])
 
   if (!agent) {
     return (

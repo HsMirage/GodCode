@@ -8,12 +8,14 @@
  *   HALO_TEST_API_KEY   - API key for testing (required for chat tests)
  *   HALO_TEST_API_URL   - API URL (default: https://api.anthropic.com)
  *   HALO_TEST_MODEL     - Model to use (default: claude-haiku-4-5-20251001)
+ *   HALO_TEST_PROVIDER  - Provider ID (default: anthropic)
  */
 
 import { test as base, ElectronApplication, Page } from '@playwright/test'
 import { _electron as electron } from 'playwright'
 import path from 'path'
 import fs from 'fs'
+import crypto from 'crypto'
 import { fileURLToPath } from 'url'
 
 // ESM compatibility: __dirname is not available in ES modules
@@ -22,8 +24,23 @@ const __dirname = path.dirname(__filename)
 
 // Test configuration from environment variables
 const TEST_API_KEY = process.env.HALO_TEST_API_KEY || ''
-const TEST_API_URL = process.env.HALO_TEST_API_URL || 'https://api.anthropic.com'
-const TEST_MODEL = process.env.HALO_TEST_MODEL || 'claude-haiku-4-5-20251001'
+const TEST_API_URL = process.env.HALO_TEST_API_URL || ''
+const TEST_MODEL = process.env.HALO_TEST_MODEL || ''
+const TEST_PROVIDER = process.env.HALO_TEST_PROVIDER || ''
+const TEST_OAUTH_SOURCE = process.env.HALO_TEST_OAUTH_SOURCE || ''
+
+// Validate: if API key is set, the other three must also be set
+if (TEST_API_KEY && (!TEST_API_URL || !TEST_MODEL || !TEST_PROVIDER)) {
+  const missing = [
+    !TEST_API_URL && 'HALO_TEST_API_URL',
+    !TEST_MODEL && 'HALO_TEST_MODEL',
+    !TEST_PROVIDER && 'HALO_TEST_PROVIDER'
+  ].filter(Boolean)
+  throw new Error(
+    `HALO_TEST_API_KEY is set but missing: ${missing.join(', ')}. ` +
+    'All four env vars must be configured together in .env.local'
+  )
+}
 
 // Types for the fixture
 interface ElectronFixtures {
@@ -32,36 +49,56 @@ interface ElectronFixtures {
 }
 
 /**
- * Get the path to the built application
+ * Get the app entry point path.
+ * Requires "npm run build" to produce out/main/index.mjs.
  */
-function getAppPath(): string {
+function getAppEntryPath(): string {
   const projectRoot = path.resolve(__dirname, '../../..')
+  const appEntryPath = path.join(projectRoot, 'out/main/index.mjs')
 
-  if (process.platform === 'darwin') {
-    // macOS: Check for arm64 first
-    const arm64Path = path.join(projectRoot, 'dist/mac-arm64/Halo.app/Contents/MacOS/Halo')
-    const x64Path = path.join(projectRoot, 'dist/mac/Halo.app/Contents/MacOS/Halo')
+  if (!fs.existsSync(appEntryPath)) {
+    throw new Error('Built app not found. Run "npm run build" first.')
+  }
 
-    if (fs.existsSync(arm64Path)) {
-      return arm64Path
-    }
-    if (fs.existsSync(x64Path)) {
-      return x64Path
+  // Ensure product.json exists in out/main/ so auth-loader can find providers.
+  // In E2E, app.getAppPath() returns out/main/, not project root.
+  ensureProductJson(projectRoot)
+
+  return appEntryPath
+}
+
+/**
+ * Copy product.json to out/main/ with absolute provider paths.
+ * This is needed because app.getAppPath() returns out/main/ in E2E,
+ * and auth-loader resolves provider paths relative to product.json location.
+ */
+function ensureProductJson(projectRoot: string): void {
+  const srcProductJson = path.join(projectRoot, 'product.json')
+  const destDir = path.join(projectRoot, 'out/main')
+  const destProductJson = path.join(destDir, 'product.json')
+
+  if (!fs.existsSync(srcProductJson)) return
+
+  try {
+    const product = JSON.parse(fs.readFileSync(srcProductJson, 'utf-8'))
+
+    // Rewrite provider paths to be relative to out/main/ (where product.json will live)
+    // auth-loader resolves paths via: join(dirname(productJsonPath), cleanPath)
+    if (product.authProviders) {
+      for (const provider of product.authProviders) {
+        if (provider.path && provider.path.startsWith('./')) {
+          // Original path is relative to project root, e.g. "./halo-local/dist/..."
+          // We need it relative to out/main/, e.g. "../../halo-local/dist/..."
+          const absolutePath = path.resolve(projectRoot, provider.path)
+          provider.path = path.relative(destDir, absolutePath)
+        }
+      }
     }
 
-    throw new Error('Built app not found. Run "npm run build && npm run build:mac" first.')
-  } else if (process.platform === 'win32') {
-    const winPath = path.join(projectRoot, 'dist/win-unpacked/Halo.exe')
-    if (fs.existsSync(winPath)) {
-      return winPath
-    }
-    throw new Error('Built app not found. Run "npm run build && npm run build:win" first.')
-  } else {
-    const linuxPath = path.join(projectRoot, 'dist/linux-unpacked/halo')
-    if (fs.existsSync(linuxPath)) {
-      return linuxPath
-    }
-    throw new Error('Built app not found. Run "npm run build && npm run build:linux" first.')
+    fs.writeFileSync(destProductJson, JSON.stringify(product, null, 2))
+    console.log(`[E2E] Wrote product.json to out/main/ with adjusted provider paths`)
+  } catch (err) {
+    console.warn('[E2E] Failed to copy product.json:', err)
   }
 }
 
@@ -90,13 +127,54 @@ function createTestConfigDir(appPath: string): string {
   fs.mkdirSync(path.join(tempDir, 'artifacts'), { recursive: true })
   fs.mkdirSync(path.join(tempDir, 'conversations'), { recursive: true })
 
-  // Create config.json with API credentials from environment variables
-  const config = {
-    api: {
-      provider: 'anthropic',
-      apiKey: TEST_API_KEY,
+  // Build v2 aiSources config directly (skip legacy migration at startup)
+  const sourceId = crypto.randomUUID()
+  const now = new Date().toISOString()
+
+  // Build sources array from environment variables
+  const sources = []
+
+  // Add API key source if configured
+  if (TEST_API_KEY) {
+    sources.push({
+      id: sourceId,
+      name: 'E2E Test Source',
+      provider: TEST_PROVIDER,
+      authType: 'api-key',
       apiUrl: TEST_API_URL,
-      model: TEST_MODEL
+      apiKey: TEST_API_KEY,
+      model: TEST_MODEL,
+      availableModels: [{ id: TEST_MODEL, name: TEST_MODEL }],
+      createdAt: now,
+      updatedAt: now
+    })
+  }
+
+  // Add OAuth source if configured
+  if (TEST_OAUTH_SOURCE) {
+    try {
+      const oauthSource = JSON.parse(TEST_OAUTH_SOURCE)
+      sources.push(oauthSource)
+      console.log(`[E2E] Loaded OAuth source: ${oauthSource.provider}`)
+    } catch (err) {
+      console.warn('[E2E] Failed to parse HALO_TEST_OAUTH_SOURCE:', err.message)
+    }
+  }
+
+  // Create config.json with both legacy api field and v2 aiSources format
+  const config = {
+    // Legacy api field (still required by HaloConfig for backward compatibility)
+    api: {
+      provider: TEST_PROVIDER || 'anthropic',
+      apiKey: TEST_API_KEY,
+      apiUrl: TEST_API_URL || 'https://api.anthropic.com',
+      model: TEST_MODEL || 'claude-haiku-4-5-20251001'
+    },
+    // v2 aiSources format (used by actual app logic)
+    aiSources: {
+      version: 2,
+      currentId: sources.length > 0 ? sources[0].id : null,
+      sources
     },
     permissions: {
       fileAccess: 'allow',
@@ -166,21 +244,29 @@ function cleanupTestConfigDir(testDir: string): void {
 export const test = base.extend<ElectronFixtures>({
   // Electron application instance
   electronApp: async ({}, use) => {
-    const appPath = getAppPath()
-    const testConfigDir = createTestConfigDir(appPath)
+    const appEntryPath = getAppEntryPath()
+    const testConfigDir = createTestConfigDir(appEntryPath)
 
-    console.log(`[E2E] Launching app: ${appPath}`)
+    console.log(`[E2E] App entry: ${appEntryPath}`)
     console.log(`[E2E] Test config dir: ${testConfigDir}`)
 
-    // Launch Electron app with test environment
+    // Build a clean env without ELECTRON_RUN_AS_NODE.
+    // Halo sets ELECTRON_RUN_AS_NODE=1 for its child processes (Claude Agent SDK),
+    // which forces Electron into plain Node.js mode. E2E tests inherit this env var,
+    // but Playwright needs Electron in full app mode to connect via CDP.
+    const { ELECTRON_RUN_AS_NODE: _, ...cleanEnv } = process.env
+
     const app = await electron.launch({
-      executablePath: appPath,
-      args: [],
+      args: [appEntryPath],
       env: {
-        ...process.env,
+        ...cleanEnv,
         // Use test-specific config directory
         HOME: testConfigDir,
         USERPROFILE: testConfigDir,
+        // Point app config to the test .halo dir directly.
+        // config.service.ts checks HALO_DATA_DIR first (highest priority),
+        // bypassing the .halo vs .halo-dev dev-mode logic.
+        HALO_DATA_DIR: path.join(testConfigDir, '.halo'),
         // Disable hardware acceleration for CI
         ELECTRON_DISABLE_GPU: '1',
         // Mark as E2E test

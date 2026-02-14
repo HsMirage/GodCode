@@ -43,6 +43,8 @@ export enum NonRetryableErrorType {
   PAYLOAD_TOO_LARGE = 'PAYLOAD_TOO_LARGE',
   /** Content policy violation */
   CONTENT_POLICY = 'CONTENT_POLICY',
+  /** User-initiated cancellation/abort */
+  CANCELLED = 'CANCELLED',
   /** Unknown or unclassified error */
   UNKNOWN = 'UNKNOWN'
 }
@@ -126,6 +128,17 @@ export function classifyError(error: unknown): ErrorClassification {
 
   const errorMessage = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
   const errorName = error instanceof Error ? error.name.toLowerCase() : ''
+
+  // User/system abort should never be retried.
+  if (
+    errorName.includes('abort') ||
+    errorMessage.includes('aborted') ||
+    errorMessage.includes('cancelled by user') ||
+    errorMessage.includes('canceled by user') ||
+    errorMessage.includes('workflow cancelled')
+  ) {
+    return NonRetryableErrorType.CANCELLED
+  }
 
   // Check for network errors
   if (

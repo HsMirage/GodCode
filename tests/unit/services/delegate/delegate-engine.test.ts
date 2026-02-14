@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => {
       findFirst: vi.fn()
     },
     session: {
+      findUnique: vi.fn(),
       findFirst: vi.fn(),
       create: vi.fn()
     },
@@ -98,6 +99,10 @@ describe('DelegateEngine', () => {
     delegateEngine = new DelegateEngine()
 
     // Default mocks setup
+    mocks.mockPrisma.session.findUnique.mockResolvedValue({
+      id: 'test-session-123',
+      space: { id: 'space-1', workDir: '/tmp/workspace-a' }
+    })
     mocks.mockPrisma.session.findFirst.mockResolvedValue({ id: 'session-1' })
     mocks.mockPrisma.task.create.mockResolvedValue({ id: 'task-1', type: 'subtask' })
     mocks.mockPrisma.task.update.mockResolvedValue({ id: 'task-1' })
@@ -149,6 +154,13 @@ describe('DelegateEngine', () => {
       )
 
       expect(mocks.mockAdapter.sendMessage).toHaveBeenCalled()
+      expect(mocks.mockAdapter.sendMessage).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({
+          workspaceDir: '/tmp/workspace-a',
+          sessionId: 'test-session-123'
+        })
+      )
       expect(mocks.mockPrisma.task.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'task-1' },
@@ -288,6 +300,34 @@ describe('DelegateEngine', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             status: 'failed'
+          })
+        })
+      )
+    })
+
+    it('should mark task as cancelled when abort signal is triggered', async () => {
+      const controller = new AbortController()
+      controller.abort()
+      mocks.mockAdapter.sendMessage.mockRejectedValue(new Error('Request aborted by user'))
+
+      const input = {
+        description: 'Cancelable task',
+        prompt: 'Run this',
+        category: 'quick',
+        sessionId: 'test-session-123',
+        abortSignal: controller.signal
+      }
+
+      const result = await delegateEngine.delegateTask(input)
+
+      expect(result.success).toBe(false)
+      expect(result.output).toBe('Cancelled by user')
+      expect(mocks.mockPrisma.task.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'task-1' },
+          data: expect.objectContaining({
+            status: 'cancelled',
+            output: 'Cancelled by user'
           })
         })
       )

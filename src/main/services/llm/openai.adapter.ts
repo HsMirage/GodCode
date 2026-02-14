@@ -30,8 +30,10 @@ const toOpenAIMessages = (messages: Message[]): ChatCompletionMessageParam[] => 
 /**
  * Convert tool definitions to OpenAI function calling format
  */
-const getOpenAITools = (): ChatCompletionTool[] => {
-  const toolDefs = toolExecutionService.getToolDefinitions()
+const getOpenAITools = (
+  scopedTools?: Array<{ name: string; description: string; parameters: Record<string, unknown> }>
+): ChatCompletionTool[] => {
+  const toolDefs = scopedTools ?? toolExecutionService.getToolDefinitions()
   return toolDefs.map(tool => ({
     type: 'function' as const,
     function: {
@@ -95,16 +97,27 @@ export class OpenAIAdapter implements LLMAdapter {
     if (!model) {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
-    const tools = getOpenAITools()
+    const tools = getOpenAITools(config.tools)
 
     let fullContent = ''
     const totalUsage = { prompt_tokens: 0, completion_tokens: 0 }
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
       for (let attempt = 1; attempt <= runtime.maxRetries; attempt++) {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null
+        let externalAbortHandler: (() => void) | null = null
         try {
+          if (config.abortSignal?.aborted) {
+            throw new Error('Request aborted by user')
+          }
+
           const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+          timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+
+          if (config.abortSignal) {
+            externalAbortHandler = () => controller.abort()
+            config.abortSignal.addEventListener('abort', externalAbortHandler, { once: true })
+          }
 
           const response = await this.client.chat.completions.create(
             {
@@ -117,7 +130,14 @@ export class OpenAIAdapter implements LLMAdapter {
             { signal: controller.signal }
           )
 
-          clearTimeout(timeoutId)
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+            timeoutId = null
+          }
+          if (config.abortSignal && externalAbortHandler) {
+            config.abortSignal.removeEventListener('abort', externalAbortHandler)
+            externalAbortHandler = null
+          }
 
           const choice = response.choices[0]
           const message = choice?.message
@@ -190,6 +210,18 @@ export class OpenAIAdapter implements LLMAdapter {
           // Continue to next iteration for follow-up response
           break // Break retry loop, continue tool loop
         } catch (error) {
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+          }
+          if (config.abortSignal && externalAbortHandler) {
+            config.abortSignal.removeEventListener('abort', externalAbortHandler)
+          }
+
+          if (isAbortRequested(error, config.abortSignal)) {
+            logger.info('OpenAI request aborted by user')
+            throw error instanceof Error ? error : new Error('Request aborted by user')
+          }
+
           logger.warn(`OpenAI request failed (attempt ${attempt}/${runtime.maxRetries})`, { error })
 
           if (attempt === runtime.maxRetries) {
@@ -217,7 +249,7 @@ export class OpenAIAdapter implements LLMAdapter {
     if (!model) {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
-    const tools = getOpenAITools()
+    const tools = getOpenAITools(config.tools)
 
     logger.info('[OpenAIAdapter] streamMessage called', {
       model,

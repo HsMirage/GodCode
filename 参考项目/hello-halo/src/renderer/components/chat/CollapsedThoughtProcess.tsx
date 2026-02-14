@@ -5,9 +5,10 @@
  * TodoWrite is rendered separately at the bottom (only one instance)
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, type RefObject } from 'react'
 import {
   Lightbulb,
+  Loader2,
   XCircle,
   ChevronRight,
   ChevronUp,
@@ -22,11 +23,13 @@ import {
   getThoughtLabelKey,
   getToolFriendlyFormat,
 } from './thought-utils'
-import type { Thought } from '../../types'
+import { useLazyVisible } from '../../hooks/useLazyVisible'
+import type { Thought, ThoughtsSummary } from '../../types'
 import { getCurrentLanguage, useTranslation } from '../../i18n'
 
 interface CollapsedThoughtProcessProps {
   thoughts: Thought[]
+  defaultExpanded?: boolean
 }
 
 
@@ -58,7 +61,10 @@ function ThoughtItem({ thought }: { thought: Thought }) {
       <div className="flex items-center gap-2">
         <Icon size={14} className={`${color} shrink-0`} />
         <span className={`font-medium ${color} flex-1 min-w-0 truncate`}>
-          {t(getThoughtLabelKey(thought.type))}
+          {(() => {
+            const label = getThoughtLabelKey(thought.type)
+            return label === 'AI' ? label : t(label)
+          })()}
           {thought.toolName && ` - ${thought.toolName}`}
         </span>
         <span className="text-muted-foreground/40 text-[10px] shrink-0">
@@ -148,10 +154,32 @@ function ThoughtItem({ thought }: { thought: Thought }) {
   )
 }
 
-export function CollapsedThoughtProcess({ thoughts }: CollapsedThoughtProcessProps) {
+// Lazy wrapper for historical thought items — defers rendering until scrolled into view
+const COLLAPSED_THOUGHT_ESTIMATED_HEIGHT = 36
+
+function LazyCollapsedThoughtItem({
+  thought,
+  scrollContainerRef,
+}: {
+  thought: Thought
+  scrollContainerRef: RefObject<HTMLDivElement | null>
+}) {
+  const [ref, isVisible] = useLazyVisible('150px', scrollContainerRef)
+
+  if (isVisible) {
+    return <ThoughtItem thought={thought} />
+  }
+
+  return (
+    <div ref={ref} style={{ minHeight: COLLAPSED_THOUGHT_ESTIMATED_HEIGHT }} className="border-b border-border/20 last:border-b-0" />
+  )
+}
+
+export function CollapsedThoughtProcess({ thoughts, defaultExpanded = false }: CollapsedThoughtProcessProps) {
   const { t } = useTranslation()
-  const [isExpanded, setIsExpanded] = useState(true)
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded)
   const [isMaximized, setIsMaximized] = useState(false)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   // Get latest todo data (only render one TodoCard at bottom)
   const latestTodos = useMemo(() => {
@@ -226,11 +254,15 @@ export function CollapsedThoughtProcess({ thoughts }: CollapsedThoughtProcessPro
       {/* Expanded content */}
       {isExpanded && (
         <div className="mt-1 py-2 bg-muted/20 rounded-lg border border-border/30 animate-slide-down thought-content">
-          {/* Thought items */}
+          {/* Thought items — lazy-loaded: only items near the scroll viewport are rendered */}
           {displayThoughts.length > 0 && (
-            <div className={`${isMaximized ? 'max-h-[80vh]' : 'max-h-[300px]'} scrollbar-overlay px-3 transition-all duration-200`}>
-              {displayThoughts.map((thought) => (
-                <ThoughtItem key={thought.id} thought={thought} />
+            <div ref={scrollContainerRef} className={`${isMaximized ? 'max-h-[80vh]' : 'max-h-[300px]'} scrollbar-overlay px-3 transition-all duration-200`}>
+              {displayThoughts.map((thought, index) => (
+                <LazyCollapsedThoughtItem
+                  key={`${thought.id}-${index}`}
+                  thought={thought}
+                  scrollContainerRef={scrollContainerRef}
+                />
               ))}
             </div>
           )}
@@ -238,7 +270,7 @@ export function CollapsedThoughtProcess({ thoughts }: CollapsedThoughtProcessPro
           {/* TodoCard at bottom - only one instance */}
           {latestTodos && latestTodos.length > 0 && (
             <div className={`px-3 ${displayThoughts.length > 0 ? 'mt-2 pt-2 border-t border-border/20' : ''}`}>
-              <TodoCard todos={latestTodos} />
+              <TodoCard todos={latestTodos} isAgentActive={false} />
             </div>
           )}
 
@@ -257,6 +289,64 @@ export function CollapsedThoughtProcess({ thoughts }: CollapsedThoughtProcessPro
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * LazyCollapsedThoughtProcess - For separated thoughts (v2 format).
+ * Shows a collapsed summary bar initially, loads full thoughts on first expand,
+ * then renders the full CollapsedThoughtProcess.
+ */
+interface LazyCollapsedThoughtProcessProps {
+  thoughtsSummary: ThoughtsSummary
+  onLoadThoughts: () => Promise<Thought[]>
+}
+
+export function LazyCollapsedThoughtProcess({ thoughtsSummary, onLoadThoughts }: LazyCollapsedThoughtProcessProps) {
+  const { t } = useTranslation()
+  const [loadedThoughts, setLoadedThoughts] = useState<Thought[] | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+
+  // Once loaded, render expanded — user explicitly clicked to load thoughts
+  if (loadedThoughts) {
+    return <CollapsedThoughtProcess thoughts={loadedThoughts} defaultExpanded />
+  }
+
+  const duration = thoughtsSummary.duration
+
+  const handleClick = async () => {
+    console.log('[LazyCollapsedThoughtProcess] User clicked to load thoughts')
+    setIsLoading(true)
+    try {
+      const thoughts = await onLoadThoughts()
+      console.log(`[LazyCollapsedThoughtProcess] Loaded ${thoughts.length} thoughts, rendering full view`)
+      setLoadedThoughts(thoughts)
+    } catch (err) {
+      console.error('[LazyCollapsedThoughtProcess] Failed to load thoughts:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={handleClick}
+        disabled={isLoading}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs transition-all duration-200 w-full bg-muted/30 hover:bg-muted/50 border border-transparent"
+      >
+        {isLoading ? (
+          <Loader2 size={12} className="text-muted-foreground animate-spin" />
+        ) : (
+          <ChevronRight size={12} className="text-muted-foreground" />
+        )}
+        <Lightbulb size={14} className="text-primary" />
+        <span className="text-muted-foreground">{t('Thought process')}</span>
+        <div className="flex items-center gap-1.5 text-muted-foreground/60">
+          {duration != null && <span>{duration.toFixed(1)}s</span>}
+        </div>
+      </button>
     </div>
   )
 }

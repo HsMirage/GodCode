@@ -12,8 +12,12 @@ import { taskContinuationService } from '@/main/services/task-continuation.servi
 import { backgroundTaskManager, cancelTasks } from '@/main/services/tools/background'
 import { toolExecutionService } from '@/main/services/tools/tool-execution.service'
 import { getAgentPromptByCode } from '@/main/services/delegate/agents'
+import { resolveScopedRuntimeToolNames } from '@/main/services/delegate/tool-allowlist'
 import { EVENT_CHANNELS } from '@/shared/ipc-channels'
-import { getAgentByCode, PRIMARY_AGENTS, CATEGORY_AGENTS } from '@/shared/agent-definitions'
+import { PRIMARY_AGENTS, CATEGORY_AGENTS } from '@/shared/agent-definitions'
+import { BoulderStateService } from '@/main/services/boulder-state.service'
+import path from 'node:path'
+import fs from 'node:fs'
 
 type MessageSendInput = {
   sessionId: string
@@ -45,59 +49,8 @@ const toLLMConfig = (config: unknown): LLMConfig => {
   return config as LLMConfig
 }
 
-const AGENT_TOOL_ALIAS_MAP: Record<string, string[]> = {
-  read: ['file_read'],
-  write: ['file_write'],
-  edit: ['file_write'],
-  bash: ['bash'],
-  glob: ['glob'],
-  grep: ['grep'],
-  webfetch: ['webfetch'],
-  websearch: ['websearch'],
-  look_at: ['look_at'],
-  browser_navigate: ['browser_navigate'],
-  browser_click: ['browser_click'],
-  browser_fill: ['browser_fill'],
-  browser_snapshot: ['browser_snapshot'],
-  browser_screenshot: ['browser_screenshot'],
-  browser_extract: ['browser_extract'],
-  lsp_diagnostics: ['lsp_diagnostics'],
-  lsp_goto_definition: ['lsp_goto_definition'],
-  lsp_find_references: ['lsp_find_references'],
-  lsp_symbols: ['lsp_symbols']
-}
-
-const AGENT_CODE_ALIASES: Record<string, string> = {
-  explore: 'qianliyan',
-  oracle: 'baize',
-  librarian: 'diting',
-  metis: 'chongming',
-  momus: 'leigong',
-  prometheus: 'fuxi',
-  sisyphus: 'haotian',
-  atlas: 'kuafu',
-  hephaestus: 'luban'
-}
-
 function resolveAgentRuntimeToolNames(agentCode: string): string[] | undefined {
-  const resolvedAgentCode = AGENT_CODE_ALIASES[agentCode] || agentCode
-  const agentDefinition = getAgentByCode(resolvedAgentCode)
-  if (!agentDefinition) {
-    return undefined
-  }
-
-  if (agentDefinition.tools.length === 0) {
-    return []
-  }
-
-  const availableToolNames = new Set(
-    toolExecutionService.getToolDefinitions().map(tool => tool.name)
-  )
-  const resolvedToolNames = agentDefinition.tools
-    .flatMap(toolName => AGENT_TOOL_ALIAS_MAP[toolName] ?? [toolName])
-    .filter(toolName => availableToolNames.has(toolName))
-
-  return Array.from(new Set(resolvedToolNames))
+  return resolveScopedRuntimeToolNames({ subagentType: agentCode })
 }
 
 function extractRouteOutput(result: RouteResult): string {
@@ -108,9 +61,32 @@ function extractRouteOutput(result: RouteResult): string {
     return result.output
   }
   if ('workflowId' in result) {
-    return Array.from(result.results.values()).join('\n\n---\n\n')
+    if (result.tasks.length === 0) {
+      return '工作流执行完成：当前计划没有未完成任务。'
+    }
+    const taskSummary = result.tasks
+      .map(task => `- ${task.description}${task.assignedAgent ? `（执行: ${task.assignedAgent}）` : ''}`)
+      .join('\n')
+    const outputs = Array.from(result.results.entries())
+      .map(([taskId, output]) => `### ${taskId}\n${output}`)
+      .join('\n\n---\n\n')
+
+    return `工作流执行完成。\n\n任务分解与分配:\n${taskSummary}\n\n执行结果:\n\n${outputs}`
   }
   return ''
+}
+
+function extractPlanPath(content: string): string | undefined {
+  const match = content.match(/(?:[A-Za-z]:)?[^\s"'`]*\.sisyphus[\\/]+plans[\\/]+[^\s"'`<>]+\.md/i)
+  return match?.[0]
+}
+
+function normalizePlanPath(candidate: string, workspaceDir: string): string {
+  const trimmed = candidate.trim().replace(/^["']|["']$/g, '')
+  if (path.isAbsolute(trimmed)) {
+    return path.normalize(trimmed)
+  }
+  return path.resolve(workspaceDir, trimmed)
 }
 
 export async function handleMessageSend(
@@ -155,6 +131,9 @@ export async function handleMessageSend(
       : selectedDefinition.defaultStrategy
     : router.analyzeTask(input.content)
   let assistantContent = ''
+  let assistantMetadata: Record<string, unknown> | undefined = agentCode
+    ? { agentCode }
+    : undefined
 
   // Get workspace directory from session's space
   const session = await prisma.session.findUnique({
@@ -162,6 +141,13 @@ export async function handleMessageSend(
     include: { space: true }
   })
   const workspaceDir = session?.space?.workDir || process.cwd()
+  logger.info('[message:send] Resolved session workspace context', {
+    sessionId: input.sessionId,
+    spaceId: session?.space?.id ?? null,
+    workspaceDir,
+    agentCode,
+    strategy
+  })
   const streamAbortController = new AbortController()
   let streamDoneSent = false
   let streamWasAborted = false
@@ -235,9 +221,13 @@ export async function handleMessageSend(
 
       const agentSystemPrompt = agentCode ? getAgentPromptByCode(agentCode)?.trim() : undefined
       const scopedAgentToolNames = agentCode ? resolveAgentRuntimeToolNames(agentCode) : undefined
-      const agentToolNames = scopedAgentToolNames ?? []
-      const agentToolDefinitions =
+      const effectiveScopedAgentToolNames =
         scopedAgentToolNames !== undefined
+          ? toolExecutionService.getToolDefinitions(scopedAgentToolNames).map(tool => tool.name)
+          : undefined
+      const agentToolNames = effectiveScopedAgentToolNames ?? []
+      const agentToolDefinitions =
+        effectiveScopedAgentToolNames !== undefined
           ? toolExecutionService.getToolDefinitions(agentToolNames)
           : undefined
 
@@ -278,7 +268,7 @@ export async function handleMessageSend(
           ]
         : domainMessages
 
-      await toolExecutionService.withAllowedTools(scopedAgentToolNames, async () => {
+      await toolExecutionService.withAllowedTools(effectiveScopedAgentToolNames, async () => {
         for await (const chunk of adapter.streamMessage(messagesForLLM, llmConfig)) {
           // Accumulate text content
           if (chunk.content) {
@@ -315,7 +305,8 @@ export async function handleMessageSend(
       const routeContext = {
         sessionId: input.sessionId,
         prompt: input.content,
-        agentCode
+        agentCode,
+        abortSignal: streamAbortController.signal
       }
       const routeResult =
         selectedDefinition?.defaultStrategy === 'workforce'
@@ -390,13 +381,72 @@ export async function handleMessageSend(
     return userMessage
   }
 
+  if (agentCode === 'fuxi' && assistantContent.trim()) {
+    const detectedPlanPath = extractPlanPath(assistantContent)
+    const boulderService = BoulderStateService.getInstance()
+    let normalizedPlanPath: string | undefined
+
+    if (detectedPlanPath) {
+      normalizedPlanPath = normalizePlanPath(detectedPlanPath, workspaceDir)
+    } else {
+      try {
+        const tracked = await boulderService.isSessionTracked(input.sessionId)
+        const state = await boulderService.getState()
+        if (tracked && state.active_plan) {
+          normalizedPlanPath = normalizePlanPath(state.active_plan, workspaceDir)
+        }
+      } catch (error) {
+        logger.warn('Failed to read boulder state after FuXi planning', {
+          sessionId: input.sessionId,
+          planPath: detectedPlanPath,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+    }
+
+    const looksLikePlanOutput =
+      /(TL;DR|TODOs|Execution Strategy|Success Criteria|工作目标|执行策略|成功标准|计划|TODO)/i.test(
+        assistantContent
+      )
+    const resolvedPlanPath = normalizedPlanPath && fs.existsSync(normalizedPlanPath) ? normalizedPlanPath : undefined
+
+    if (resolvedPlanPath && (detectedPlanPath || looksLikePlanOutput)) {
+      try {
+        const state = await boulderService.getState()
+        const sessionIds = new Set(state.session_ids || [])
+        sessionIds.add(input.sessionId)
+
+        await boulderService.updateState({
+          active_plan: resolvedPlanPath,
+          plan_name: path.basename(resolvedPlanPath, path.extname(resolvedPlanPath)),
+          session_ids: Array.from(sessionIds),
+          agent: 'fuxi',
+          status: 'in_progress'
+        })
+      } catch (error) {
+        logger.warn('Failed to update boulder state after FuXi planning', {
+          sessionId: input.sessionId,
+          planPath: resolvedPlanPath,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
+
+      assistantContent = `${assistantContent}\n\n---\n\n✅ 伏羲已完成规划，建议切换到夸父(KuaFu)执行。\n请发送：\`执行计划 ${resolvedPlanPath}\``
+      assistantMetadata = {
+        ...(assistantMetadata || {}),
+        handoffToAgent: 'kuafu',
+        planPath: resolvedPlanPath
+      }
+    }
+  }
+
   const assistantMessage = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const created = await tx.message.create({
       data: {
         sessionId: userMessage.sessionId,
         role: 'assistant',
         content: assistantContent,
-        metadata: agentCode ? { agentCode } : {}
+        metadata: (assistantMetadata || {}) as Prisma.InputJsonValue
       }
     })
 

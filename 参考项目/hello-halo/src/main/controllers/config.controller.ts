@@ -1,13 +1,13 @@
-/**
+/**		      	    				  	  	  	 		 		       	 	 	         	 	    					 
  * Config Controller - Unified business logic for configuration
  * Used by both IPC handlers and HTTP routes
  */
 
 import {
   getConfig as serviceGetConfig,
-  saveConfig as serviceSaveConfig,
-  validateApiConnection as serviceValidateApiConnection
+  saveConfig as serviceSaveConfig
 } from '../services/config.service'
+import { validateApiConnection } from '../services/api-validator.service'
 
 export interface ControllerResponse<T = unknown> {
   success: boolean
@@ -42,18 +42,27 @@ export function setConfig(updates: Record<string, unknown>): ControllerResponse 
 }
 
 /**
- * Validate API connection
+ * Validate API connection via SDK
  */
 export async function validateApi(
   apiKey: string,
   apiUrl: string,
-  provider: string
+  provider: string,
+  model?: string
 ): Promise<ControllerResponse> {
   try {
-    const result = await serviceValidateApiConnection(apiKey, apiUrl, provider)
+    const result = await validateApiConnection({
+      apiKey,
+      apiUrl,
+      provider: provider as 'anthropic' | 'openai',
+      model
+    })
     return {
       success: result.valid,
-      data: { model: result.model },
+      data: {
+        model: result.model,
+        normalizedUrl: result.normalizedUrl
+      },
       error: result.message
     }
   } catch (error: unknown) {

@@ -1,4 +1,4 @@
-/**
+/**		      	    				  	  	  	 		 		       	 	 	         	 	    					 
  * Halo - Main App Component
  */
 
@@ -18,7 +18,7 @@ import { SearchHighlightBar } from './components/search/SearchHighlightBar'
 import { OnboardingOverlay } from './components/onboarding'
 import { UpdateNotification } from './components/updater/UpdateNotification'
 import { api } from './api'
-import type { AgentEventBase, Thought, ToolCall, HaloConfig } from './types'
+import type { AgentEventBase, Thought, ToolCall, HaloConfig, AgentErrorType, Question } from './types'
 import { hasAnyAISource } from './types'
 
 // Lazy load heavy page components for better initial load performance
@@ -81,6 +81,7 @@ export default function App() {
     handleAgentThought,
     handleAgentThoughtDelta,
     handleAgentCompact,
+    handleAskQuestion,
     currentSpaceId,
     setCurrentSpace: setChatCurrentSpace,
     loadConversations,
@@ -206,7 +207,7 @@ export default function App() {
 
     // Message events (with session IDs)
     const unsubMessage = api.onAgentMessage((data) => {
-      console.log('[App] Received agent:message event:', data)
+      // console.log('[App] Received agent:message event:', data)
       handleAgentMessage(data as AgentEventBase & { content: string; isComplete: boolean })
     })
 
@@ -222,7 +223,7 @@ export default function App() {
 
     const unsubError = api.onAgentError((data) => {
       console.log('[App] Received agent:error event:', data)
-      handleAgentError(data as AgentEventBase & { error: string })
+      handleAgentError(data as AgentEventBase & { error: string; errorType?: AgentErrorType })
     })
 
     const unsubComplete = api.onAgentComplete((data) => {
@@ -233,6 +234,12 @@ export default function App() {
     const unsubCompact = api.onAgentCompact((data) => {
       console.log('[App] Received agent:compact event:', data)
       handleAgentCompact(data as AgentEventBase & { trigger: 'manual' | 'auto'; preTokens: number })
+    })
+
+    // AskUserQuestion - AI needs user input to continue
+    const unsubAskQuestion = api.onAgentAskQuestion((data) => {
+      console.log('[App] Received agent:ask-question event:', data)
+      handleAskQuestion(data as AgentEventBase & { id: string; questions: Question[] })
     })
 
     // MCP status updates (global - not per-conversation)
@@ -253,6 +260,7 @@ export default function App() {
       unsubError()
       unsubComplete()
       unsubCompact()
+      unsubAskQuestion()
       unsubMcpStatus()
     }
   }, [
@@ -264,6 +272,7 @@ export default function App() {
     handleAgentThought,
     handleAgentThoughtDelta,
     handleAgentCompact,
+    handleAskQuestion,
     setMcpStatus
   ])
 
@@ -393,38 +402,20 @@ export default function App() {
         console.log(`[App] Selecting conversation: ${conversationId}`)
         await selectConversation(conversationId)
 
-        // Step 4: Wait for message element to render and navigate
-        console.log(`[App] Waiting for message element: ${messageId}`)
-        let retries = 0
-        const maxRetries = 50
-
-        const waitAndNavigate = async () => {
-          while (retries < maxRetries) {
-            const messageElement = document.querySelector(`[data-message-id="${messageId}"]`)
-            if (messageElement) {
-              console.log(`[App] Message element found, dispatching navigate event`)
-              // Dispatch the actual navigation event
-              const navEvent = new CustomEvent('search:navigate-to-message', {
-                detail: {
-                  messageId,
-                  query
-                }
-              })
-              window.dispatchEvent(navEvent)
-              return
+        // Step 4: Dispatch navigation event for ChatView to handle
+        // ChatView uses Virtuoso scrollToIndex to bring the message into viewport,
+        // then applies DOM highlighting — no need to pre-check DOM existence here.
+        // Small delay to let conversation data load and MessageList mount.
+        setTimeout(() => {
+          console.log(`[App] Dispatching navigate-to-message for: ${messageId}`)
+          const navEvent = new CustomEvent('search:navigate-to-message', {
+            detail: {
+              messageId,
+              query
             }
-
-            retries++
-            if (retries % 10 === 0) {
-              console.log(`[App] Waiting for message... (${retries}/${maxRetries})`)
-            }
-            await new Promise(resolve => setTimeout(resolve, 100))
-          }
-
-          console.warn(`[App] Message element not found after retries`)
-        }
-
-        waitAndNavigate()
+          })
+          window.dispatchEvent(navEvent)
+        }, 300)
       } catch (error) {
         console.error(`[App] Error navigating to result:`, error)
       }
@@ -449,7 +440,7 @@ export default function App() {
       const loadedConfig = response.data as HaloConfig
       setConfig(loadedConfig)  // Sync config to store (was missing, causing empty apiKey in settings)
       // Show setup if first launch or no AI source configured
-      if (loadedConfig.isFirstLaunch || !hasAnyAISource(loadedConfig)) {
+      if (loadedConfig.isFirstLaunch || !hasAnyAISource(loadedConfig.aiSources)) {
         setView('setup')
       } else {
         setView('home')

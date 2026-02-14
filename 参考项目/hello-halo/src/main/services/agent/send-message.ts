@@ -1,4 +1,4 @@
-/**
+/**		      	    				  	  	  	 		 		       	 	 	         	 	    					 
  * Agent Module - Send Message
  *
  * Core message sending logic including:
@@ -12,9 +12,8 @@
 import { BrowserWindow } from 'electron'
 import { getConfig } from '../config.service'
 import { getConversation, saveSessionId, addMessage, updateLastMessage } from '../conversation.service'
-import { ensureOpenAICompatRouter, encodeBackendConfig } from '../../openai-compat-router'
+import { notifyTaskComplete } from '../notification.service'
 import {
-  isAIBrowserTool,
   AI_BROWSER_SYSTEM_PROMPT,
   createAIBrowserMcpServer
 } from '../ai-browser'
@@ -31,11 +30,10 @@ import {
   getWorkingDir,
   getApiCredentials,
   getEnabledMcpServers,
-  buildSystemPromptAppend,
-  inferOpenAIWireApi,
   sendToRenderer,
   setMainWindow
 } from './helpers'
+import { buildSystemPromptWithAIBrowser } from './system-prompt'
 import {
   getOrCreateV2Session,
   closeV2Session,
@@ -45,7 +43,6 @@ import {
   v2Sessions
 } from './session-manager'
 import { broadcastMcpStatus } from './mcp-manager'
-import { createCanUseTool } from './permission-handler'
 import {
   formatCanvasContext,
   buildMessageContent,
@@ -53,6 +50,11 @@ import {
   extractSingleUsage,
   extractResultUsage
 } from './message-utils'
+import { onAgentError, runPpidScanAndCleanup } from '../health'
+import { resolveCredentialsForSdk, buildBaseSdkOptions } from './sdk-config'
+
+// Unified fallback error suffix - guides user to check logs
+const FALLBACK_ERROR_HINT = 'Check logs in Settings > System > Logs.'
 
 // ============================================
 // Send Message
@@ -91,35 +93,12 @@ export async function sendMessage(
   const config = getConfig()
   const workDir = getWorkingDir(spaceId)
 
-  // Get API credentials based on current aiSources configuration
+  // Get API credentials and resolve for SDK use
   const credentials = await getApiCredentials(config)
   console.log(`[Agent] sendMessage using: ${credentials.provider}, model: ${credentials.model}`)
 
-  // Route through OpenAI compat router for non-Anthropic providers
-  let anthropicBaseUrl = credentials.baseUrl
-  let anthropicApiKey = credentials.apiKey
-  let sdkModel = credentials.model || 'claude-opus-4-5-20251101'
-
-  // For non-Anthropic providers (openai or OAuth), use the OpenAI compat router
-  if (credentials.provider !== 'anthropic') {
-    const router = await ensureOpenAICompatRouter({ debug: false })
-    anthropicBaseUrl = router.baseUrl
-
-    // Use apiType from credentials (set by provider), fallback to inference
-    const apiType = credentials.apiType
-      || (credentials.provider === 'oauth' ? 'chat_completions' : inferOpenAIWireApi(credentials.baseUrl))
-
-    anthropicApiKey = encodeBackendConfig({
-      url: credentials.baseUrl,
-      key: credentials.apiKey,
-      model: credentials.model,
-      headers: credentials.customHeaders,
-      apiType
-    })
-    // Pass a fake Claude model to CC for normal request handling
-    sdkModel = 'claude-sonnet-4-20250514'
-    console.log(`[Agent] ${credentials.provider} provider enabled: routing via ${anthropicBaseUrl}, apiType=${apiType}`)
-  }
+  // Resolve credentials for SDK (handles OpenAI compat router for non-Anthropic providers)
+  const resolvedCredentials = await resolveCredentialsForSdk(credentials)
 
   // Get conversation for session resumption
   const conversation = getConversation(spaceId, conversationId)
@@ -154,78 +133,47 @@ export async function sendMessage(
     const electronPath = getHeadlessElectronPath()
     console.log(`[Agent] Using headless Electron as Node runtime: ${electronPath}`)
 
-    // Configure SDK options
-    // Note: These parameters require SDK patch to work in V2 Session
-    // Native SDK SDKSessionOptions only supports model, executable, executableArgs
-    // After patch supports full parameter pass-through, see notes in session-manager.ts
-    const sdkOptions: Record<string, any> = {
-      model: sdkModel,
-      cwd: workDir,
-      abortController: abortController,
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: 1,
-        ELECTRON_NO_ATTACH_CONSOLE: 1,
-        ANTHROPIC_API_KEY: anthropicApiKey,
-        ANTHROPIC_BASE_URL: anthropicBaseUrl,
-        // Ensure localhost bypasses proxy
-        NO_PROXY: 'localhost,127.0.0.1',
-        no_proxy: 'localhost,127.0.0.1',
-        // Disable unnecessary API requests
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-        DISABLE_TELEMETRY: '1',
-        DISABLE_COST_WARNINGS: '1'
-      },
-      extraArgs: {
-        'dangerously-skip-permissions': null
-      },
-      stderr: (data: string) => {
+    // Get enabled MCP servers
+    const enabledMcpServers = getEnabledMcpServers(config.mcpServers || {})
+
+    // Build MCP servers config (including AI Browser if enabled)
+    const mcpServers: Record<string, any> = enabledMcpServers ? { ...enabledMcpServers } : {}
+    if (aiBrowserEnabled) {
+      mcpServers['ai-browser'] = createAIBrowserMcpServer()
+      console.log(`[Agent][${conversationId}] AI Browser MCP server added`)
+    }
+
+    // Build base SDK options using shared configuration
+    const sdkOptions = buildBaseSdkOptions({
+      credentials: resolvedCredentials,
+      workDir,
+      electronPath,
+      spaceId,
+      conversationId,
+      abortController,
+      stderrHandler: (data: string) => {
         console.error(`[Agent][${conversationId}] CLI stderr:`, data)
         stderrBuffer += data  // Accumulate for error reporting
       },
-      systemPrompt: {
-        type: 'preset' as const,
-        preset: 'claude_code' as const,
-        // Append AI Browser system prompt if enabled
-        // Pass actual model name so AI knows what model it's running on
-        append: buildSystemPromptAppend(workDir, credentials.model) + (aiBrowserEnabled ? AI_BROWSER_SYSTEM_PROMPT : '')
-      },
-      maxTurns: 50,
-      allowedTools: ['Read', 'Write', 'Edit', 'Grep', 'Glob', 'Bash', 'Skill'],
-      settingSources: ['user', 'project'],  // Enable Skills loading from ~/.claude/skills/ and <workspace>/.claude/skills/
-      permissionMode: 'acceptEdits' as const,
-      canUseTool: createCanUseTool(workDir, spaceId, conversationId),
-      includePartialMessages: true,  // Requires SDK patch: enable token-level streaming (stream_event)
-      executable: electronPath,
-      executableArgs: ['--no-warnings'],
-      // Extended thinking: enable when user requests it (10240 tokens, same as Claude Code CLI Tab)
-      ...(thinkingEnabled ? { maxThinkingTokens: 10240 } : {}),
-      // MCP servers configuration
-      // - Pass through enabled user MCP servers
-      // - Add AI Browser MCP server if enabled
-      //
-      // NOTE: SDK patch adds proper handling of SDK-type MCP servers in SessionImpl,
-      // extracting 'instance' before serialization (mirrors query() behavior).
-      // See patches/@anthropic-ai+claude-agent-sdk+0.1.76.patch
-      ...((() => {
-        const enabledMcp = getEnabledMcpServers(config.mcpServers || {})
-        const mcpServers: Record<string, any> = enabledMcp ? { ...enabledMcp } : {}
+      mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : null
+    })
 
-        // Add AI Browser as SDK MCP server if enabled
-        if (aiBrowserEnabled) {
-          mcpServers['ai-browser'] = createAIBrowserMcpServer()
-          console.log(`[Agent][${conversationId}] AI Browser MCP server added`)
-        }
-
-        return Object.keys(mcpServers).length > 0 ? { mcpServers } : {}
-      })())
+    // Apply dynamic configurations (AI Browser system prompt, Thinking mode)
+    // These are specific to sendMessage and not part of base options
+    if (aiBrowserEnabled) {
+      sdkOptions.systemPrompt = buildSystemPromptWithAIBrowser(
+        { workDir, modelInfo: resolvedCredentials.displayModel },
+        AI_BROWSER_SYSTEM_PROMPT
+      )
+    }
+    if (thinkingEnabled) {
+      sdkOptions.maxThinkingTokens = 10240
     }
 
     const t0 = Date.now()
     console.log(`[Agent][${conversationId}] Getting or creating V2 session...`)
 
     // Log MCP servers if configured (only enabled ones)
-    const enabledMcpServers = getEnabledMcpServers(config.mcpServers || {})
     const mcpServerNames = enabledMcpServers ? Object.keys(enabledMcpServers) : []
     if (mcpServerNames.length > 0) {
       console.log(`[Agent][${conversationId}] MCP servers configured: ${mcpServerNames.join(', ')}`)
@@ -238,7 +186,8 @@ export async function sendMessage(
 
     // Get or create persistent V2 session for this conversation
     // Pass config for rebuild detection when aiBrowserEnabled changes
-    const v2Session = await getOrCreateV2Session(spaceId, conversationId, sdkOptions, sessionId, sessionConfig)
+    // Pass workDir for session migration support (from old ~/.claude to new config dir)
+    const v2Session = await getOrCreateV2Session(spaceId, conversationId, sdkOptions, sessionId, sessionConfig, workDir)
 
     // Dynamic runtime parameter adjustment (via SDK patch)
     // These can be changed without rebuilding the session
@@ -247,8 +196,8 @@ export async function sendMessage(
       // Note: For OpenAI-compat/OAuth providers, model is encoded in apiKey and always fresh
       // This setModel call is mainly for pure Anthropic API sessions
       if (v2Session.setModel) {
-        await v2Session.setModel(sdkModel)
-        console.log(`[Agent][${conversationId}] Model set: ${sdkModel}`)
+        await v2Session.setModel(resolvedCredentials.sdkModel)
+        console.log(`[Agent][${conversationId}] Model set: ${resolvedCredentials.sdkModel}`)
       }
 
       // Set thinking tokens dynamically
@@ -270,10 +219,13 @@ export async function sendMessage(
       message,
       images,
       canvasContext,
-      credentials.model,
+      resolvedCredentials.displayModel,
       abortController,
       t0
     )
+
+    // System notification for task completion (if window not focused)
+    notifyTaskComplete(conversation?.title || 'Conversation')
 
   } catch (error: unknown) {
     const err = error as Error
@@ -287,7 +239,7 @@ export async function sendMessage(
     console.error(`[Agent][${conversationId}] Error:`, error)
 
     // Extract detailed error message from stderr if available
-    let errorMessage = err.message || 'Unknown error occurred'
+    let errorMessage = err.message || `Unknown error. ${FALLBACK_ERROR_HINT}`
 
     // Windows: Check for Git Bash related errors
     if (process.platform === 'win32') {
@@ -327,6 +279,14 @@ export async function sendMessage(
     sendToRenderer('agent:error', spaceId, conversationId, {
       type: 'error',
       error: errorMessage
+    })
+
+    // Emit health event for monitoring
+    onAgentError(conversationId, errorMessage)
+
+    // Run PPID scan to clean up dead processes (async, don't wait)
+    runPpidScanAndCleanup().catch(err => {
+      console.error('[Agent] PPID scan after error failed:', err)
     })
 
     // Close V2 session on error (it may be in a bad state)
@@ -371,6 +331,11 @@ async function processMessageStream(
   let currentStreamingText = ''  // Accumulates text_delta tokens
   let isStreamingTextBlock = false  // True when inside a text content block
   const STREAM_THROTTLE_MS = 30  // Throttle updates to ~33fps
+
+  // Track if SDK reported error_during_execution (for interrupted detection)
+  let hadErrorDuringExecution = false
+  // Track if we received a result message (for detecting stream interruption)
+  let receivedResult = false
 
   // Streaming block state - track active blocks by index for delta/stop correlation
   // Key: block index, Value: { type, thoughtId, content/partialJson }
@@ -434,12 +399,12 @@ async function processMessageStream(
       if (event.type === 'message_start') {
         console.log(`[Agent][${conversationId}] 🔴 +${elapsed}ms message_start FULL:`, JSON.stringify(event))
       } else {
-        console.log(`[Agent][${conversationId}] 🔴 +${elapsed}ms stream_event:`, JSON.stringify({
-          type: event.type,
-          index: event.index,
-          content_block: event.content_block,
-          delta: event.delta
-        }))
+        // console.log(`[Agent][${conversationId}] 🔴 +${elapsed}ms stream_event:`, JSON.stringify({
+        //   type: event.type,
+        //   index: event.index,
+        //   content_block: event.content_block,
+        //   delta: event.delta
+        // }))
       }
 
       // Text block started
@@ -671,16 +636,8 @@ async function processMessageStream(
 
     // DEBUG: Log all SDK messages with timestamp
     const elapsed = Date.now() - t1
-    console.log(`[Agent][${conversationId}] 🔵 +${elapsed}ms ${sdkMessage.type}:`,
-      sdkMessage.type === 'assistant'
-        ? JSON.stringify(
-            Array.isArray((sdkMessage as any).message?.content)
-              ? (sdkMessage as any).message.content.map((b: any) => ({ type: b.type, id: b.id, name: b.name, textLen: b.text?.length, thinkingLen: b.thinking?.length }))
-              : (sdkMessage as any).message?.content
-          )
-        : sdkMessage.type === 'user'
-          ? `tool_result or input`
-          : ''
+    console.log(`[Agent] SDK messages [${conversationId}] 🔵 +${elapsed}ms ${sdkMessage.type}:`,
+      JSON.stringify(sdkMessage, null, 2)
     )
 
     // Extract single API call usage from assistant message (represents current context size)
@@ -772,6 +729,15 @@ async function processMessageStream(
             input: thought.toolInput || {}
           }
           sendToRenderer('agent:tool-call', spaceId, conversationId, toolCall as unknown as Record<string, unknown>)
+        } else if (thought.type === 'error') {
+          // SDK reported an error (rate_limit, authentication_failed, etc.)
+          // Send error to frontend - user should see the actual error from provider
+          console.log(`[Agent][${conversationId}] Error thought received: ${thought.content}`)
+          sendToRenderer('agent:error', spaceId, conversationId, {
+            type: 'error',
+            error: thought.content,
+            errorCode: thought.errorCode  // Preserve error code for debugging
+          })
         } else if (thought.type === 'result') {
           // Final result - use the last text block as the final reply
           const finalContent = lastTextContent || thought.content
@@ -830,9 +796,39 @@ async function processMessageStream(
         console.log(`[Agent][${conversationId}] Available tools: ${tools.length}`)
       }
     } else if (sdkMessage.type === 'result') {
+      receivedResult = true  // Mark that we received a result message
       if (!capturedSessionId) {
         const sessionIdFromMsg = msg.session_id || (msg.message as Record<string, unknown>)?.session_id
         capturedSessionId = sessionIdFromMsg as string
+      }
+
+      // 🔑 Check for real API errors - only report if is_error=true OR errors array has content
+      // Note: subtype="error_during_execution" alone does NOT mean error - it's a normal completion state
+      const isError = (sdkMessage as any).is_error === true
+      const errors = (sdkMessage as any).errors as unknown[] | undefined
+      const hasErrors = Array.isArray(errors) && errors.length > 0
+
+      if (isError || hasErrors) {
+        // Pass through the real error from SDK
+        const realError = hasErrors
+          ? JSON.stringify(errors)
+          : ((sdkMessage as any).result || `Unknown API error. ${FALLBACK_ERROR_HINT}`)
+        console.log(`[Agent][${conversationId}] ⚠️ SDK error (is_error=${isError}, errors=${errors?.length || 0}): ${realError}`)
+        const errorThought: Thought = {
+          id: `thought-error-${Date.now()}`,
+          type: 'error',
+          content: realError,
+          timestamp: new Date().toISOString()
+        }
+        sessionState.thoughts.push(errorThought)
+        sendToRenderer('agent:thought', spaceId, conversationId, {
+          type: 'thought',
+          thought: errorThought
+        })
+      } else if ((sdkMessage as any).subtype === 'error_during_execution') {
+        // Mark as interrupted - will be used for empty response handling
+        hadErrorDuringExecution = true
+        console.log(`[Agent][${conversationId}] SDK result subtype=error_during_execution but is_error=false, errors=[] - marked as interrupted`)
       }
 
       // Extract token usage from result message
@@ -849,41 +845,73 @@ async function processMessageStream(
     console.log(`[Agent][${conversationId}] Session ID saved:`, capturedSessionId)
   }
 
-  // Ensure complete event is sent even if no result message was received
-  if (lastTextContent) {
-    console.log(`[Agent][${conversationId}] Sending final complete event with last text`)
-    // Backend saves complete message with thoughts and tokenUsage (Single Source of Truth)
+  // ========== Stream End Handling ==========
+  //
+  // Error conditions (truth table):
+  // | Case | hasContent | isInterrupted | hasErrorThought | wasAborted | Send error?      |
+  // |------|------------|---------------|-----------------|------------|------------------|
+  // | 1a   | yes        | -             | -               | yes        | stopped by user  |
+  // | 1b   | yes        | yes           | -               | no         | interrupted      |
+  // | 2    | yes        | no            | -               | no         | no               |
+  // | 3    | no         | yes           | no              | no         | interrupted      |
+  // | 4    | no         | no            | no              | no         | empty response   |
+  // | 5    | no         | -             | yes             | -          | no               |
+  // | 6    | no         | -             | -               | yes        | no               |
+
+  // Merge content: prefer lastTextContent (confirmed), fallback to currentStreamingText (accumulated)
+  const finalContent = lastTextContent || currentStreamingText || ''
+  const wasAborted = abortController.signal.aborted
+  const hasErrorThought = sessionState.thoughts.some(t => t.type === 'error')
+  // Two independent interrupt reasons: SDK reported error_during_execution, or stream ended unexpectedly
+  const isInterrupted = !receivedResult || hadErrorDuringExecution
+
+  // Step 1: Save content if available
+  if (finalContent) {
+    const contentSource = lastTextContent ? 'lastTextContent' : 'currentStreamingText (fallback)'
+    console.log(`[Agent][${conversationId}] Saving content from ${contentSource}: ${finalContent.length} chars`)
     updateLastMessage(spaceId, conversationId, {
-      content: lastTextContent,
+      content: finalContent,
       thoughts: sessionState.thoughts.length > 0 ? [...sessionState.thoughts] : undefined,
-      tokenUsage: tokenUsage || undefined  // Include token usage if available
-    })
-    console.log(`[Agent][${conversationId}] Saved ${sessionState.thoughts.length} thoughts${tokenUsage ? ' with tokenUsage' : ''} to backend`)
-    sendToRenderer('agent:complete', spaceId, conversationId, {
-      type: 'complete',
-      duration: 0,
-      tokenUsage  // Include token usage data
+      tokenUsage: tokenUsage || undefined
     })
   } else {
-    console.log(`[Agent][${conversationId}] WARNING: No text content after SDK query completed`)
-    // CRITICAL: Still send complete event to unblock frontend
-    // This can happen if content_block_stop is missing from SDK response
+    console.log(`[Agent][${conversationId}] No content to save`)
+  }
 
-    // Fallback: Try to use currentStreamingText if available (content_block_stop was missed)
-    const fallbackContent = currentStreamingText || ''
-    if (fallbackContent) {
-      console.log(`[Agent][${conversationId}] Using fallback content from currentStreamingText: ${fallbackContent.length} chars`)
-      updateLastMessage(spaceId, conversationId, {
-        content: fallbackContent,
-        thoughts: sessionState.thoughts.length > 0 ? [...sessionState.thoughts] : undefined,
-        tokenUsage: tokenUsage || undefined
-      })
+  // Step 2: Always send complete event to unblock frontend
+  sendToRenderer('agent:complete', spaceId, conversationId, {
+    type: 'complete',
+    duration: 0,
+    tokenUsage
+  })
+
+  // Step 3: Determine if interrupted error should be sent
+  const getInterruptedErrorMessage = (): string | null => {
+    if (finalContent) {
+      // Has content: user aborted shows friendly message, other interrupts show warning
+      if (wasAborted) return 'Stopped by user.'
+      return isInterrupted ? 'Model response interrupted unexpectedly.' : null
+    } else {
+      // No content: skip if already has error thought or user aborted
+      if (hasErrorThought || wasAborted) return null
+      return isInterrupted
+        ? 'Model response interrupted unexpectedly.'
+        : `Unexpected empty response. ${FALLBACK_ERROR_HINT}`
     }
+  }
 
-    sendToRenderer('agent:complete', spaceId, conversationId, {
-      type: 'complete',
-      duration: 0,
-      tokenUsage  // Include token usage data
+  const errorMessage = getInterruptedErrorMessage()
+  if (errorMessage) {
+    const reason = isInterrupted
+      ? (hadErrorDuringExecution ? 'error_during_execution' : 'stream interrupted')
+      : 'empty response'
+    console.log(`[Agent][${conversationId}] Sending interrupted error (${reason}, content: ${finalContent ? 'yes' : 'no'})`)
+    sendToRenderer('agent:error', spaceId, conversationId, {
+      type: 'error',
+      errorType: 'interrupted',
+      error: errorMessage
     })
+  } else if (wasAborted) {
+    console.log(`[Agent][${conversationId}] User stopped - no error sent`)
   }
 }

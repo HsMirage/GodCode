@@ -9,6 +9,7 @@ import { useCanvasLifecycle } from '../hooks/useCanvasLifecycle'
 import { Message } from '../components/chat/MessageCard'
 import { SessionResumeIndicator } from '../components/session/SessionResumeIndicator'
 import { AgentWorkViewer } from '../components/agents/AgentWorkViewer'
+import { AgentList } from '../components/agents/AgentList'
 import { useAgentStore } from '../store/agent.store'
 import { useUIStore } from '../store/ui.store'
 import { AGENT_DEFINITIONS, type AgentRoutingStrategy } from '@shared/agent-definitions'
@@ -25,7 +26,7 @@ export function ChatPage() {
   const [streamingContent, setStreamingContent] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
   const { isOpen: canvasIsOpen } = useCanvasLifecycle()
-  const { selectedAgentId } = useAgentStore()
+  const { selectedAgentId, fetchAgents } = useAgentStore()
   const {
     isTaskPanelOpen,
     isBrowserPanelOpen,
@@ -65,6 +66,11 @@ export function ChatPage() {
     activeSessionIdRef.current = currentSessionId
   }, [currentSessionId])
 
+  useEffect(() => {
+    if (viewMode !== 'agent') return
+    void fetchAgents(currentSessionId)
+  }, [viewMode, currentSessionId, fetchAgents])
+
   // Ensure base data exists (spaces -> currentSpace).
   useEffect(() => {
     if (!window.codeall) {
@@ -88,10 +94,13 @@ export function ChatPage() {
       if (viewMode === 'chat') {
         setViewMode('workflow')
       }
+      if (viewMode === 'agent') {
+        void fetchAgents(currentSessionId)
+      }
     })
 
     return () => removeListener()
-  }, [currentSessionId, viewMode])
+  }, [currentSessionId, viewMode, fetchAgents])
 
   const chatDisabled = !currentSessionId
 
@@ -447,19 +456,24 @@ export function ChatPage() {
         )}
 
         {viewMode === 'agent' && (
-          <div className="flex-1 overflow-hidden h-full">
-            {selectedAgentId ? (
-              <AgentWorkViewer agentId={selectedAgentId} className="h-full" />
-            ) : (
-              <div className="flex h-full items-center justify-center">
-                <div className="text-center">
-                  <p className="text-[var(--text-secondary)]">请选择一个代理查看工作状态</p>
-                  <p className="mt-2 text-sm text-[var(--text-muted)]">
-                    在右侧面板或代理列表中选择一个活动代理
-                  </p>
+          <div className="flex-1 overflow-hidden h-full min-h-0 flex flex-col gap-3">
+            <div className="shrink-0 max-h-[42%] overflow-y-auto pr-1">
+              <AgentList />
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {selectedAgentId ? (
+                <AgentWorkViewer agentId={selectedAgentId} className="h-full" />
+              ) : (
+                <div className="flex h-full items-center justify-center">
+                  <div className="text-center">
+                    <p className="text-[var(--text-secondary)]">请选择一个代理查看工作状态</p>
+                    <p className="mt-2 text-sm text-[var(--text-muted)]">
+                      上方代理列表展示了当前会话的真实分工和状态
+                    </p>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -18,6 +18,11 @@ export type { DelegateTaskInput, DelegateTaskResult } from './delegate-engine'
 // Categories and agents
 export { categories } from './categories'
 export { agents } from './agents'
+export {
+  resolveAgentRuntimeToolNames,
+  resolveCategoryRuntimeToolNames,
+  resolveScopedRuntimeToolNames
+} from './tool-allowlist'
 export type { CategoryConfig } from './categories'
 export type { AgentConfig } from './agents'
 

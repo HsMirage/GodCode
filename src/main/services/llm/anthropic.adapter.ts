@@ -97,8 +97,10 @@ function normalizeMessageOrder(messages: MessageParam[]): MessageParam[] {
 /**
  * Convert tool definitions to Anthropic format
  */
-function getAnthropicTools(): AnthropicTool[] {
-  const toolDefs = toolExecutionService.getToolDefinitions()
+function getAnthropicTools(
+  scopedTools?: Array<{ name: string; description: string; parameters: Record<string, unknown> }>
+): AnthropicTool[] {
+  const toolDefs = scopedTools ?? toolExecutionService.getToolDefinitions()
   return toolDefs.map(tool => ({
     name: tool.name,
     description: tool.description,
@@ -156,7 +158,7 @@ export class AnthropicAdapter implements LLMAdapter {
     if (!model) {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
-    const tools = getAnthropicTools()
+    const tools = getAnthropicTools(config.tools)
     const maxTokens = config.maxTokens || config.maxOutputTokens || runtime.defaultMaxTokens
     const thinking =
       config.thinkingMode === true
@@ -171,9 +173,20 @@ export class AnthropicAdapter implements LLMAdapter {
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
       for (let attempt = 1; attempt <= runtime.maxRetries; attempt++) {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null
+        let externalAbortHandler: (() => void) | null = null
         try {
+          if (config.abortSignal?.aborted) {
+            throw new Error('Request aborted by user')
+          }
+
           const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+          timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+
+          if (config.abortSignal) {
+            externalAbortHandler = () => controller.abort()
+            config.abortSignal.addEventListener('abort', externalAbortHandler, { once: true })
+          }
 
           const response = await this.client.messages.create(
             {
@@ -190,7 +203,14 @@ export class AnthropicAdapter implements LLMAdapter {
             { signal: controller.signal }
           )
 
-          clearTimeout(timeoutId)
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+            timeoutId = null
+          }
+          if (config.abortSignal && externalAbortHandler) {
+            config.abortSignal.removeEventListener('abort', externalAbortHandler)
+            externalAbortHandler = null
+          }
 
           // Accumulate usage
           totalUsage.prompt_tokens += response.usage.input_tokens
@@ -260,6 +280,18 @@ export class AnthropicAdapter implements LLMAdapter {
           // Continue to next iteration
           break
         } catch (error) {
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+          }
+          if (config.abortSignal && externalAbortHandler) {
+            config.abortSignal.removeEventListener('abort', externalAbortHandler)
+          }
+
+          if (isAbortRequested(error, config.abortSignal)) {
+            logger.info('Anthropic request aborted by user')
+            throw error instanceof Error ? error : new Error('Request aborted by user')
+          }
+
           logger.warn(`Anthropic request failed (attempt ${attempt}/${runtime.maxRetries})`, { error })
 
           if (attempt === runtime.maxRetries) {
@@ -287,7 +319,7 @@ export class AnthropicAdapter implements LLMAdapter {
     if (!model) {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
-    const tools = getAnthropicTools()
+    const tools = getAnthropicTools(config.tools)
     const maxTokens = config.maxTokens || config.maxOutputTokens || runtime.defaultMaxTokens
     const thinking =
       config.thinkingMode === true ? ({ type: 'enabled', budget_tokens: 1024 } as const) : undefined

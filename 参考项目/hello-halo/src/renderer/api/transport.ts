@@ -208,11 +208,13 @@ export function onEvent(channel: string, callback: (data: unknown) => void): () 
       'agent:thought-delta': 'onAgentThoughtDelta',
       'agent:mcp-status': 'onAgentMcpStatus',
       'agent:compact': 'onAgentCompact',
+      'agent:ask-question': 'onAgentAskQuestion',
       'remote:status-change': 'onRemoteStatusChange',
       'browser:state-change': 'onBrowserStateChange',
       'browser:zoom-changed': 'onBrowserZoomChanged',
       'canvas:tab-action': 'onCanvasTabAction',
       'ai-browser:active-view-changed': 'onAIBrowserActiveViewChanged',
+      'artifact:tree-update': 'onArtifactTreeUpdate',
       'perf:snapshot': 'onPerfSnapshot',
       'perf:warning': 'onPerfWarning'
     }

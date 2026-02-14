@@ -158,8 +158,10 @@ function toGeminiContents(messages: Message[]): GeminiContent[] {
 /**
  * 将工具定义转换为 Gemini 函数声明格式
  */
-function getGeminiTools(): GeminiTool | undefined {
-  const toolDefs = toolExecutionService.getToolDefinitions()
+function getGeminiTools(
+  scopedTools?: Array<{ name: string; description: string; parameters: Record<string, unknown> }>
+): GeminiTool | undefined {
+  const toolDefs = scopedTools ?? toolExecutionService.getToolDefinitions()
 
   if (toolDefs.length === 0) {
     return undefined
@@ -267,16 +269,27 @@ export class GeminiAdapter implements LLMAdapter {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
     const contents = toGeminiContents(messages)
-    const tools = getGeminiTools()
+    const tools = getGeminiTools(config.tools)
 
     let fullContent = ''
     const totalUsage = { prompt_tokens: 0, completion_tokens: 0 }
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
       for (let attempt = 1; attempt <= runtime.maxRetries; attempt++) {
+        let timeoutId: ReturnType<typeof setTimeout> | null = null
+        let externalAbortHandler: (() => void) | null = null
         try {
+          if (config.abortSignal?.aborted) {
+            throw new Error('Request aborted by user')
+          }
+
           const controller = new AbortController()
-          const timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+          timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+
+          if (config.abortSignal) {
+            externalAbortHandler = () => controller.abort()
+            config.abortSignal.addEventListener('abort', externalAbortHandler, { once: true })
+          }
 
           const requestBody: GeminiGenerateContentRequest = {
             contents,
@@ -301,7 +314,14 @@ export class GeminiAdapter implements LLMAdapter {
             signal: controller.signal
           })
 
-          clearTimeout(timeoutId)
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+            timeoutId = null
+          }
+          if (config.abortSignal && externalAbortHandler) {
+            config.abortSignal.removeEventListener('abort', externalAbortHandler)
+            externalAbortHandler = null
+          }
 
           if (!response.ok) {
             const errorText = await response.text()
@@ -373,6 +393,18 @@ export class GeminiAdapter implements LLMAdapter {
           // 继续下一轮迭代
           break
         } catch (error) {
+          if (timeoutId) {
+            clearTimeout(timeoutId)
+          }
+          if (config.abortSignal && externalAbortHandler) {
+            config.abortSignal.removeEventListener('abort', externalAbortHandler)
+          }
+
+          if (isAbortRequested(error, config.abortSignal)) {
+            logger.info('Gemini request aborted by user')
+            throw error instanceof Error ? error : new Error('Request aborted by user')
+          }
+
           logger.warn(`Gemini request failed (attempt ${attempt}/${runtime.maxRetries})`, { error })
 
           if (attempt === runtime.maxRetries) {
@@ -402,7 +434,7 @@ export class GeminiAdapter implements LLMAdapter {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
     const contents = toGeminiContents(messages)
-    const tools = getGeminiTools()
+    const tools = getGeminiTools(config.tools)
 
     logger.info('[GeminiAdapter] streamMessage called', {
       model,

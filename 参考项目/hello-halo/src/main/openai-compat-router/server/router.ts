@@ -22,15 +22,20 @@ export function createApp(options: RouterOptions = {}): Express {
   const { debug = false, timeoutMs } = options
 
   // Body parser with large limit for images
-  app.use(express.json({ limit: '50mb' }))
+  // verify callback captures the raw body buffer before JSON parsing,
+  // enabling zero-cost forwarding when interceptors don't modify the request.
+  app.use(express.json({
+    limit: '50mb',
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf
+    }
+  }))
 
-  // Debug logging middleware
-  if (debug) {
-    app.use((req, _res, next) => {
-      console.log(`[OpenAICompatRouter] ${req.method} ${req.url}`)
-      next()
-    })
-  }
+  // Request logging middleware (production-level)
+  app.use((req, _res, next) => {
+    console.log(`[Router] ${req.method} ${req.url}`)
+    next()
+  })
 
   // Health check endpoint
   app.get('/health', (_req, res) => {
@@ -65,7 +70,23 @@ export function createApp(options: RouterOptions = {}): Express {
     }
 
     // Handle the request
-    await handleMessagesRequest(anthropicRequest, decodedConfig, res, { debug, timeoutMs })
+    // Forward all SDK headers for transparent passthrough, excluding hop-by-hop
+    // headers and those that will be overridden by fetchAnthropicUpstream.
+    // Upstream may validate any header at any time — we must not silently drop them.
+    const HOP_BY_HOP = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'x-api-key'])
+    const sdkHeaders: Record<string, string> = {}
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (!HOP_BY_HOP.has(key) && value) {
+        sdkHeaders[key] = Array.isArray(value) ? value[0] : value
+      }
+    }
+    const queryString = req.url.includes('?') ? req.url.split('?')[1] : undefined
+
+    const rawBody = (req as any).rawBody as Buffer | undefined
+
+    await handleMessagesRequest(anthropicRequest, decodedConfig, res, {
+      debug, timeoutMs, sdkHeaders, queryString, rawBody
+    })
   })
 
   // Token counting endpoint

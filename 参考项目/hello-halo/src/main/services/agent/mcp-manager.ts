@@ -18,6 +18,7 @@ import {
   broadcastToAllClients,
   setMainWindow
 } from './helpers'
+import { getCleanUserEnv } from './sdk-config'
 
 // ============================================
 // MCP Status Cache
@@ -134,7 +135,9 @@ export async function testMcpConnections(
         key: credentials.apiKey,
         model: credentials.model,
         headers: credentials.customHeaders,
-        apiType
+        apiType,
+        forceStream: credentials.forceStream,
+        filterContent: credentials.filterContent
       })
       sdkModel = 'claude-sonnet-4-20250514'
       console.log(`[Agent] MCP test: ${credentials.provider} provider enabled via ${anthropicBaseUrl}, apiType=${apiType}`)
@@ -155,7 +158,7 @@ export async function testMcpConnections(
         executable: electronPath,
         executableArgs: ['--no-warnings'],
         env: {
-          ...process.env,
+          ...getCleanUserEnv(),
           ELECTRON_RUN_AS_NODE: '1',
           ELECTRON_NO_ATTACH_CONSOLE: '1',
           ANTHROPIC_API_KEY: anthropicApiKey,

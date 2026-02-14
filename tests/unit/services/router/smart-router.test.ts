@@ -105,6 +105,19 @@ describe('SmartRouter', () => {
       expect(mockWorkforceEngine.executeWorkflow).toHaveBeenCalledWith(input, { category: 'unspecified-high' })
     })
 
+    it('should propagate abort signal to workforce strategy', async () => {
+      const input = '创建用户注册功能'
+      const controller = new AbortController()
+
+      await router.route(input, { sessionId: 'session-1', abortSignal: controller.signal })
+
+      expect(mockWorkforceEngine.executeWorkflow).toHaveBeenCalledWith(
+        input,
+        'session-1',
+        expect.objectContaining({ abortSignal: controller.signal })
+      )
+    })
+
     it('should execute direct strategy correctly', async () => {
       // Create router with custom rule that forces direct strategy
       const customRouter = new SmartRouter([{ pattern: /test/, strategy: 'direct' }])

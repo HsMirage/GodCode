@@ -11,10 +11,9 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Copy, Check, Code, Eye, ExternalLink, Pencil } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeRaw from 'rehype-raw'
-import { highlightCodeSync } from '../../../lib/highlight-loader'
+import { Streamdown } from 'streamdown'
+import 'streamdown/styles.css'
+import { useCodePlugin } from '../../../lib/streamdown-plugins'
 import { api } from '../../../api'
 import type { CanvasTab } from '../../../stores/canvas.store'
 import { useTranslation } from '../../../i18n'
@@ -68,6 +67,7 @@ export function MarkdownViewer({ tab, onScrollChange, onEditRequest }: MarkdownV
   const containerRef = useRef<HTMLDivElement>(null)
   const [viewMode, setViewMode] = useState<'rendered' | 'source'>('rendered')
   const [copied, setCopied] = useState(false)
+  const codePlugin = useCodePlugin()
 
   // Get the base directory of the markdown file for resolving relative paths
   const basePath = tab.path ? tab.path.substring(0, tab.path.lastIndexOf('/')) : ''
@@ -193,43 +193,11 @@ export function MarkdownViewer({ tab, onScrollChange, onEditRequest }: MarkdownV
       >
         {viewMode === 'rendered' ? (
           <div className="prose prose-invert max-w-none p-6 sm:p-8">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeRaw]}
+            <Streamdown
+              mode="static"
+              controls={{ code: true }}
+              plugins={codePlugin ? { code: codePlugin } : undefined}
               components={{
-                // Code block container - uses not-prose to escape prose styles
-                // for CopyButton positioning (styles must be defined here, not in config)
-                pre({ children }) {
-                  return (
-                    <div className="relative group not-prose">
-                      <pre className="bg-muted/50 rounded-lg p-4 overflow-x-auto text-sm leading-relaxed">
-                        {children}
-                      </pre>
-                      <PreCopyButton>{children}</PreCopyButton>
-                    </div>
-                  )
-                },
-                // Handle code element - only process code blocks for syntax highlighting
-                // Inline code styling is handled by tailwind.config.cjs (:not(pre) > code)
-                code({ node, inline, className, children, ...props }: any) {
-                  // Inline code - let prose styles handle it
-                  if (inline) {
-                    return <code {...props}>{children}</code>
-                  }
-
-                  // Code block - apply syntax highlighting
-                  const match = /language-(\w+)/.exec(className || '')
-                  const language = match ? match[1] : ''
-                  const code = String(children).replace(/\n$/, '')
-                  const highlighted = highlightCodeSync(code, language)
-
-                  return (
-                    <code
-                      className={`hljs ${language ? `language-${language}` : ''}`}
-                      dangerouslySetInnerHTML={{ __html: highlighted }}
-                    />
-                  )
-                },
                 // Style tables
                 table({ children }) {
                   return (
@@ -239,7 +207,7 @@ export function MarkdownViewer({ tab, onScrollChange, onEditRequest }: MarkdownV
                   )
                 },
                 // Links - add target="_blank" (styling from tailwind.config.cjs)
-                a({ href, children }) {
+                a({ href, children }: any) {
                   return (
                     <a href={href} target="_blank" rel="noopener noreferrer">
                       {children}
@@ -247,7 +215,7 @@ export function MarkdownViewer({ tab, onScrollChange, onEditRequest }: MarkdownV
                   )
                 },
                 // Style images - resolve relative paths using halo-file:// protocol
-                img({ src, alt }) {
+                img({ src, alt }: any) {
                   return (
                     <img
                       src={resolveImageSrc(src, basePath)}
@@ -261,7 +229,7 @@ export function MarkdownViewer({ tab, onScrollChange, onEditRequest }: MarkdownV
               }}
             >
               {content}
-            </ReactMarkdown>
+            </Streamdown>
           </div>
         ) : (
           <SourceView content={content} />
@@ -293,55 +261,5 @@ function SourceView({ content }: { content: string }) {
         {content}
       </pre>
     </div>
-  )
-}
-
-/**
- * Extract text content from React children (for code blocks)
- */
-function extractTextFromChildren(children: React.ReactNode): string {
-  if (typeof children === 'string') return children
-  if (Array.isArray(children)) return children.map(extractTextFromChildren).join('')
-  if (children && typeof children === 'object' && 'props' in children) {
-    const props = children.props as { children?: React.ReactNode; dangerouslySetInnerHTML?: { __html: string } }
-    if (props.dangerouslySetInnerHTML) {
-      // Extract text from HTML string
-      return props.dangerouslySetInnerHTML.__html.replace(/<[^>]*>/g, '')
-    }
-    return extractTextFromChildren(props.children)
-  }
-  return ''
-}
-
-/**
- * Copy button for pre blocks (extracts text from children)
- */
-function PreCopyButton({ children }: { children: React.ReactNode }) {
-  const { t } = useTranslation()
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = async () => {
-    try {
-      const text = extractTextFromChildren(children)
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
-    }
-  }
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="absolute top-2 right-2 p-1.5 rounded bg-background/80 opacity-0 group-hover:opacity-100 transition-opacity"
-      title={t('Copy code')}
-    >
-      {copied ? (
-        <Check className="w-4 h-4 text-green-500" />
-      ) : (
-        <Copy className="w-4 h-4 text-muted-foreground" />
-      )}
-    </button>
   )
 }

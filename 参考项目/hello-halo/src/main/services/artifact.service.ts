@@ -38,20 +38,6 @@ export interface Artifact {
   size?: number
 }
 
-// Tree node structure for developer view
-export interface ArtifactTreeNode {
-  id: string
-  name: string
-  type: 'file' | 'folder'
-  path: string
-  extension: string
-  icon: string
-  size?: number
-  children?: ArtifactTreeNode[]
-  depth: number
-  childrenLoaded?: boolean  // For lazy loading - indicates if children have been fetched
-}
-
 // Get working directory for a space
 function getWorkingDir(spaceId: string): string {
   if (spaceId === 'halo-temp') {
@@ -61,7 +47,7 @@ function getWorkingDir(spaceId: string): string {
 
   const space = getSpace(spaceId)
   if (space) {
-    return space.path
+    return space.workingDir || space.path
   }
 
   return getTempSpacePath()
@@ -109,13 +95,15 @@ export function getArtifact(artifactId: string): Artifact | null {
   return null
 }
 
-// Watch for file changes (future feature)
+// Watch for file changes
+// Note: File watching is implemented in artifact-cache.service.ts using @parcel/watcher.
+// This function is kept for API compatibility but delegates to the cache service.
 export function watchArtifacts(
   spaceId: string,
   callback: (artifacts: Artifact[]) => void
 ): () => void {
-  // TODO: Implement file watching with chokidar or similar
-  // For now, return a no-op cleanup function
+  // File watching is handled by artifact-cache.service.ts via IPC events
+  // Callers should use api.onArtifactChanged() instead
   return () => {}
 }
 
@@ -123,22 +111,20 @@ export function watchArtifacts(
  * List artifacts as tree structure (lazy loading)
  * Only loads root level initially, children are loaded on demand
  */
-export async function listArtifactsTree(spaceId: string): Promise<ArtifactTreeNode[]> {
+export async function listArtifactsTree(spaceId: string): Promise<CachedTreeNode[]> {
   console.log(`[Artifact] listArtifactsTree for space: ${spaceId}`)
 
   const workDir = getWorkingDir(spaceId)
+  console.log(`[Artifact] listArtifactsTree workDir resolved: ${workDir}`)
 
   if (!existsSync(workDir)) {
     console.log(`[Artifact] Directory does not exist: ${workDir}`)
     return []
   }
 
-  const cachedNodes = await listArtifactsTreeCached(spaceId, workDir)
+  const nodes = await listArtifactsTreeCached(spaceId, workDir)
 
-  // Convert to ArtifactTreeNode format
-  const nodes: ArtifactTreeNode[] = cachedNodes.map(cn => convertToTreeNode(cn))
-
-  console.log(`[Artifact] Found ${nodes.length} root nodes`)
+  console.log(`[Artifact] listArtifactsTree result: ${nodes.length} root nodes`)
   return nodes
 }
 
@@ -148,10 +134,11 @@ export async function listArtifactsTree(spaceId: string): Promise<ArtifactTreeNo
 export async function loadTreeChildren(
   spaceId: string,
   dirPath: string
-): Promise<ArtifactTreeNode[]> {
+): Promise<CachedTreeNode[]> {
   console.log(`[Artifact] loadTreeChildren for: ${dirPath}`)
 
   const workDir = getWorkingDir(spaceId)
+  console.log(`[Artifact] loadTreeChildren workDir resolved: ${workDir}`)
 
   if (!existsSync(dirPath)) {
     console.log(`[Artifact] Directory does not exist: ${dirPath}`)
@@ -165,7 +152,7 @@ export async function loadTreeChildren(
     // Must use sep suffix to prevent /workspace_tmp matching /workspace
     const realWorkDirWithSep = realWorkDir.endsWith(sep) ? realWorkDir : realWorkDir + sep
     if (realPath !== realWorkDir && !realPath.startsWith(realWorkDirWithSep)) {
-      console.warn(`[Artifact] Path traversal blocked: ${dirPath}`)
+      console.warn(`[Artifact] Path traversal blocked: ${dirPath} (realPath=${realPath}, workDir=${realWorkDir})`)
       return []
     }
   } catch {
@@ -174,29 +161,12 @@ export async function loadTreeChildren(
   }
 
   try {
-    const cachedNodes = await loadDirectoryChildren(spaceId, dirPath, workDir)
-    return cachedNodes.map(cn => convertToTreeNode(cn))
+    const result = await loadDirectoryChildren(spaceId, dirPath, workDir)
+    console.log(`[Artifact] loadTreeChildren result: ${result.length} children for ${dirPath}`)
+    return result
   } catch (error) {
     console.error(`[Artifact] loadTreeChildren error:`, error)
     return []
-  }
-}
-
-/**
- * Convert CachedTreeNode to ArtifactTreeNode
- */
-function convertToTreeNode(cn: CachedTreeNode): ArtifactTreeNode {
-  return {
-    id: cn.id,
-    name: cn.name,
-    type: cn.type,
-    path: cn.path,
-    extension: cn.extension,
-    icon: cn.icon,
-    size: cn.size,
-    depth: cn.depth,
-    children: cn.children?.map(child => convertToTreeNode(child)),
-    childrenLoaded: cn.childrenLoaded
   }
 }
 

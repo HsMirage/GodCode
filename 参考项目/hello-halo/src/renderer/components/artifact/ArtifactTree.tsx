@@ -1,33 +1,32 @@
 /**
  * ArtifactTree - Professional tree view using react-arborist
- * VSCode-style file explorer with keyboard navigation, virtual scrolling, and more
+ * VSCode-style file explorer with virtual scrolling and lazy loading
  *
  * PERFORMANCE OPTIMIZED:
- * - Lazy loading: children are fetched on-demand when expanding folders
- * - Incremental updates: file watcher events update tree without full refresh
- * - Cached data: tree state is preserved across re-renders
+ * - Zero conversion: backend CachedTreeNode shape consumed directly (no intermediate types)
+ * - O(1) node lookup: mutable Map<path, node> index avoids recursive tree traversal
+ * - Mutable ref + revision counter: watcher updates mutate in place, single shallow copy triggers render
+ * - CSS-only hover: no per-node React state for mouse events
+ * - Lazy loading: children fetched on-demand when expanding folders
  */
 
 import { useState, useCallback, useEffect, useMemo, createContext, useContext, useRef } from 'react'
-import { Tree, NodeRendererProps, NodeApi } from 'react-arborist'
+import { Tree, NodeRendererProps } from 'react-arborist'
 import { api } from '../../api'
 import { useCanvasStore } from '../../stores/canvas.store'
-import type { ArtifactTreeNode, ArtifactChangeEvent } from '../../types'
+import type { ArtifactTreeNode, ArtifactTreeUpdateEvent } from '../../types'
 import { FileIcon } from '../icons/ToolIcons'
 import { ChevronRight, ChevronDown, Download, Eye, Loader2 } from 'lucide-react'
-import { useIsGenerating } from '../../stores/chat.store'
 import { useTranslation } from '../../i18n'
 import { canOpenInCanvas } from '../../constants/file-types'
 
 // Context to pass openFile function to tree nodes without each node subscribing to store
-// This prevents massive re-renders when canvas state changes
 type OpenFileFn = (path: string, title?: string) => Promise<void>
 const OpenFileContext = createContext<OpenFileFn | null>(null)
 
 const isWebMode = api.isRemoteMode()
 
 // Directories that should be visually dimmed (secondary importance)
-// These are shown but with reduced opacity to help users focus on source code
 const DIMMED_DIRS = new Set([
   // Dependencies
   'node_modules', 'vendor', 'venv', '.venv', 'Pods', 'bower_components',
@@ -45,11 +44,8 @@ const DIMMED_DIRS = new Set([
   '.halo', 'logs', 'tmp', 'temp',
 ])
 
-// Check if a file/folder should be dimmed (shown with reduced opacity)
 function isDimmed(name: string): boolean {
-  // Hidden files (starting with .) are dimmed
   if (name.startsWith('.')) return true
-  // Known secondary directories are dimmed
   return DIMMED_DIRS.has(name)
 }
 
@@ -58,19 +54,13 @@ interface ArtifactTreeProps {
 }
 
 // Fixed offsets for tree height calculation (in pixels)
-// App Header (44) + Rail Header (40) + Rail Footer (~60) + Tree Header (28) + buffer
 const TREE_HEIGHT_OFFSET = 180
 
-// Simple hook using window height minus fixed offset
-// No complex measurement needed - window.innerHeight is always immediately available
 function useTreeHeight() {
   const [height, setHeight] = useState(() => window.innerHeight - TREE_HEIGHT_OFFSET)
 
   useEffect(() => {
-    const handleResize = () => {
-      setHeight(window.innerHeight - TREE_HEIGHT_OFFSET)
-    }
-
+    const handleResize = () => setHeight(window.innerHeight - TREE_HEIGHT_OFFSET)
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
   }, [])
@@ -78,47 +68,95 @@ function useTreeHeight() {
   return height
 }
 
-// Transform backend tree data to react-arborist format
-interface TreeNodeData {
-  id: string
-  name: string
-  path: string
-  extension: string
-  isFolder: boolean
-  children?: TreeNodeData[]
-  childrenLoaded?: boolean  // For lazy loading
-  isLoading?: boolean       // Loading indicator for this folder
+// Get parent directory path (supports both / and \ separators)
+function getParentPath(filePath: string): string {
+  const lastSep = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
+  return lastSep > 0 ? filePath.substring(0, lastSep) : filePath
 }
 
 // Context for lazy loading children
 interface LazyLoadContextType {
-  loadChildren: (path: string) => Promise<TreeNodeData[]>
+  loadChildren: (path: string) => Promise<void>
   loadingPaths: Set<string>
 }
 const LazyLoadContext = createContext<LazyLoadContextType | null>(null)
 
-function transformToArboristData(nodes: ArtifactTreeNode[]): TreeNodeData[] {
-  return nodes.map(node => ({
-    id: node.id,
-    name: node.name,
-    path: node.path,
-    extension: node.extension,
-    isFolder: node.type === 'folder',
-    children: node.children ? transformToArboristData(node.children) : (node.type === 'folder' ? [] : undefined),
-    childrenLoaded: node.childrenLoaded ?? false
-  }))
+// ============================================
+// Index helpers — maintain Map<path, node> for O(1) lookup
+// ============================================
+
+/** Add direct children to the index (non-recursive — deeper nodes indexed on expand) */
+function indexNodes(nodes: ArtifactTreeNode[], index: Map<string, ArtifactTreeNode>): void {
+  for (const node of nodes) {
+    index.set(node.path, node)
+  }
 }
+
+/** Remove a node and its entire expanded subtree from the index */
+function removeSubtreeFromIndex(node: ArtifactTreeNode, index: Map<string, ArtifactTreeNode>): void {
+  index.delete(node.path)
+  if (node.children) {
+    for (const child of node.children) {
+      removeSubtreeFromIndex(child, index)
+    }
+  }
+}
+
+/**
+ * Merge incoming children (from watcher or IPC) with existing children.
+ * Preserves react-arborist node id (key stability) and expanded folder state.
+ * Maintains the path→node index as a side effect.
+ */
+function mergeChildren(
+  incoming: ArtifactTreeNode[],
+  existing: ArtifactTreeNode[],
+  index: Map<string, ArtifactTreeNode>
+): ArtifactTreeNode[] {
+  const existingByPath = new Map(existing.map(n => [n.path, n]))
+
+  // Remove deleted nodes from index
+  const incomingPaths = new Set(incoming.map(n => n.path))
+  for (const node of existing) {
+    if (!incomingPaths.has(node.path)) {
+      removeSubtreeFromIndex(node, index)
+    }
+  }
+
+  return incoming.map(node => {
+    const prev = existingByPath.get(node.path)
+    if (prev) {
+      // Preserve react-arborist key
+      node.id = prev.id
+      // Preserve expanded state: keep children the user already loaded
+      if (prev.childrenLoaded && prev.children) {
+        node.children = prev.children
+        node.childrenLoaded = prev.childrenLoaded
+      }
+    }
+    index.set(node.path, node)
+    return node
+  })
+}
+
+// ============================================
+// ArtifactTree component
+// ============================================
 
 export function ArtifactTree({ spaceId }: ArtifactTreeProps) {
   const { t } = useTranslation()
-  const [treeData, setTreeData] = useState<TreeNodeData[]>([])
   const [loadingPaths, setLoadingPaths] = useState<Set<string>>(new Set())
-  const isGenerating = useIsGenerating()
   const treeHeight = useTreeHeight()
   const watcherInitialized = useRef(false)
 
-  // Subscribe to openFile once at parent level, pass down via context
-  // This prevents each TreeNodeComponent from subscribing to the store
+  // Whether the initial IPC load has completed (distinguishes "loading" from "truly empty")
+  const [hasLoaded, setHasLoaded] = useState(false)
+
+  // Mutable tree data + path→node index (avoids full-tree immutable copies)
+  const nodeIndex = useRef<Map<string, ArtifactTreeNode>>(new Map())
+  const treeDataRef = useRef<ArtifactTreeNode[]>([])
+  // Revision counter — incrementing triggers react-arborist to pick up mutated data
+  const [revision, setRevision] = useState(0)
+
   const openFile = useCanvasStore(state => state.openFile)
 
   // Load tree data (root level only for lazy loading)
@@ -126,44 +164,53 @@ export function ArtifactTree({ spaceId }: ArtifactTreeProps) {
     if (!spaceId) return
 
     try {
+      console.log('[ArtifactTree] loadTree START, spaceId:', spaceId)
       const response = await api.listArtifactsTree(spaceId)
+      console.log('[ArtifactTree] loadTree IPC response: success=%s, nodeCount=%d',
+        response.success, response.data?.length ?? 0)
       if (response.success && response.data) {
-        const transformed = transformToArboristData(response.data as ArtifactTreeNode[])
-        setTreeData(transformed)
+        const nodes = response.data as ArtifactTreeNode[]
+        treeDataRef.current = nodes
+        nodeIndex.current.clear()
+        indexNodes(nodes, nodeIndex.current)
+        setRevision(r => r + 1)
+      } else {
+        console.warn('[ArtifactTree] loadTree: response not successful or no data', response)
       }
     } catch (error) {
       console.error('[ArtifactTree] Failed to load tree:', error)
+    } finally {
+      setHasLoaded(true)
     }
   }, [spaceId])
 
-  // Lazy load children for a folder
-  const loadChildren = useCallback(async (dirPath: string): Promise<TreeNodeData[]> => {
-    if (!spaceId) return []
+  // Lazy load children for a folder — mutates ref in place, O(1) lookup
+  const loadChildren = useCallback(async (dirPath: string): Promise<void> => {
+    if (!spaceId) return
 
     try {
+      console.log('[ArtifactTree] loadChildren START: %s', dirPath)
       setLoadingPaths(prev => new Set(prev).add(dirPath))
       const response = await api.loadArtifactChildren(spaceId, dirPath)
 
+      console.log('[ArtifactTree] loadChildren IPC response: success=%s, childCount=%d, path=%s',
+        response.success, response.data?.length ?? 0, dirPath)
       if (response.success && response.data) {
-        const children = transformToArboristData(response.data as ArtifactTreeNode[])
-
-        // Update tree data with loaded children
-        setTreeData(prev => {
-          const updateNodeChildren = (nodes: TreeNodeData[]): TreeNodeData[] => {
-            return nodes.map(node => {
-              if (node.path === dirPath) {
-                return { ...node, children, childrenLoaded: true }
-              }
-              if (node.children) {
-                return { ...node, children: updateNodeChildren(node.children) }
-              }
-              return node
-            })
-          }
-          return updateNodeChildren(prev)
-        })
-
-        return children
+        const children = response.data as ArtifactTreeNode[]
+        const parent = nodeIndex.current.get(dirPath)
+        if (parent) {
+          parent.children = children
+          parent.childrenLoaded = true
+          indexNodes(children, nodeIndex.current)
+          setRevision(r => r + 1)
+          console.log('[ArtifactTree] loadChildren OK: %d children attached to "%s", hasChildren=%s',
+            children.length, parent.name, Array.isArray(parent.children))
+        } else {
+          console.warn('[ArtifactTree] loadChildren: parent NOT in nodeIndex — path=%s, indexSize=%d',
+            dirPath, nodeIndex.current.size)
+        }
+      } else {
+        console.warn('[ArtifactTree] loadChildren: response not successful or empty — path=%s', dirPath)
       }
     } catch (error) {
       console.error('[ArtifactTree] Failed to load children:', error)
@@ -174,106 +221,72 @@ export function ArtifactTree({ spaceId }: ArtifactTreeProps) {
         return next
       })
     }
-    return []
   }, [spaceId])
 
-  // Handle file change events from watcher
-  const handleArtifactChange = useCallback((event: ArtifactChangeEvent) => {
-    if (event.spaceId !== spaceId) return
+  // Handle tree update events from watcher (pre-computed data, zero IPC round-trips)
+  // O(1) node lookup via index, mutate in place, single revision bump
+  const handleTreeUpdate = useCallback((event: ArtifactTreeUpdateEvent) => {
+    if (event.spaceId !== spaceId || event.updatedDirs.length === 0) return
 
-    console.log('[ArtifactTree] Artifact changed:', event.type, event.relativePath)
+    for (const { dirPath, children } of event.updatedDirs) {
+      const incomingChildren = children as ArtifactTreeNode[]
+      const parent = nodeIndex.current.get(dirPath)
 
-    // For simplicity, refresh the affected part of the tree
-    // More sophisticated incremental updates could be implemented
-    // Use regex to support both / and \ (Windows compatibility)
-    const lastSepIndex = Math.max(event.path.lastIndexOf('/'), event.path.lastIndexOf('\\'))
-    const parentPath = lastSepIndex > 0 ? event.path.substring(0, lastSepIndex) : ''
+      if (parent) {
+        // Known expanded directory — O(1) lookup, merge children
+        parent.children = mergeChildren(incomingChildren, parent.children || [], nodeIndex.current)
+        parent.childrenLoaded = true
+      } else {
+        // Check if this is a root-level update
+        const isRoot = treeDataRef.current.length > 0 &&
+          treeDataRef.current.some(n => getParentPath(n.path) === dirPath)
 
-    setTreeData(prev => {
-      // If the change is at root level, trigger a refresh
-      if (!parentPath || parentPath === event.path) {
-        // Defer refresh to avoid state update during render
-        setTimeout(loadTree, 100)
-        return prev
-      }
-
-      // Check if the parent folder was previously loaded (likely expanded)
-      // and schedule a reload if so
-      const findAndCheckNode = (nodes: TreeNodeData[]): boolean => {
-        for (const node of nodes) {
-          if (node.path === parentPath && node.childrenLoaded) {
-            return true
-          }
-          if (node.children && findAndCheckNode(node.children)) {
-            return true
-          }
+        if (isRoot || treeDataRef.current.length === 0) {
+          treeDataRef.current = mergeChildren(incomingChildren, treeDataRef.current, nodeIndex.current)
         }
-        return false
+        // Else: untracked directory, skip — will be loaded on first expand
       }
-      const needsReload = findAndCheckNode(prev)
+    }
 
-      // Find and refresh the parent folder's children
-      const refreshNode = (nodes: TreeNodeData[]): TreeNodeData[] => {
-        return nodes.map(node => {
-          if (node.path === parentPath && node.childrenLoaded) {
-            // Mark as needing refresh
-            return { ...node, childrenLoaded: false }
-          }
-          if (node.children) {
-            return { ...node, children: refreshNode(node.children) }
-          }
-          return node
-        })
-      }
-
-      // If the folder was expanded, schedule a reload after state update
-      if (needsReload) {
-        setTimeout(() => loadChildren(parentPath), 100)
-      }
-
-      return refreshNode(prev)
-    })
-  }, [spaceId, loadTree, loadChildren])
+    setRevision(r => r + 1)
+  }, [spaceId])
 
   // Initialize watcher and subscribe to changes
   useEffect(() => {
     if (!spaceId || watcherInitialized.current) return
 
-    // Initialize watcher
     api.initArtifactWatcher(spaceId).catch(err => {
       console.error('[ArtifactTree] Failed to init watcher:', err)
     })
 
-    // Subscribe to change events
-    const cleanup = api.onArtifactChanged(handleArtifactChange)
+    const cleanup = api.onArtifactTreeUpdate(handleTreeUpdate)
     watcherInitialized.current = true
 
     return () => {
       cleanup()
       watcherInitialized.current = false
     }
-  }, [spaceId, handleArtifactChange])
+  }, [spaceId, handleTreeUpdate])
 
   // Load on mount and when space changes
   useEffect(() => {
     loadTree()
   }, [loadTree])
 
-  // Refresh when generation completes (debounced)
-  useEffect(() => {
-    if (!isGenerating) {
-      const timer = setTimeout(loadTree, 500)
-      return () => clearTimeout(timer)
-    }
-  }, [isGenerating, loadTree])
+  // New shallow root array only when revision changes — internal nodes are same (mutated) objects
+  const treeData = useMemo(() => [...treeDataRef.current], [revision])
 
-  // Lazy load context value
   const lazyLoadValue = useMemo(() => ({
     loadChildren,
     loadingPaths
   }), [loadChildren, loadingPaths])
 
+  // Three-state empty check: loading → show nothing; loaded & empty → "No files"
   if (treeData.length === 0) {
+    if (!hasLoaded) {
+      // Still loading — render empty container to avoid "No files" flash
+      return null
+    }
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-2">
         <div className="w-10 h-10 rounded-lg border border-dashed border-muted-foreground/30 flex items-center justify-center mb-2">
@@ -293,9 +306,9 @@ export function ArtifactTree({ spaceId }: ArtifactTreeProps) {
             {t('Files')}
           </div>
 
-          {/* Tree - uses window height based calculation */}
+          {/* Tree — uses window height based calculation */}
           <div className="flex-1 overflow-hidden">
-            <Tree
+            <Tree<ArtifactTreeNode>
               data={treeData}
               openByDefault={false}
               width="100%"
@@ -318,37 +331,34 @@ export function ArtifactTree({ spaceId }: ArtifactTreeProps) {
   )
 }
 
-// Custom node renderer for VSCode-like appearance
-// Uses context for openFile to avoid store subscription in each node
-function TreeNodeComponent({ node, style, dragHandle }: NodeRendererProps<TreeNodeData>) {
+// ============================================
+// Tree node renderer — CSS-only hover, no per-node state
+// ============================================
+
+function TreeNodeComponent({ node, style, dragHandle }: NodeRendererProps<ArtifactTreeNode>) {
   const { t } = useTranslation()
-  const [isHovered, setIsHovered] = useState(false)
-  // Get openFile from context (subscribed once at parent ArtifactTree level)
   const openFile = useContext(OpenFileContext)
-  // Get lazy loading context
   const lazyLoad = useContext(LazyLoadContext)
   const data = node.data
-  const isFolder = data.isFolder
+  const isFolder = data.type === 'folder'
   const isLoading = lazyLoad?.loadingPaths.has(data.path) ?? false
-  const dimmed = isDimmed(data.name)  // Check if this item should be dimmed
-
-  // Check if this file can be viewed in the canvas
+  const dimmed = isDimmed(data.name)
   const canViewInCanvas = !isFolder && canOpenInCanvas(data.extension)
 
   // Handle folder toggle with lazy loading
   const handleToggle = useCallback(async () => {
     if (!isFolder) return
-
-    // If opening and children not loaded, trigger lazy load
+    console.log('[ArtifactTree] handleToggle: name="%s", isOpen=%s, isLeaf=%s, childrenLoaded=%s, dataChildren=%s',
+      data.name, node.isOpen, node.isLeaf, data.childrenLoaded,
+      Array.isArray(data.children) ? data.children.length : String(data.children))
     if (!node.isOpen && !data.childrenLoaded && lazyLoad) {
-      // Load children first, then toggle open
       await lazyLoad.loadChildren(data.path)
     }
-
     node.toggle()
+    console.log('[ArtifactTree] handleToggle DONE: name="%s", toggled to open=%s', data.name, !node.isOpen)
   }, [isFolder, node, data.childrenLoaded, data.path, lazyLoad])
 
-  // Handle click - open in canvas, system app, or download
+  // Handle click — open in canvas, system app, or download
   const handleClick = async (e: React.MouseEvent) => {
     e.stopPropagation()
     if (isFolder) {
@@ -356,18 +366,14 @@ function TreeNodeComponent({ node, style, dragHandle }: NodeRendererProps<TreeNo
       return
     }
 
-    // Try to open in Canvas first for viewable files
     if (canViewInCanvas && openFile) {
       openFile(data.path, data.name)
       return
     }
 
-    // Fallback behavior for non-viewable files
     if (isWebMode) {
-      // In web mode, trigger download
       api.downloadArtifact(data.path)
     } else {
-      // In desktop mode, open with system app
       try {
         await api.openArtifact(data.path)
       } catch (error) {
@@ -394,7 +400,7 @@ function TreeNodeComponent({ node, style, dragHandle }: NodeRendererProps<TreeNo
     }
   }
 
-  // Handle right-click - show in folder (desktop only)
+  // Handle right-click — show in folder (desktop only)
   const handleContextMenu = async (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -414,13 +420,10 @@ function TreeNodeComponent({ node, style, dragHandle }: NodeRendererProps<TreeNo
       onClick={handleClick}
       onDoubleClick={handleDoubleClickFile}
       onContextMenu={handleContextMenu}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
       className={`
-        flex items-center h-full pr-2 cursor-pointer select-none
+        group flex items-center h-full pr-2 cursor-pointer select-none
         transition-colors duration-75
-        ${node.isSelected ? 'bg-primary/15' : ''}
-        ${isHovered && !node.isSelected ? 'bg-secondary/60' : ''}
+        ${node.isSelected ? 'bg-primary/15' : 'hover:bg-secondary/60'}
         ${node.isFocused ? 'outline outline-1 outline-primary/50 -outline-offset-1' : ''}
       `}
       title={canViewInCanvas
@@ -466,13 +469,12 @@ function TreeNodeComponent({ node, style, dragHandle }: NodeRendererProps<TreeNo
         {data.name}
       </span>
 
-      {/* Action indicator */}
-      {!isFolder && isHovered && (
-        canViewInCanvas ? (
-          <Eye className="w-3 h-3 text-primary flex-shrink-0 ml-1" />
-        ) : isWebMode ? (
-          <Download className="w-3 h-3 text-primary flex-shrink-0 ml-1" />
-        ) : null
+      {/* Action icons — CSS-only visibility via group-hover, zero JS overhead */}
+      {!isFolder && canViewInCanvas && (
+        <Eye className="w-3 h-3 text-primary flex-shrink-0 ml-1 opacity-0 group-hover:opacity-100 transition-opacity duration-75" />
+      )}
+      {!isFolder && !canViewInCanvas && isWebMode && (
+        <Download className="w-3 h-3 text-primary flex-shrink-0 ml-1 opacity-0 group-hover:opacity-100 transition-opacity duration-75" />
       )}
     </div>
   )

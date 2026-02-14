@@ -2,6 +2,8 @@ import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vit
 import type { IpcMainInvokeEvent } from 'electron'
 import { DatabaseService } from '../../src/main/services/database'
 import type { PrismaClient } from '@prisma/client'
+import { createLLMAdapter } from '@/main/services/llm/factory'
+import fs from 'fs'
 
 // Set E2E test mode BEFORE imports that read it
 process.env.CODEALL_E2E_TEST = '1'
@@ -280,6 +282,18 @@ vi.mock('@/main/services/router/smart-router', () => ({
   }
 }))
 
+const mockBoulderState = {
+  getState: vi.fn(),
+  isSessionTracked: vi.fn(),
+  updateState: vi.fn()
+}
+
+vi.mock('@/main/services/boulder-state.service', () => ({
+  BoulderStateService: {
+    getInstance: vi.fn(() => mockBoulderState)
+  }
+}))
+
 // Mock tool-execution.service to avoid real file operations
 vi.mock('@/main/services/tools/tool-execution.service', () => ({
   toolExecutionService: {
@@ -337,6 +351,9 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     mockStore.artifact = []
     uuidCounter = 0
     lastLLMConfig = null
+    mockBoulderState.getState.mockResolvedValue({ session_ids: [] })
+    mockBoulderState.isSessionTracked.mockResolvedValue(false)
+    mockBoulderState.updateState.mockResolvedValue(undefined)
 
     // Create a space and session for testing
     const space = await prisma.space.create({
@@ -549,5 +566,37 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     expect(lastLLMConfig).toBeTruthy()
     expect(lastLLMConfig.model).toBe('model-A2')
     expect(lastLLMConfig.agentCode).toBe('luban')
+  })
+
+  test('fuxi planning output triggers kuafu handoff metadata and boulder update', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+    vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) =>
+      String(p).replace(/\\/g, '/').includes('.sisyphus/plans/codeall-repair.md')
+    )
+    vi.mocked(createLLMAdapter).mockImplementationOnce(
+      () =>
+        ({
+          sendMessage: vi.fn(),
+          streamMessage: async function* () {
+            yield {
+              content:
+                'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .sisyphus/plans/codeall-repair.md',
+              done: true
+            }
+          }
+        }) as any
+    )
+
+    const result = await handleMessageSend(mockEvent, {
+      sessionId,
+      content: '请你先规划这个任务',
+      agentCode: 'fuxi'
+    })
+
+    expect(result.content).toContain('建议切换到夸父')
+    expect(result.content).toContain('执行计划')
+    expect((result.metadata as any)?.handoffToAgent).toBe('kuafu')
+    expect((result.metadata as any)?.planPath).toContain('codeall-repair.md')
+    expect(mockBoulderState.updateState).toHaveBeenCalledTimes(1)
   })
 })

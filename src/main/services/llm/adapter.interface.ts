@@ -15,6 +15,12 @@ export interface LLMConfig {
   agentCode?: string
   /** Optional external abort signal for request cancellation */
   abortSignal?: AbortSignal
+  /** Optional explicit tool definitions for this request */
+  tools?: Array<{
+    name: string
+    description: string
+    parameters: Record<string, unknown>
+  }>
 
   /** Provider-specific capability toggles */
   thinkingMode?: boolean

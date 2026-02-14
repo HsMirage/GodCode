@@ -40,7 +40,7 @@ Expérimentez toute la puissance d'un AI Agent sans toucher au terminal. Halo ap
 
 Pour les développeurs à l'aise avec le CLI, c'est bien. Mais pour les designers, les chefs de produit, les étudiants, et tous ceux qui veulent simplement que l'IA *fasse des choses* — le terminal est un obstacle.
 
-**Halo brise cet obstacle.**
+**Halo est le premier à briser cet obstacle.**
 
 Nous avons pris 100% des capacités d'Agent de Claude Code et les avons enveloppées dans une interface visuelle que tout le monde peut utiliser. Même puissance, zéro friction.
 
@@ -205,7 +205,8 @@ L'obstacle n'est plus la capacité de l'IA. **C'est l'accessibilité.** Halo sup
 - [x] Navigateur IA (basé sur CDP)
 - [x] Support serveur MCP
 - [ ] Système de plugins
-- [ ] Entrée vocale
+- [ ] Git visuel avec revue assistée par IA
+- [ ] Recherche de fichiers propulsée par IA
 
 ---
 
@@ -242,6 +243,16 @@ Voir [CONTRIBUTING.md](../CONTRIBUTING.md) pour les directives.
 ## Licence
 
 Licence MIT — voir [LICENSE](../LICENSE) pour les détails.
+
+---
+
+## Inspiré par Halo ?
+
+Si ce projet a éveillé une idée ou vous a aidé à construire quelque chose de cool :
+
+- **Donnez-nous une étoile** — cela aide les autres à trouver Halo
+- **Partagez votre histoire** — nous adorons savoir ce que vous avez construit
+- **Faites un lien vers nous** — par exemple `Inspired by [Halo](https://github.com/openkursar/hello-halo)`
 
 ---
 

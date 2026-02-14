@@ -41,7 +41,7 @@ Experience the full power of an AI Agent without touching the terminal. Halo bri
 
 For developers comfortable with CLI, that's fine. But for designers, PMs, students, and anyone who just wants AI to *do things* — the terminal is a wall.
 
-**Halo breaks down that wall.**
+**Halo is the first to break down that wall.**
 
 We took 100% of Claude Code's Agent capabilities and wrapped them in a visual interface that anyone can use. Same power, zero friction.
 
@@ -118,11 +118,19 @@ Extend capabilities with Model Context Protocol. Compatible with Claude Desktop 
   <img src="./docs/assets/mobile_chat.jpg" width="45%" alt="Mobile Chat">
 </p>
 
+AI browser Video Demo 
+
+https://github.com/user-attachments/assets/2d4d2f3e-d27c-44b0-8f1d-9059c8372003
+
 ---
 
 ## Installation
 
 ### Download (Recommended)
+
+
+
+
 
 | Platform | Download | Requirements |
 |----------|----------|--------------|
@@ -142,8 +150,11 @@ For developers who want to contribute or customize:
 git clone https://github.com/openkursar/hello-halo.git
 cd hello-halo
 npm install
+npm run prepare        # Download binary dependencies for your platform
 npm run dev
 ```
+
+> To build for all platforms, run `npm run prepare:all` first to download binaries for every target platform.
 
 ---
 
@@ -206,7 +217,8 @@ The barrier isn't AI capability anymore. **It's accessibility.** Halo removes th
 - [x] AI Browser (CDP-based)
 - [x] MCP Server support
 - [ ] Plugin system
-- [ ] Voice input
+- [ ] Visual Git with AI-assisted review
+- [ ] AI-powered file search
 
 ---
 
@@ -226,6 +238,7 @@ We welcome contributions of all kinds:
 git clone https://github.com/openkursar/hello-halo.git
 cd hello-halo
 npm install
+npm run prepare        # Download binary dependencies for your platform
 npm run dev
 ```
 
@@ -243,6 +256,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+## Inspired by Halo?
+
+If this project sparked an idea or helped you build something cool:
+
+- **Give us a star** — it helps others find Halo
+- **Share your story** — we love hearing what you built
+- **Link back to us** — e.g. `Inspired by [Halo](https://github.com/openkursar/hello-halo)`
 
 ---
 

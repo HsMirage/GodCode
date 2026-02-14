@@ -1,20 +1,45 @@
 /**
- * Artifact Cache Service - Manages file system cache with chokidar watcher
+ * Artifact Cache Service - Manages in-memory file system cache
  *
  * Features:
  * - Per-space caching with lazy loading
- * - File system watching for incremental updates
+ * - Batched event delivery with automatic debouncing
  * - Event-driven notifications to renderer
  * - Memory-efficient with LRU-style cleanup
+ *
+ * All file system I/O (watcher, readdir, stat, .gitignore) is delegated to the
+ * file-watcher worker process via watcher-host.service.ts.
+ * This service only manages in-memory caches and IPC broadcasts.
  */
 
-import chokidar, { FSWatcher } from 'chokidar'
-import { join, extname, basename, dirname, relative } from 'path'
-import { promises as fs } from 'fs'
-import { existsSync } from 'fs'
-import { BrowserWindow } from 'electron'
+import { relative, sep } from 'path'
 import { getMainWindow } from '../index'
 import { broadcastToAll } from '../http/websocket'
+import {
+  initSpaceWatcher,
+  destroySpaceWatcher,
+  scanTreeViaWorker,
+  scanFlatViaWorker,
+  refreshIgnoreRules as refreshWorkerIgnoreRules,
+  setFsEventsHandler,
+  shutdown as shutdownWorker
+} from './watcher-host.service'
+import type { ProcessedFsEvent } from '../../shared/protocol/file-watcher.protocol'
+
+// Re-export shared types for downstream consumers (artifact.service.ts etc.)
+export type {
+  CachedArtifact,
+  CachedTreeNode,
+  ArtifactChangeEvent,
+  ArtifactTreeUpdateEvent
+} from '../../shared/types/artifact'
+
+import type {
+  CachedArtifact,
+  CachedTreeNode,
+  ArtifactChangeEvent,
+  ArtifactTreeUpdateEvent
+} from '../../shared/types/artifact'
 
 /**
  * Broadcast event to all clients (Electron IPC + WebSocket)
@@ -39,460 +64,256 @@ function broadcastToAllClients(channel: string, data: Record<string, unknown>): 
   }
 }
 
-// File type icon IDs mapping (same as artifact.service.ts)
-const FILE_ICON_IDS: Record<string, string> = {
-  html: 'globe', htm: 'globe', css: 'palette', scss: 'palette', less: 'palette',
-  js: 'file-code', jsx: 'file-code', ts: 'file-code', tsx: 'file-code',
-  json: 'file-json', md: 'book', markdown: 'book', txt: 'file-text',
-  py: 'file-code', rs: 'cpu', go: 'file-code', java: 'coffee',
-  cpp: 'cpu', c: 'cpu', h: 'cpu', hpp: 'cpu', vue: 'file-code',
-  svelte: 'file-code', php: 'file-code', rb: 'gem', swift: 'file-code',
-  kt: 'file-code', sql: 'database', sh: 'terminal', bash: 'terminal',
-  zsh: 'terminal', yaml: 'file-json', yml: 'file-json', xml: 'file-json',
-  svg: 'image', png: 'image', jpg: 'image', jpeg: 'image', gif: 'image',
-  webp: 'image', ico: 'image', pdf: 'book', default: 'file-text'
-}
-
-// Hidden patterns - system junk files that should never be shown
-const HIDDEN_PATTERNS = [
-  /\.DS_Store$/,      // macOS system file
-  /Thumbs\.db$/,      // Windows thumbnail cache
-  /desktop\.ini$/,    // Windows folder settings
-]
-
-// Watcher exclude patterns - directories NOT to watch for changes
-// These directories are still VISIBLE in the tree, but changes inside them
-// won't trigger file watcher events. User needs to manually refresh to see changes.
-// This prevents EMFILE (too many open files) errors from large directories.
-const WATCHER_EXCLUDE = [
-  // System junk (also hidden from display)
-  /\.DS_Store$/,
-  /Thumbs\.db$/,
-  /desktop\.ini$/,
-
-  // Large directories - exclude internals (VSCode style)
-  // Top-level directory is visible, but contents are not watched
-  /node_modules\/.+/,         // node_modules internals
-  /\.git\/objects/,           // .git/objects (large binary storage)
-  /\.git\/subtree-cache/,     // .git/subtree-cache
-  /\.hg\/store/,              // Mercurial store
-  /\.venv\/.+/,               // Python venv internals
-  /venv\/.+/,                 // Python venv internals (alternative name)
-  /\.pnpm\/.+/,               // pnpm store internals
-  /__pycache__/,              // Python bytecode cache
-  /\.pytest_cache/,           // pytest cache
-  /\.mypy_cache/,             // mypy cache
-  /\.tox/,                    // tox environments
-  /\.cache\/.+/,              // Generic cache directories
-  /\.turbo\/.+/,              // Turborepo cache
-  /\.next\/.+/,               // Next.js build cache
-  /\.nuxt\/.+/,               // Nuxt.js build cache
-  /dist\/.+/,                 // Build output internals
-  /build\/.+/,                // Build output internals
-  /coverage\/.+/,             // Test coverage reports
-]
-
 /**
- * Artifact item for flat list view
- */
-export interface CachedArtifact {
-  id: string
-  spaceId: string
-  name: string
-  type: 'file' | 'folder'
-  path: string
-  relativePath: string  // Path relative to space root
-  extension: string
-  icon: string
-  size?: number
-  createdAt: string
-  modifiedAt: string
-}
-
-/**
- * Tree node for hierarchical view
- */
-export interface CachedTreeNode {
-  id: string
-  name: string
-  type: 'file' | 'folder'
-  path: string
-  relativePath: string
-  extension: string
-  icon: string
-  size?: number
-  depth: number
-  children?: CachedTreeNode[]
-  childrenLoaded: boolean  // For lazy loading
-}
-
-/**
- * File change event for incremental updates
- */
-export interface ArtifactChangeEvent {
-  type: 'add' | 'change' | 'unlink' | 'addDir' | 'unlinkDir'
-  path: string
-  relativePath: string
-  spaceId: string
-  item?: CachedArtifact | CachedTreeNode
-}
-
-/**
- * Space cache entry
+ * Space cache entry.
+ * Only in-memory data structures -- no fs handles or watcher references.
  */
 interface SpaceCache {
   spaceId: string
   rootPath: string
-  watcher: FSWatcher | null
   // Cache for flat list (only top-level items for card view)
   flatItems: Map<string, CachedArtifact>
-  // Cache for tree structure (with lazy-loaded children)
-  treeNodes: Map<string, CachedTreeNode>
+  // Cache for tree structure: key = directory absolute path, value = sorted children
+  treeNodes: Map<string, CachedTreeNode[]>
   // Track loaded directories for lazy loading
   loadedDirs: Set<string>
   // Last update timestamp
   lastUpdate: number
+  // Whether watcher has been requested for this space
+  watcherInitialized: boolean
 }
 
 // Global cache map (per-space)
 const cacheMap = new Map<string, SpaceCache>()
+
+// Maximum number of items in flatItems cache to prevent memory leaks
+const MAX_FLAT_ITEMS_CACHE_SIZE = 10000
 
 // Event listeners registry
 type ChangeListener = (event: ArtifactChangeEvent) => void
 const changeListeners: ChangeListener[] = []
 
 /**
- * Get file icon ID from extension
+ * Add item to flatItems cache with size limit enforcement.
+ * Uses FIFO eviction when limit is reached.
  */
-function getFileIconId(ext: string): string {
-  const normalized = ext.toLowerCase().replace('.', '')
-  return FILE_ICON_IDS[normalized] || FILE_ICON_IDS.default
-}
-
-/**
- * Generate unique ID for artifacts
- */
-function generateId(): string {
-  return `artifact-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-}
-
-/**
- * Check if path should be hidden (system junk files)
- */
-function shouldHide(filePath: string): boolean {
-  return HIDDEN_PATTERNS.some(pattern => pattern.test(filePath))
-}
-
-/**
- * Create artifact from file stats
- */
-async function createArtifact(
-  fullPath: string,
-  rootPath: string,
-  spaceId: string
-): Promise<CachedArtifact | null> {
-  try {
-    const stats = await fs.stat(fullPath)
-    const ext = extname(fullPath)
-    const name = basename(fullPath)
-    const relativePath = relative(rootPath, fullPath)
-
-    return {
-      id: generateId(),
-      spaceId,
-      name,
-      type: stats.isDirectory() ? 'folder' : 'file',
-      path: fullPath,
-      relativePath,
-      extension: ext.replace('.', ''),
-      icon: stats.isDirectory() ? 'folder' : getFileIconId(ext),
-      size: stats.isFile() ? stats.size : undefined,
-      createdAt: stats.birthtime.toISOString(),
-      modifiedAt: stats.mtime.toISOString()
+function addToFlatItemsCache(cache: SpaceCache, path: string, artifact: CachedArtifact): void {
+  // Evict oldest entries if at capacity
+  if (cache.flatItems.size >= MAX_FLAT_ITEMS_CACHE_SIZE) {
+    const keysToDelete: string[] = []
+    const deleteCount = Math.ceil(MAX_FLAT_ITEMS_CACHE_SIZE * 0.1) // Evict 10%
+    let count = 0
+    for (const key of Array.from(cache.flatItems.keys())) {
+      if (count >= deleteCount) break
+      keysToDelete.push(key)
+      count++
     }
-  } catch (error) {
-    console.error(`[ArtifactCache] Failed to create artifact for ${fullPath}:`, error)
-    return null
+    for (const key of keysToDelete) {
+      cache.flatItems.delete(key)
+    }
+    console.log(`[ArtifactCache] Evicted ${keysToDelete.length} items from cache (limit: ${MAX_FLAT_ITEMS_CACHE_SIZE})`)
+  }
+  cache.flatItems.set(path, artifact)
+}
+
+/**
+ * Sort artifacts: folders first, then alphabetically by name
+ */
+function sortByName(a: CachedArtifact, b: CachedArtifact): number {
+  if (a.type === 'folder' && b.type !== 'folder') return -1
+  if (a.type !== 'folder' && b.type === 'folder') return 1
+  return a.name.localeCompare(b.name)
+}
+
+/**
+ * Get parent directory path from a file path.
+ * Supports both / and \ separators.
+ */
+function getParentPath(filePath: string): string {
+  const lastSep = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
+  return lastSep > 0 ? filePath.substring(0, lastSep) : filePath
+}
+
+/**
+ * Sort tree nodes: folders first, then alphabetically by name.
+ * Mutates and returns the array for convenience.
+ */
+function sortTreeNodes(nodes: CachedTreeNode[]): CachedTreeNode[] {
+  return nodes.sort((a, b) => {
+    if (a.type === 'folder' && b.type !== 'folder') return -1
+    if (a.type !== 'folder' && b.type === 'folder') return 1
+    return a.name.localeCompare(b.name)
+  })
+}
+
+/**
+ * Recursively remove a directory and all its descendant entries from treeNodes and loadedDirs.
+ * Called when a tracked directory is deleted.
+ */
+function removeTreeNodeDescendants(cache: SpaceCache, dirPath: string): void {
+  cache.treeNodes.delete(dirPath)
+  cache.loadedDirs.delete(dirPath)
+
+  const prefix = dirPath + sep
+  for (const key of Array.from(cache.treeNodes.keys())) {
+    if (key.startsWith(prefix)) {
+      cache.treeNodes.delete(key)
+      cache.loadedDirs.delete(key)
+    }
   }
 }
 
 /**
- * Create tree node from file stats
+ * Check if path is a disk root directory.
+ * Disk roots are dangerous to scan/watch due to massive file counts.
  */
-async function createTreeNode(
-  fullPath: string,
-  rootPath: string,
-  depth: number
-): Promise<CachedTreeNode | null> {
-  try {
-    const stats = await fs.stat(fullPath)
-    const ext = extname(fullPath)
-    const name = basename(fullPath)
-    const relativePath = relative(rootPath, fullPath)
-    const isDir = stats.isDirectory()
-
-    return {
-      id: generateId(),
-      name,
-      type: isDir ? 'folder' : 'file',
-      path: fullPath,
-      relativePath,
-      extension: ext.replace('.', ''),
-      icon: isDir ? 'folder' : getFileIconId(ext),
-      size: stats.isFile() ? stats.size : undefined,
-      depth,
-      children: isDir ? [] : undefined,
-      childrenLoaded: false
-    }
-  } catch (error) {
-    console.error(`[ArtifactCache] Failed to create tree node for ${fullPath}:`, error)
-    return null
-  }
+function isDiskRoot(path: string): boolean {
+  if (/^[A-Z]:\\?$/i.test(path)) return true
+  if (path === '/') return true
+  if (/^\/Volumes\/[^/]+\/?$/.test(path)) return true
+  if (/^\/mnt\/[^/]+\/?$/.test(path)) return true
+  if (/^\/media\/[^/]+\/?$/.test(path)) return true
+  return false
 }
 
-/**
- * Scan directory for immediate children only (async, non-blocking)
- */
-async function scanDirectoryShallow(
-  dirPath: string,
-  rootPath: string,
-  spaceId: string
-): Promise<CachedArtifact[]> {
-  const startTime = performance.now()
-  const artifacts: CachedArtifact[] = []
+// ============================================
+// Worker Event Integration
+// ============================================
 
-  try {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true })
+// Register once: receive fs events from the worker process and apply to caches.
+// This replaces the old in-process processWatcherEvent() function.
+setFsEventsHandler((spaceId: string, events: ProcessedFsEvent[]) => {
+  const cache = cacheMap.get(spaceId)
+  if (!cache) return
 
-    // Process entries in parallel with concurrency limit
-    const CONCURRENCY = 50
-    for (let i = 0; i < entries.length; i += CONCURRENCY) {
-      const batch = entries.slice(i, i + CONCURRENCY)
-      const results = await Promise.all(
-        batch
-          .filter(entry => !shouldHide(entry.name))
-          .map(async entry => {
-            const fullPath = join(dirPath, entry.name)
-            return createArtifact(fullPath, rootPath, spaceId)
-          })
-      )
+  for (const event of events) {
+    const parentIsTracked = cache.treeNodes.has(event.parentDir)
 
-      for (const artifact of results) {
-        if (artifact) {
-          artifacts.push(artifact)
+    if (event.changeType === 'unlink' || event.changeType === 'unlinkDir') {
+      // Delete from caches.
+      // For 'unlink' events from the worker, we check local cache to determine
+      // if the deleted path was a directory (worker can't stat deleted files).
+      const wasCachedDir = cache.loadedDirs.has(event.filePath) ||
+        cache.flatItems.get(event.filePath)?.type === 'folder'
+      const resolvedChangeType = wasCachedDir ? 'unlinkDir' : event.changeType
+
+      cache.flatItems.delete(event.filePath)
+
+      if (parentIsTracked) {
+        const parentChildren = cache.treeNodes.get(event.parentDir)!
+        cache.treeNodes.set(event.parentDir, parentChildren.filter(n => n.path !== event.filePath))
+      }
+
+      if (wasCachedDir || event.changeType === 'unlinkDir') {
+        removeTreeNodeDescendants(cache, event.filePath)
+      }
+
+      emitChange({
+        type: resolvedChangeType,
+        path: event.filePath,
+        relativePath: event.relativePath,
+        spaceId,
+      })
+    } else {
+      // Add/update caches
+      if (event.artifact) {
+        addToFlatItemsCache(cache, event.filePath, event.artifact)
+      }
+
+      if (parentIsTracked && event.treeNode) {
+        const parentChildren = cache.treeNodes.get(event.parentDir)!
+        const existingIdx = parentChildren.findIndex(n => n.path === event.filePath)
+
+        if (existingIdx !== -1) {
+          // Node exists: replace in-place, preserving children/childrenLoaded for expanded folders
+          const existing = parentChildren[existingIdx]
+          const updatedNode = { ...event.treeNode }
+          if (existing.type === 'folder' && updatedNode.type === 'folder') {
+            updatedNode.children = existing.children
+            updatedNode.childrenLoaded = existing.childrenLoaded
+          }
+          parentChildren[existingIdx] = updatedNode
+        } else {
+          // New node: insert and re-sort
+          parentChildren.push(event.treeNode)
+          sortTreeNodes(parentChildren)
         }
       }
+
+      emitChange({
+        type: event.changeType,
+        path: event.filePath,
+        relativePath: event.relativePath,
+        spaceId,
+        item: event.artifact,
+      })
     }
-  } catch (error) {
-    console.error(`[ArtifactCache] Failed to scan directory ${dirPath}:`, error)
   }
+})
 
-  const elapsed = performance.now() - startTime
-  console.log(`[ArtifactCache] ⏱️ scanDirectoryShallow: ${artifacts.length} items in ${elapsed.toFixed(1)}ms (path=${dirPath})`)
+// ============================================
+// Debounced IPC Broadcasting
+// ============================================
 
-  return artifacts
-}
+// Pending events to be broadcast (grouped by spaceId, deduped by path)
+const pendingBroadcastEvents = new Map<string, Map<string, ArtifactChangeEvent>>()
+let broadcastTimer: ReturnType<typeof setTimeout> | null = null
+const BROADCAST_DEBOUNCE_MS = 500
 
 /**
- * Scan directory and return tree nodes (first level only)
+ * Flush pending events to all clients.
+ *
+ * Smart batching: for each spaceId, collect unique parent directories that are tracked
+ * in treeNodes and build an `updatedDirs` payload with pre-computed children.
+ * Also sends individual `artifact:changed` events for backwards compatibility (card view).
  */
-async function scanDirectoryTreeShallow(
-  dirPath: string,
-  rootPath: string,
-  depth: number = 0
-): Promise<CachedTreeNode[]> {
-  const startTime = performance.now()
-  const nodes: CachedTreeNode[] = []
+function flushPendingBroadcasts(): void {
+  if (pendingBroadcastEvents.size === 0) return
 
-  try {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true })
+  for (const [spaceId, eventsMap] of Array.from(pendingBroadcastEvents.entries())) {
+    const dedupedEvents = Array.from(eventsMap.values())
+    const cache = cacheMap.get(spaceId)
 
-    // Sort: folders first, then files, alphabetically
-    entries.sort((a, b) => {
-      if (a.isDirectory() && !b.isDirectory()) return -1
-      if (!a.isDirectory() && b.isDirectory()) return 1
-      return a.name.localeCompare(b.name)
-    })
+    const updatedDirs: Array<{ dirPath: string; children: CachedTreeNode[] }> = []
 
-    // Process entries in parallel with concurrency limit
-    const CONCURRENCY = 50
-    for (let i = 0; i < entries.length; i += CONCURRENCY) {
-      const batch = entries.slice(i, i + CONCURRENCY)
-      const results = await Promise.all(
-        batch
-          .filter(entry => !shouldHide(entry.name))
-          .map(async entry => {
-            const fullPath = join(dirPath, entry.name)
-            return createTreeNode(fullPath, rootPath, depth)
-          })
-      )
-
-      for (const node of results) {
-        if (node) {
-          nodes.push(node)
-        }
-      }
-    }
-
-    // Re-sort after parallel processing
-    nodes.sort((a, b) => {
-      if (a.type === 'folder' && b.type !== 'folder') return -1
-      if (a.type !== 'folder' && b.type === 'folder') return 1
-      return a.name.localeCompare(b.name)
-    })
-
-  } catch (error) {
-    console.error(`[ArtifactCache] Failed to scan tree ${dirPath}:`, error)
-  }
-
-  const elapsed = performance.now() - startTime
-  console.log(`[ArtifactCache] ⏱️ scanDirectoryTreeShallow: ${nodes.length} nodes in ${elapsed.toFixed(1)}ms (depth=${depth}, path=${dirPath})`)
-
-  return nodes
-}
-
-/**
- * Initialize watcher for a space
- */
-function initWatcher(cache: SpaceCache): void {
-  if (cache.watcher) {
-    return // Already initialized
-  }
-
-  console.log(`[ArtifactCache] Initializing watcher for space: ${cache.spaceId} at ${cache.rootPath}`)
-
-  const watcher = chokidar.watch(cache.rootPath, {
-    ignored: WATCHER_EXCLUDE,  // Use watcher-specific exclusions (not display filtering)
-    persistent: true,
-    ignoreInitial: true,  // Don't trigger events for existing files
-    depth: 10,            // Max depth for watching
-    awaitWriteFinish: {   // Wait for file writes to complete
-      stabilityThreshold: 300,
-      pollInterval: 100
-    },
-    // Performance optimizations
-    usePolling: false,    // Use native fs events when available
-    interval: 1000,       // Polling interval if polling is used
-    binaryInterval: 3000, // Polling interval for binary files
-  })
-
-  // Handle file add
-  watcher.on('add', async (filePath) => {
-    console.log(`[ArtifactCache] File added: ${filePath}`)
-    const artifact = await createArtifact(filePath, cache.rootPath, cache.spaceId)
-    if (artifact) {
-      cache.flatItems.set(filePath, artifact)
-      emitChange({
-        type: 'add',
-        path: filePath,
-        relativePath: relative(cache.rootPath, filePath),
-        spaceId: cache.spaceId,
-        item: artifact
-      })
-    }
-  })
-
-  // Handle file change
-  watcher.on('change', async (filePath) => {
-    console.log(`[ArtifactCache] File changed: ${filePath}`)
-    const artifact = await createArtifact(filePath, cache.rootPath, cache.spaceId)
-    if (artifact) {
-      cache.flatItems.set(filePath, artifact)
-      emitChange({
-        type: 'change',
-        path: filePath,
-        relativePath: relative(cache.rootPath, filePath),
-        spaceId: cache.spaceId,
-        item: artifact
-      })
-    }
-  })
-
-  // Handle file delete
-  watcher.on('unlink', (filePath) => {
-    console.log(`[ArtifactCache] File removed: ${filePath}`)
-    cache.flatItems.delete(filePath)
-    cache.treeNodes.delete(filePath)
-    emitChange({
-      type: 'unlink',
-      path: filePath,
-      relativePath: relative(cache.rootPath, filePath),
-      spaceId: cache.spaceId
-    })
-  })
-
-  // Handle directory add
-  watcher.on('addDir', async (dirPath) => {
-    // Skip root path
-    if (dirPath === cache.rootPath) return
-
-    console.log(`[ArtifactCache] Directory added: ${dirPath}`)
-    const artifact = await createArtifact(dirPath, cache.rootPath, cache.spaceId)
-    if (artifact) {
-      cache.flatItems.set(dirPath, artifact)
-      emitChange({
-        type: 'addDir',
-        path: dirPath,
-        relativePath: relative(cache.rootPath, dirPath),
-        spaceId: cache.spaceId,
-        item: artifact
-      })
-    }
-  })
-
-  // Handle directory delete
-  watcher.on('unlinkDir', (dirPath) => {
-    console.log(`[ArtifactCache] Directory removed: ${dirPath}`)
-    cache.flatItems.delete(dirPath)
-    cache.treeNodes.delete(dirPath)
-    cache.loadedDirs.delete(dirPath)
-    emitChange({
-      type: 'unlinkDir',
-      path: dirPath,
-      relativePath: relative(cache.rootPath, dirPath),
-      spaceId: cache.spaceId
-    })
-  })
-
-  // Handle errors - graceful degradation like VSCode
-  watcher.on('error', (error: NodeJS.ErrnoException) => {
-    console.error(`[ArtifactCache] Watcher error for ${cache.spaceId}:`, error)
-
-    // Handle EMFILE (too many open files) gracefully
-    if (error.code === 'EMFILE' || error.code === 'ENFILE') {
-      console.warn(`[ArtifactCache] ⚠️ Too many open files. Disabling file watcher for ${cache.spaceId}.`)
-      console.warn('[ArtifactCache] File changes will not be detected automatically. Manual refresh required.')
-
-      // Close the watcher to release file descriptors
-      if (cache.watcher) {
-        cache.watcher.close().catch(() => {})
-        cache.watcher = null
-      }
-
-      // Notify renderer about the degraded state
-      try {
-        const mainWindow = getMainWindow()
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('artifact:watcher-error', {
-            spaceId: cache.spaceId,
-            error: 'EMFILE',
-            message: 'Too many open files. File watcher disabled.'
+    if (cache) {
+      const seenDirs = new Set<string>()
+      for (const event of dedupedEvents) {
+        const parentDir = getParentPath(event.path)
+        if (!seenDirs.has(parentDir) && cache.treeNodes.has(parentDir)) {
+          seenDirs.add(parentDir)
+          updatedDirs.push({
+            dirPath: parentDir,
+            children: cache.treeNodes.get(parentDir)!
           })
         }
-      } catch (e) {
-        // Ignore notification errors
       }
     }
-  })
 
-  cache.watcher = watcher
+    if (updatedDirs.length > 0 || dedupedEvents.length > 0) {
+      const treeUpdateEvent: ArtifactTreeUpdateEvent = {
+        spaceId,
+        updatedDirs,
+        changes: dedupedEvents
+      }
+      broadcastToAllClients('artifact:tree-update', treeUpdateEvent as unknown as Record<string, unknown>)
+    }
+
+    for (const event of dedupedEvents) {
+      broadcastToAllClients('artifact:changed', event as unknown as Record<string, unknown>)
+    }
+  }
+
+  pendingBroadcastEvents.clear()
 }
 
 /**
- * Emit change event to all listeners
+ * Emit change event to all listeners (with debounced IPC broadcast).
+ *
+ * Dedup: within a single debounce window, only the LAST event per path is kept.
  */
 function emitChange(event: ArtifactChangeEvent): void {
-  // Notify registered listeners (internal callbacks)
+  // Notify registered listeners immediately (internal callbacks)
   for (const listener of changeListeners) {
     try {
       listener(event)
@@ -501,8 +322,16 @@ function emitChange(event: ArtifactChangeEvent): void {
     }
   }
 
-  // Broadcast to all clients (Electron IPC + WebSocket)
-  broadcastToAllClients('artifact:changed', event as unknown as Record<string, unknown>)
+  // Queue event for debounced broadcast
+  if (!pendingBroadcastEvents.has(event.spaceId)) {
+    pendingBroadcastEvents.set(event.spaceId, new Map())
+  }
+  pendingBroadcastEvents.get(event.spaceId)!.set(event.path, event)
+
+  if (broadcastTimer) {
+    clearTimeout(broadcastTimer)
+  }
+  broadcastTimer = setTimeout(flushPendingBroadcasts, BROADCAST_DEBOUNCE_MS)
 }
 
 // ============================================
@@ -523,19 +352,20 @@ export async function initSpaceCache(spaceId: string, rootPath: string): Promise
   const cache: SpaceCache = {
     spaceId,
     rootPath,
-    watcher: null,
     flatItems: new Map(),
     treeNodes: new Map(),
     loadedDirs: new Set(),
-    lastUpdate: Date.now()
+    lastUpdate: Date.now(),
+    watcherInitialized: false
   }
 
   cacheMap.set(spaceId, cache)
 
-  // Initialize watcher in background (don't block)
-  setImmediate(() => {
-    initWatcher(cache)
-  })
+  // Initialize watcher in worker process (non-blocking)
+  if (!isDiskRoot(rootPath)) {
+    cache.watcherInitialized = true
+    initSpaceWatcher(spaceId, rootPath)
+  }
 }
 
 /**
@@ -548,8 +378,9 @@ export async function ensureSpaceCache(spaceId: string, rootPath: string): Promi
     return
   }
 
-  if (!cache.watcher) {
-    setImmediate(() => initWatcher(cache))
+  if (!cache.watcherInitialized && !isDiskRoot(rootPath)) {
+    cache.watcherInitialized = true
+    initSpaceWatcher(spaceId, rootPath)
   }
 }
 
@@ -562,9 +393,9 @@ export async function destroySpaceCache(spaceId: string): Promise<void> {
 
   console.log(`[ArtifactCache] Destroying cache for space: ${spaceId}`)
 
-  if (cache.watcher) {
-    await cache.watcher.close()
-    cache.watcher = null
+  // Tell worker to stop watching this space
+  if (cache.watcherInitialized) {
+    destroySpaceWatcher(spaceId)
   }
 
   cache.flatItems.clear()
@@ -576,14 +407,19 @@ export async function destroySpaceCache(spaceId: string): Promise<void> {
 
 /**
  * Get artifacts as flat list (for card view)
- * Only returns top-level items
  */
 export async function listArtifacts(
   spaceId: string,
   rootPath: string,
-  maxDepth: number = 2
+  maxDepth: number = 1
 ): Promise<CachedArtifact[]> {
-  console.log(`[ArtifactCache] listArtifacts for space: ${spaceId}`)
+  console.debug(`[ArtifactCache] listArtifacts for space: ${spaceId}`)
+
+  // Disk root detection - degrade to prevent system freeze
+  if (isDiskRoot(rootPath)) {
+    console.warn(`[ArtifactCache] Disk root detected (${rootPath}), degrading to depth 0`)
+    maxDepth = 0
+  }
 
   // Ensure cache is initialized
   if (!cacheMap.has(spaceId)) {
@@ -595,13 +431,13 @@ export async function listArtifacts(
   // If cache is fresh (within 5 seconds), return cached items
   const now = Date.now()
   if (cache.flatItems.size > 0 && now - cache.lastUpdate < 5000) {
-    console.log(`[ArtifactCache] Returning cached ${cache.flatItems.size} items`)
+    console.debug(`[ArtifactCache] Returning cached ${cache.flatItems.size} items`)
     return Array.from(cache.flatItems.values())
-      .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime())
+      .sort((a, b) => sortByName(a, b))
   }
 
-  // Scan root directory
-  const artifacts = await scanDirectoryRecursive(rootPath, rootPath, spaceId, maxDepth, 0)
+  // Scan via worker process
+  const artifacts = await scanFlatViaWorker(spaceId, rootPath, rootPath, maxDepth)
 
   // Update cache
   cache.flatItems.clear()
@@ -610,112 +446,89 @@ export async function listArtifacts(
   }
   cache.lastUpdate = now
 
-  return artifacts.sort((a, b) =>
-    new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime()
-  )
+  return artifacts.sort((a, b) => sortByName(a, b))
 }
 
 /**
- * Recursively scan directory with depth limit (async)
- */
-async function scanDirectoryRecursive(
-  dirPath: string,
-  rootPath: string,
-  spaceId: string,
-  maxDepth: number,
-  currentDepth: number
-): Promise<CachedArtifact[]> {
-  if (currentDepth >= maxDepth || !existsSync(dirPath)) {
-    return []
-  }
-
-  const artifacts: CachedArtifact[] = []
-
-  try {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true })
-
-    // Process in parallel with concurrency limit
-    const CONCURRENCY = 50
-    for (let i = 0; i < entries.length; i += CONCURRENCY) {
-      const batch = entries.slice(i, i + CONCURRENCY)
-
-      const results = await Promise.all(
-        batch
-          .filter(entry => !shouldHide(entry.name))
-          .map(async entry => {
-            const fullPath = join(dirPath, entry.name)
-            const artifact = await createArtifact(fullPath, rootPath, spaceId)
-
-            if (!artifact) return []
-
-            const items = [artifact]
-
-            // Recursively scan subdirectories
-            if (entry.isDirectory()) {
-              const subItems = await scanDirectoryRecursive(
-                fullPath, rootPath, spaceId, maxDepth, currentDepth + 1
-              )
-              items.push(...subItems)
-            }
-
-            return items
-          })
-      )
-
-      for (const items of results) {
-        artifacts.push(...items)
-      }
-    }
-  } catch (error) {
-    console.error(`[ArtifactCache] Failed to scan ${dirPath}:`, error)
-  }
-
-  return artifacts
-}
-
-/**
- * Get artifacts as tree structure (lazy loading)
+ * Get artifacts as tree structure (lazy loading).
+ * Returns cached children for rootPath on cache hit (Map.get, O(1)).
+ * On miss, scans via worker and populates the cache.
  */
 export async function listArtifactsTree(
   spaceId: string,
   rootPath: string
 ): Promise<CachedTreeNode[]> {
-  console.log(`[ArtifactCache] listArtifactsTree for space: ${spaceId}`)
-
   // Ensure cache is initialized
   if (!cacheMap.has(spaceId)) {
     await initSpaceCache(spaceId, rootPath)
   }
 
-  // Scan root level only
-  return scanDirectoryTreeShallow(rootPath, rootPath, 0)
+  const cache = cacheMap.get(spaceId)!
+
+  // Cache hit: return immediately (O(1) Map.get)
+  const cached = cache.treeNodes.get(rootPath)
+  if (cached) {
+    console.debug(`[ArtifactCache] listArtifactsTree CACHE HIT: ${cached.length} nodes`)
+    return cached
+  }
+
+  // Cache miss: scan via worker
+  console.debug(`[ArtifactCache] listArtifactsTree CACHE MISS, scanning: ${rootPath}`)
+  const nodes = await scanTreeViaWorker(spaceId, rootPath, rootPath, 0)
+
+  // Store in cache
+  cache.treeNodes.set(rootPath, nodes)
+  cache.loadedDirs.add(rootPath)
+
+  return nodes
 }
 
 /**
- * Load children for a specific directory (lazy loading)
+ * Load children for a specific directory (lazy loading).
+ * Returns cached children on cache hit (O(1)).
+ * On miss, scans via worker and populates cache. Re-checks cache after async scan
+ * to handle race condition where watcher populated the cache during the await.
  */
 export async function loadDirectoryChildren(
   spaceId: string,
   dirPath: string,
   rootPath: string
 ): Promise<CachedTreeNode[]> {
-  console.log(`[ArtifactCache] Loading children for: ${dirPath}`)
-
-  const cache = cacheMap.get(spaceId)
+  let cache = cacheMap.get(spaceId)
   if (!cache) {
     await initSpaceCache(spaceId, rootPath)
+    cache = cacheMap.get(spaceId)!
+  }
+
+  // Cache hit: return immediately
+  const cached = cache.treeNodes.get(dirPath)
+  if (cached) {
+    console.debug(`[ArtifactCache] loadDirectoryChildren CACHE HIT: ${cached.length} nodes (${dirPath})`)
+    return cached
   }
 
   // Calculate depth based on relative path
-  const relativePath = relative(rootPath, dirPath)
-  const depth = relativePath ? relativePath.split(/[\\/]/).length : 0
+  const relPath = relative(rootPath, dirPath)
+  const depth = relPath ? relPath.split(/[\\/]/).length : 0
 
-  const children = await scanDirectoryTreeShallow(dirPath, rootPath, depth + 1)
+  // Cache miss: scan via worker
+  console.debug(`[ArtifactCache] loadDirectoryChildren CACHE MISS, scanning: ${dirPath} (depth=${depth + 1}, rootPath=${rootPath})`)
+  const children = await scanTreeViaWorker(spaceId, dirPath, rootPath, depth + 1)
+  console.debug(`[ArtifactCache] loadDirectoryChildren scan result: ${children.length} nodes for ${dirPath}`)
 
-  // Mark directory as loaded
-  if (cache) {
+  // Race condition guard: watcher may have populated the cache during the await.
+  // Prefer watcher's version since it's more up-to-date.
+  const watcherVersion = cache.treeNodes.get(dirPath)
+  if (watcherVersion) {
+    console.debug(`[ArtifactCache] loadDirectoryChildren: watcher populated cache during scan, using watcher version (${watcherVersion.length} nodes)`)
     cache.loadedDirs.add(dirPath)
+    return watcherVersion
   }
+
+  // Store in cache
+  cache.treeNodes.set(dirPath, children)
+  cache.loadedDirs.add(dirPath)
+  console.debug(`[ArtifactCache] loadDirectoryChildren cached: ${children.length} nodes for ${dirPath}`)
 
   return children
 }
@@ -749,7 +562,7 @@ export function getCacheStats(spaceId: string): {
     flatItems: cache.flatItems.size,
     treeNodes: cache.treeNodes.size,
     loadedDirs: cache.loadedDirs.size,
-    watcherActive: cache.watcher !== null
+    watcherActive: cache.watcherInitialized
   }
 }
 
@@ -761,6 +574,8 @@ export async function refreshCache(spaceId: string, rootPath: string): Promise<v
 
   const cache = cacheMap.get(spaceId)
   if (cache) {
+    // Tell worker to reload .gitignore rules
+    refreshWorkerIgnoreRules(spaceId, rootPath)
     cache.flatItems.clear()
     cache.treeNodes.clear()
     cache.loadedDirs.clear()
@@ -774,7 +589,17 @@ export async function refreshCache(spaceId: string, rootPath: string): Promise<v
 export async function cleanupAllCaches(): Promise<void> {
   console.log('[ArtifactCache] Cleaning up all caches')
 
-  for (const spaceId of cacheMap.keys()) {
-    await destroySpaceCache(spaceId)
+  // Clear all in-memory caches
+  for (const spaceId of Array.from(cacheMap.keys())) {
+    const cache = cacheMap.get(spaceId)
+    if (cache) {
+      cache.flatItems.clear()
+      cache.treeNodes.clear()
+      cache.loadedDirs.clear()
+    }
+    cacheMap.delete(spaceId)
   }
+
+  // Shutdown the worker process
+  await shutdownWorker()
 }

@@ -1,6 +1,6 @@
 {
   "name": "halo",
-  "version": "1.2.12",
+  "version": "1.2.15-dev.1",
   "description": "AI that gets things done",
   "type": "module",
   "main": "./out/main/index.mjs",
@@ -14,10 +14,8 @@
     "build:mac": "npm run build && electron-builder --mac",
     "build:win": "npm run build && electron-builder --win",
     "build:win-x64": "npm run build && electron-builder --win --x64",
-    "prepare:mac-arm64": "node scripts/prepare-cloudflared-mac-arm64.mjs",
-    "prepare:mac-x64": "node scripts/prepare-cloudflared-mac-x64.mjs",
-    "prepare:win-x64": "node scripts/prepare-cloudflared-win-x64.mjs",
-    "prepare:linux-x64": "node scripts/prepare-cloudflared-linux-x64.mjs",
+    "prepare": "node scripts/prepare-binaries.mjs",
+    "prepare:all": "node scripts/prepare-binaries.mjs --platform all",
     "build:mac-x64": "npm run build && electron-builder --mac --x64",
     "build:linux": "npm run build && electron-builder --linux",
     "icons": "bash scripts/generate-icons.sh",
@@ -68,19 +66,21 @@
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^3.0.0",
     "@lezer/highlight": "^1.2.3",
+    "@parcel/watcher": "^2.5.6",
     "@replit/codemirror-lang-svelte": "^6.0.0",
+    "@streamdown/code": "^1.0.2",
     "@tailwindcss/typography": "^0.5.19",
-    "@types/chokidar": "^1.7.5",
     "@types/diff": "^7.0.2",
-    "chokidar": "^5.0.0",
     "cloudflared": "^0.7.1",
     "clsx": "^2.1.0",
     "diff": "^8.0.2",
+    "electron-log": "^5.4.3",
     "electron-updater": "^6.6.2",
     "express": "^5.1.0",
     "fix-path": "^5.0.0",
     "highlight.js": "^11.11.1",
     "i18next": "^25.7.4",
+    "ignore": "^7.0.5",
     "lucide-react": "^0.555.0",
     "qrcode": "^1.5.4",
     "react": "^18.2.0",
@@ -89,9 +89,11 @@
     "react-dom": "^18.2.0",
     "react-i18next": "^16.5.2",
     "react-markdown": "^10.1.0",
+    "react-virtuoso": "^4.18.1",
     "rehype-highlight": "^7.0.2",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
+    "streamdown": "^2.2.0",
     "tailwind-merge": "^2.2.0",
     "uuid": "^13.0.0",
     "ws": "^8.18.3",
@@ -110,6 +112,7 @@
     "@vitejs/plugin-react": "^4.2.0",
     "autoprefixer": "^10.4.16",
     "cross-env": "^10.1.0",
+    "dotenv": "^17.2.4",
     "electron": "^28.0.0",
     "electron-builder": "24.13.1",
     "electron-vite": "^2.0.0",
@@ -122,9 +125,17 @@
     "vite": "^5.0.0",
     "vitest": "^1.6.1"
   },
+  "optionalDependencies": {
+    "@parcel/watcher-darwin-arm64": "^2.5.6",
+    "@parcel/watcher-darwin-x64": "^2.5.6",
+    "@parcel/watcher-linux-x64-glibc": "^2.5.6",
+    "@parcel/watcher-win32-x64": "^2.5.6"
+  },
   "build": {
     "appId": "com.halo.app",
     "productName": "Halo",
+    "npmRebuild": false,
+    "beforePack": "./scripts/beforePack.cjs",
     "afterPack": "./scripts/afterPack.cjs",
     "directories": {
       "buildResources": "resources"
@@ -136,7 +147,8 @@
       "halo-local/dist/**/*"
     ],
     "asarUnpack": [
-      "node_modules/cloudflared/**/*"
+      "node_modules/cloudflared/**/*",
+      "node_modules/@parcel/watcher-*/**/*"
     ],
     "publish": {
       "provider": "github",

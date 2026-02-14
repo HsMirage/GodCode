@@ -15,6 +15,7 @@ import { DatabaseService } from '@/main/services/database'
 import { LoggerService } from '@/main/services/logger'
 import { createLLMAdapter } from '@/main/services/llm/factory'
 import { truncateToTokenLimit } from '@/main/services/llm/dynamic-truncator'
+import type { LLMConfig } from '@/main/services/llm/adapter.interface'
 import { BindingService } from '@/main/services/binding.service'
 import { AgentRunService, type RunLogEntry } from '@/main/services/agent-run.service'
 import {
@@ -31,6 +32,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 // 动态 Prompt 系统
 import { DynamicPromptBuilder, type PromptBuilderConfig } from './dynamic-prompt-builder'
 import { CategoryResolver, type ResolvedAgent } from './category-resolver'
+import { resolveScopedRuntimeToolNames } from './tool-allowlist'
 import {
   buildDelegationProtocol,
   serializeDelegationProtocol,
@@ -58,6 +60,10 @@ export interface DelegateTaskInput {
   delegationProtocol?: DelegationProtocolInput
   /** 是否后台运行 */
   runInBackground?: boolean
+  /** 额外元数据（会写入 Task.metadata） */
+  metadata?: Record<string, unknown>
+  /** Abort signal propagated from session stop action */
+  abortSignal?: AbortSignal
 }
 
 export interface DelegateTaskResult {
@@ -85,6 +91,13 @@ function resolveSystemPrompt(
   if (agentPrompt?.trim()) return agentPrompt.trim()
   if (categoryPrompt?.trim()) return categoryPrompt.trim()
   return DEFAULT_SYSTEM_PROMPT
+}
+
+function isAbortRequested(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true
+  if (!(error instanceof Error)) return false
+  if (error.name === 'AbortError') return true
+  return /aborted|abort|cancelled by user|cancelled/i.test(error.message)
 }
 
 export class DelegateEngine {
@@ -133,6 +146,8 @@ export class DelegateEngine {
       category,
       subagent_type,
       parentTaskId,
+      metadata,
+      abortSignal,
       model: overrideModel,
       baseURL: overrideBaseURL,
       apiKey: overrideApiKey
@@ -142,6 +157,7 @@ export class DelegateEngine {
       throw new Error('sessionId is required for delegateTask')
     }
     const resolvedSessionId = sessionId
+    const workspaceDir = await this.resolveWorkspaceDirForSession(resolvedSessionId)
 
     let modelConfig: {
       model: string
@@ -197,14 +213,18 @@ export class DelegateEngine {
     const task = await this.prisma.task.create({
       data: {
         sessionId: resolvedSessionId,
+        parentTaskId,
         type: 'subtask',
         input: description,
         status: 'running',
+        assignedModel: modelConfig.model,
+        assignedAgent: subagent_type || category,
         metadata: {
           category,
           subagent_type,
           parentTaskId,
-          model: modelConfig.model
+          model: modelConfig.model,
+          ...(metadata || {})
         }
       }
     })
@@ -213,7 +233,8 @@ export class DelegateEngine {
       taskId: task.id,
       category,
       subagent_type,
-      model: modelConfig.model
+      model: modelConfig.model,
+      workspaceDir
     })
 
     this.ensureToolExecutionRunLogging()
@@ -264,6 +285,19 @@ export class DelegateEngine {
         subagent_type ? this.bindingService.getAgentBinding(subagent_type) : Promise.resolve(null),
         category ? this.bindingService.getCategoryBinding(category) : Promise.resolve(null)
       ])
+      const scopedToolNames = resolveScopedRuntimeToolNames({
+        subagentType: subagent_type,
+        category,
+        availableTools: input.availableTools
+      })
+      const effectiveScopedToolNames =
+        scopedToolNames !== undefined
+          ? toolExecutionService.getToolDefinitions(scopedToolNames).map(tool => tool.name)
+          : undefined
+      const scopedToolDefinitions =
+        effectiveScopedToolNames !== undefined
+          ? toolExecutionService.getToolDefinitions(effectiveScopedToolNames)
+          : undefined
 
       // 根据配置选择使用动态 Prompt 或静态 Prompt
       const useDynamicPrompt = input.useDynamicPrompt !== false
@@ -275,7 +309,7 @@ export class DelegateEngine {
         const resolvedAgent = this.categoryResolver.resolveAgent(subagent_type)
         systemPrompt = await this.buildDynamicSystemPrompt(
           resolvedAgent,
-          input.availableTools || [],
+          (effectiveScopedToolNames ?? input.availableTools) || [],
           input.loadSkills || [],
           agentBinding?.systemPrompt
         )
@@ -330,27 +364,56 @@ export class DelegateEngine {
         }
       })
 
+      const llmConfig: LLMConfig = {
+        model: modelConfig.model,
+        temperature: modelConfig.temperature,
+        workspaceDir,
+        sessionId: resolvedSessionId,
+        agentCode: subagent_type,
+        tools: scopedToolDefinitions,
+        abortSignal
+      }
+      const invokeModel = async () =>
+        await toolExecutionService.withAllowedTools(effectiveScopedToolNames, async () =>
+          adapter.sendMessage(messages, llmConfig)
+        )
+
       const response = runId
         ? await DelegateEngine.runLogContext.run({ runId }, async () =>
-            adapter.sendMessage(messages, {
-              model: modelConfig.model,
-              temperature: modelConfig.temperature
-            })
+            invokeModel()
           )
-        : await adapter.sendMessage(messages, {
-            model: modelConfig.model,
-            temperature: modelConfig.temperature
-          })
+        : await invokeModel()
+      const normalizedUsage = this.normalizeUsage((response as { usage?: unknown }).usage)
 
       const truncatedOutput = truncateToTokenLimit(response.content, 50000).result
+
+      if (abortSignal?.aborted) {
+        await this.prisma.task.update({
+          where: { id: task.id },
+          data: {
+            status: 'cancelled',
+            output: 'Cancelled by user',
+            completedAt: new Date()
+          }
+        })
+
+        this.logger.info('Task cancelled after abort signal', { taskId: task.id })
+        await this.safeFinalizeRun(runId, 'failed')
+
+        return {
+          taskId: task.id,
+          output: 'Cancelled by user',
+          success: false
+        }
+      }
 
       await this.safeAddRunLog(runId, {
         timestamp: new Date().toISOString(),
         level: 'info',
         message: 'Received delegate task response from LLM',
         data: {
-          promptTokens: response.usage.prompt_tokens,
-          completionTokens: response.usage.completion_tokens
+          promptTokens: normalizedUsage?.prompt_tokens ?? 0,
+          completionTokens: normalizedUsage?.completion_tokens ?? 0
         }
       })
 
@@ -365,7 +428,7 @@ export class DelegateEngine {
 
       this.logger.info('Task completed', { taskId: task.id })
 
-      await this.safeFinalizeRun(runId, 'completed', response.usage)
+      await this.safeFinalizeRun(runId, 'completed', normalizedUsage)
 
       return {
         taskId: task.id,
@@ -377,24 +440,29 @@ export class DelegateEngine {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
+      const cancelled = isAbortRequested(error, abortSignal)
 
       await this.prisma.task.update({
         where: { id: task.id },
         data: {
-          status: 'failed',
-          output: `Error: ${errorMessage}`,
+          status: cancelled ? 'cancelled' : 'failed',
+          output: cancelled ? 'Cancelled by user' : `Error: ${errorMessage}`,
           completedAt: new Date()
         }
       })
 
-      this.logger.error('Task failed', { taskId: task.id, error: errorMessage })
+      if (cancelled) {
+        this.logger.info('Task cancelled', { taskId: task.id })
+      } else {
+        this.logger.error('Task failed', { taskId: task.id, error: errorMessage })
+      }
 
       await this.safeAddRunLog(runId, {
         timestamp: new Date().toISOString(),
-        level: 'error',
-        message: 'Delegate task failed',
+        level: cancelled ? 'info' : 'error',
+        message: cancelled ? 'Delegate task cancelled' : 'Delegate task failed',
         data: {
-          error: errorMessage
+          error: cancelled ? 'Cancelled by user' : errorMessage
         }
       })
 
@@ -402,7 +470,7 @@ export class DelegateEngine {
 
       return {
         taskId: task.id,
-        output: errorMessage,
+        output: cancelled ? 'Cancelled by user' : errorMessage,
         success: false
       }
     }
@@ -585,6 +653,49 @@ export class DelegateEngine {
         workDir: process.cwd()
       }
     })
+  }
+
+  private async resolveWorkspaceDirForSession(sessionId: string): Promise<string> {
+    try {
+      const session = await this.prisma.session.findUnique({
+        where: { id: sessionId },
+        include: { space: true }
+      })
+
+      if (session?.space?.workDir) {
+        return session.space.workDir
+      }
+
+      this.logger.warn('Session workspace not found, falling back to process cwd', {
+        sessionId
+      })
+      return process.cwd()
+    } catch (error) {
+      this.logger.warn('Failed to resolve session workspace, falling back to process cwd', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error)
+      })
+      return process.cwd()
+    }
+  }
+
+  private normalizeUsage(
+    usage: unknown
+  ): { prompt_tokens: number; completion_tokens: number } | undefined {
+    if (!usage || typeof usage !== 'object') {
+      return undefined
+    }
+
+    const usageRecord = usage as Record<string, unknown>
+    const promptRaw = usageRecord.prompt_tokens ?? usageRecord.input_tokens
+    const completionRaw = usageRecord.completion_tokens ?? usageRecord.output_tokens
+    const promptTokens = typeof promptRaw === 'number' ? promptRaw : 0
+    const completionTokens = typeof completionRaw === 'number' ? completionRaw : 0
+
+    return {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens
+    }
   }
 
   /**

@@ -35,10 +35,21 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
     const flowNodes: Node<TaskNodeData>[] = []
     const flowEdges: Edge[] = []
     const taskMap = new Map<string, Task>()
+    const logicalTaskMap = new Map<string, string>()
 
     tasks.forEach(task => {
       taskMap.set(task.id, task)
+      const logicalTaskId = task.metadata?.logicalTaskId
+      if (typeof logicalTaskId === 'string' && logicalTaskId.trim()) {
+        logicalTaskMap.set(logicalTaskId, task.id)
+      }
     })
+
+    const resolveDependencyId = (depId: string): string | null => {
+      if (taskMap.has(depId)) return depId
+      if (logicalTaskMap.has(depId)) return logicalTaskMap.get(depId) || null
+      return null
+    }
 
     const taskLevels = new Map<string, number>()
     const calculateLevel = (task: Task, visited = new Set<string>()): number => {
@@ -46,7 +57,13 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
       if (visited.has(task.id)) return 0
 
       visited.add(task.id)
-      const dependencies = (task.metadata?.dependencies as string[]) || []
+      const rawDependencies = [
+        ...(((task.metadata?.dependencies as string[]) || []).filter(Boolean)),
+        ...(((task.metadata?.logicalDependencies as string[]) || []).filter(Boolean))
+      ]
+      const dependencies = rawDependencies
+        .map(depId => resolveDependencyId(depId))
+        .filter((depId): depId is string => Boolean(depId))
       const maxDepLevel = dependencies.reduce((max, depId) => {
         const depTask = taskMap.get(depId)
         return depTask ? Math.max(max, calculateLevel(depTask, visited)) : max
@@ -91,7 +108,13 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
         }
       })
 
-      const dependencies = (task.metadata?.dependencies as string[]) || []
+      const rawDependencies = [
+        ...(((task.metadata?.dependencies as string[]) || []).filter(Boolean)),
+        ...(((task.metadata?.logicalDependencies as string[]) || []).filter(Boolean))
+      ]
+      const dependencies = rawDependencies
+        .map(depId => resolveDependencyId(depId))
+        .filter((depId): depId is string => Boolean(depId))
       dependencies.forEach(depId => {
         if (taskMap.has(depId)) {
           flowEdges.push({

@@ -135,10 +135,15 @@ export function HomePage() {
     const space = spaces.find(s => s.id === spaceId)
     if (!space) return
 
-    // Check if it's a custom path (not under default spaces directory)
-    const isCustomPath = !space.path.includes('/.halo/spaces/')
+    // Check if it's a project-linked space:
+    // - New centralized spaces with project: have workingDir
+    // - Legacy custom spaces: path doesn't end with /spaces/{uuid}
+    //   (centralized paths are always {haloDir}/spaces/{uuid-v4}, uuid is 36 chars)
+    const lastSegment = space.path.split('/').pop() ?? ''
+    const isCentralizedSpace = space.path.includes('/spaces/') && lastSegment.length === 36
+    const isProjectSpace = !!space.workingDir || !isCentralizedSpace
 
-    const message = isCustomPath
+    const message = isProjectSpace
       ? t('Are you sure you want to delete this space?\n\nOnly Halo data (conversation history) will be deleted, your project files will be kept.')
       : t('Are you sure you want to delete this space?\n\nAll conversations and files in the space will be deleted.')
 
@@ -228,14 +233,6 @@ export function HomePage() {
                 <p className="text-sm text-muted-foreground mt-1">
                   {t('Aimless time, ideas will crystallize here')}
                 </p>
-                {(haloSpace.stats.artifactCount > 0 || haloSpace.stats.conversationCount > 0) && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    {t('{{count}} artifacts · {{conversations}} conversations', {
-                      count: haloSpace.stats.artifactCount,
-                      conversations: haloSpace.stats.conversationCount
-                    })}
-                  </p>
-                )}
               </div>
             </div>
           </div>
@@ -262,9 +259,9 @@ export function HomePage() {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4">
-            {spaces.map((space) => (
+            {spaces.map((space, i) => (
               <div
-                key={space.id}
+                key={`${space.id}-${i}`}
                 onClick={() => handleSpaceClick(space)}
                 className="space-card p-4 group animate-fade-in"
               >
@@ -291,12 +288,6 @@ export function HomePage() {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  {t('{{count}} artifacts · {{conversations}} conversations', {
-                    count: space.stats.artifactCount,
-                    conversations: space.stats.conversationCount
-                  })}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
                   {formatTimeAgo(space.updatedAt)}{t('active')}
                 </p>
               </div>

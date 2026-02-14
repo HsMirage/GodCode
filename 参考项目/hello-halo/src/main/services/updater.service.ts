@@ -22,6 +22,7 @@ import { is } from '@electron-toolkit/utils'
 
 // Local imports
 import { getMainWindow } from './window.service'
+import { loadProductConfig, UpdateConfig } from './ai-sources/auth-loader'
 
 // Type imports
 const { autoUpdater } = electronUpdater
@@ -56,9 +57,40 @@ let lastCheckTime = 0
 /** Minimum interval between checks (5 minutes) to prevent spam */
 const MIN_CHECK_INTERVAL_MS = 5 * 60 * 1000
 
+/** Cached update config for constructing download URLs */
+let cachedUpdateConfig: UpdateConfig | undefined
+
 // ============================================================================
 // Configuration
 // ============================================================================
+
+/**
+ * Construct the download page URL based on updateConfig
+ * - For 'generic' provider: use the configured URL directly
+ * - For 'github' provider: construct GitHub releases URL from owner/repo
+ * - Fallback: empty string (no download link)
+ */
+function getDownloadPageUrl(version: string): string {
+  if (!cachedUpdateConfig) {
+    return ''
+  }
+
+  const { provider, url, owner, repo } = cachedUpdateConfig
+
+  if (provider === 'generic' && url) {
+    // Internal server: use the configured URL directly
+    return url
+  }
+
+  if (provider === 'github') {
+    // GitHub: construct releases page URL
+    if (owner && repo) {
+      return `https://github.com/${owner}/${repo}/releases/tag/v${version}`
+    }
+  }
+
+  return ''
+}
 
 // Configure logging
 autoUpdater.logger = console
@@ -88,6 +120,31 @@ export function initAutoUpdater(): void {
     return
   }
 
+  // ========================================
+  // Check updateConfig from product.json
+  // ========================================
+  const productConfig = loadProductConfig()
+  const updateConfig = productConfig.updateConfig
+
+  // Cache updateConfig for constructing download URLs later
+  cachedUpdateConfig = updateConfig
+
+  if (!updateConfig) {
+    console.log('[Updater] No updateConfig in product.json, using default GitHub provider')
+  } else if (updateConfig.provider === 'generic' && !updateConfig.url) {
+    // Empty URL means updates are disabled (e.g., internal network version)
+    console.log('[Updater] updateConfig.url is empty, auto-update disabled')
+    return
+  } else if (updateConfig.provider === 'generic' && updateConfig.url) {
+    // Set custom update server URL
+    autoUpdater.setFeedURL({
+      provider: 'generic',
+      url: updateConfig.url
+    })
+    console.log('[Updater] Using custom update URL:', updateConfig.url)
+  }
+  // For 'github' provider, use default configuration from electron-builder.yml
+
   // Set up event handlers
   autoUpdater.on('checking-for-update', () => {
     console.log('[Updater] Checking for updates...')
@@ -103,7 +160,8 @@ export function initAutoUpdater(): void {
       sendUpdateStatus('manual-download', {
         version: info.version,
         releaseDate: info.releaseDate,
-        releaseNotes: info.releaseNotes
+        releaseNotes: info.releaseNotes,
+        downloadUrl: getDownloadPageUrl(info.version)
       })
     } else {
       // Windows/Linux background check: Proceed with auto-download
@@ -134,7 +192,8 @@ export function initAutoUpdater(): void {
     console.log('[Updater] Update downloaded:', info.version)
     sendUpdateStatus('downloaded', {
       version: info.version,
-      releaseNotes: info.releaseNotes
+      releaseNotes: info.releaseNotes,
+      downloadUrl: getDownloadPageUrl(info.version)
     })
   })
 

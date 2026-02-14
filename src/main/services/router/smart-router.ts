@@ -14,6 +14,8 @@ export interface RouteContext {
   parentTaskId?: string
   /** Selected dialog agent code (e.g. "haotian") */
   agentCode?: string
+  /** Abort signal propagated from current UI request */
+  abortSignal?: AbortSignal
 }
 
 export interface DirectRouteResult {
@@ -100,6 +102,7 @@ export class SmartRouter {
         category: rule.category,
         subagent_type: selectedSubagent,
         parentTaskId: context?.parentTaskId,
+        abortSignal: context?.abortSignal,
         model: modelOverride,
         baseURL: rule.baseURL,
         apiKey: rule.apiKey
@@ -109,7 +112,8 @@ export class SmartRouter {
     if (strategy === 'workforce') {
       const workflowOptions = {
         category: rule.category ?? 'unspecified-high',
-        agentCode: context?.agentCode
+        agentCode: context?.agentCode,
+        abortSignal: context?.abortSignal
       }
       return context?.sessionId
         ? await this.workforceEngine.executeWorkflow(input, context.sessionId, workflowOptions)

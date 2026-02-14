@@ -52,7 +52,7 @@ export interface Task {
   sessionId: string
   /** Supports sub-tasks */
   parentTaskId?: string
-  type: 'user' | 'delegated' | 'workforce'
+  type: 'user' | 'delegated' | 'workforce' | 'workflow' | 'subtask' | 'agent' | 'TODO_ITEM'
   status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
   /** Task description */
   input: string

@@ -1,4 +1,4 @@
-/**
+/**		      	    				  	  	  	 		 		       	 	 	         	 	    					 
  * Agent Module - Public API
  *
  * This module provides the AI agent functionality for Halo.
@@ -69,12 +69,6 @@ export {
 } from './session-manager'
 
 // ============================================
-// Permission Handling
-// ============================================
-
-export { handleToolApproval } from './permission-handler'
-
-// ============================================
 // MCP Management
 // ============================================
 
@@ -90,7 +84,7 @@ export {
 // These are not part of the public API but may be needed internally
 // during the transition period
 
-export { createCanUseTool } from './permission-handler'
+export { createCanUseTool, resolveQuestion, rejectQuestion, rejectAllQuestions } from './permission-handler'
 export { getWorkingDir, getApiCredentials, sendToRenderer } from './helpers'
 export { parseSDKMessage, buildMessageContent, formatCanvasContext } from './message-utils'
 export { getOrCreateV2Session, activeSessions, v2Sessions } from './session-manager'

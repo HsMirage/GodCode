@@ -6,8 +6,8 @@ const execAsync = promisify(exec)
 
 // Safe path patterns to identify our bundled PostgreSQL
 const SAFE_PATH_PATTERNS = [
-  /node_modules[\\\/]@embedded-postgres[\\\/]/,
-  /app\.asar\.unpacked[\\\/]node_modules[\\\/]@embedded-postgres[\\\/]/
+  /node_modules[\\\/](?:@embedded-postgres|embedded-postgres)[\\\/]/i,
+  /app\.asar\.unpacked[\\\/]node_modules[\\\/](?:@embedded-postgres|embedded-postgres)[\\\/]/i
 ]
 
 interface PostgresProcess {
@@ -20,7 +20,7 @@ interface PostgresProcess {
  * @param stdout WMIC command output
  */
 function parseWmicOutput(stdout: string): PostgresProcess[] {
-  const lines = stdout.trim().split('\r\n')
+  const lines = stdout.trim().split(/\r?\n/)
   // Remove empty lines
   const nonEmptyLines = lines.filter(line => line.trim())
 
@@ -61,26 +61,59 @@ function parseWmicOutput(stdout: string): PostgresProcess[] {
 }
 
 /**
+ * Parses `ps -axo pid=,args=` output on Unix-like systems.
+ */
+function parsePsOutput(stdout: string): PostgresProcess[] {
+  const lines = stdout.split(/\r?\n/)
+  const processes: PostgresProcess[] = []
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (!line) continue
+
+    const match = line.match(/^(\d+)\s+(.+)$/)
+    if (!match) continue
+
+    const pid = parseInt(match[1], 10)
+    const commandLine = match[2]
+
+    if (Number.isNaN(pid)) continue
+    if (!/(^|[\/\s])(postgres|initdb|pg_ctl)(\s|$)/.test(commandLine)) continue
+
+    processes.push({
+      pid,
+      executablePath: commandLine
+    })
+  }
+
+  return processes
+}
+
+/**
  * Finds running PostgreSQL processes (postgres, initdb, pg_ctl)
- * using wmic on Windows to ensure we get the full path.
+ * using platform-specific process listing commands.
  */
 export async function findPostgresProcesses(): Promise<PostgresProcess[]> {
-  if (process.platform !== 'win32') {
+  try {
+    if (process.platform === 'win32') {
+      // wmic process where "name='postgres.exe' or name='initdb.exe' or name='pg_ctl.exe'" get ProcessId,ExecutablePath /FORMAT:CSV
+      const cmd = `wmic process where "name='postgres.exe' or name='initdb.exe' or name='pg_ctl.exe'" get ProcessId,ExecutablePath /FORMAT:CSV`
+      const { stdout } = await execAsync(cmd)
+      return parseWmicOutput(stdout)
+    }
+
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      const { stdout } = await execAsync('ps -axo pid=,args=')
+      return parsePsOutput(stdout)
+    }
+
     logger.warn(
       `[process-utils] Process discovery not implemented for platform: ${process.platform}`
     )
     return []
-  }
-
-  try {
-    // wmic process where "name='postgres.exe' or name='initdb.exe' or name='pg_ctl.exe'" get ProcessId,ExecutablePath /FORMAT:CSV
-    const cmd = `wmic process where "name='postgres.exe' or name='initdb.exe' or name='pg_ctl.exe'" get ProcessId,ExecutablePath /FORMAT:CSV`
-    const { stdout } = await execAsync(cmd)
-    return parseWmicOutput(stdout)
   } catch (error) {
-    // If no processes are found, wmic might exit with non-zero or return "No Instance(s) Available"
-    const err = error as any
-    if (err.message && err.message.includes('No Instance(s) Available')) {
+    const err = error as Error
+    if (err.message.includes('No Instance(s) Available')) {
       return []
     }
     logger.error('[process-utils] Failed to find postgres processes', { error })
@@ -93,11 +126,6 @@ export async function findPostgresProcesses(): Promise<PostgresProcess[]> {
  * This ensures we don't kill a user's system PostgreSQL installation.
  */
 export async function killPostgresProcesses(): Promise<void> {
-  if (process.platform !== 'win32') {
-    logger.warn(`[process-utils] Process cleanup not implemented for platform: ${process.platform}`)
-    return
-  }
-
   const processes = await findPostgresProcesses()
   if (processes.length === 0) {
     return
@@ -120,15 +148,36 @@ export async function killPostgresProcesses(): Promise<void> {
   for (const proc of procsToKill) {
     try {
       logger.info(`[process-utils] Killing process PID=${proc.pid}`)
-      // Add 5 second timeout protection
+      if (process.platform === 'win32') {
+        await Promise.race([
+          execAsync(`taskkill /F /PID ${proc.pid}`),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Taskkill timeout')), 5000))
+        ])
+        continue
+      }
+
       await Promise.race([
-        execAsync(`taskkill /F /PID ${proc.pid}`),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Taskkill timeout')), 5000))
+        execAsync(`kill -TERM ${proc.pid}`),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('kill timeout')), 5000))
       ])
+
+      await new Promise(resolve => setTimeout(resolve, 300))
+      try {
+        await execAsync(`kill -0 ${proc.pid}`)
+        await Promise.race([
+          execAsync(`kill -KILL ${proc.pid}`),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('kill -KILL timeout')), 5000))
+        ])
+      } catch {
+        // Already exited.
+      }
     } catch (error) {
-      // Ignore error if process is already gone "The process ... not found"
       const msg = error instanceof Error ? error.message : String(error)
-      if (!msg.includes('not found')) {
+      if (
+        !msg.includes('not found') &&
+        !msg.includes('No such process') &&
+        !msg.includes('has already exited')
+      ) {
         logger.error(`[process-utils] Failed to kill process ${proc.pid}`, { error: msg })
       }
     }

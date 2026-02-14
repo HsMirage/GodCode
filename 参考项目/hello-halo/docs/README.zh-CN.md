@@ -40,7 +40,7 @@
 
 对于熟悉命令行的开发者来说，这没什么。但对于设计师、产品经理、学生，以及所有希望 AI *帮忙做事* 的人来说，终端是一道门槛。
 
-**Halo 打破了这道门槛。**
+**Halo 是首个打破这道门槛的。**
 
 我们把 Claude Code 100% 的 Agent 能力，包装进一个人人都能用的可视化界面。同样的能力，零摩擦。
 
@@ -141,8 +141,11 @@
 git clone https://github.com/openkursar/hello-halo.git
 cd hello-halo
 npm install
+npm run prepare        # 下载当前平台的二进制依赖
 npm run dev
 ```
+
+> 打包所有平台的安装包前，请先运行 `npm run prepare:all` 下载全部平台的二进制依赖。
 
 ---
 
@@ -205,7 +208,8 @@ Halo 不只是给开发者用的。我们看到：
 - [x] AI 浏览器（基于 CDP）
 - [x] MCP 服务器支持
 - [ ] 插件系统
-- [ ] 语音输入
+- [ ] Git 可视化与 AI 辅助代码审查
+- [ ] AI 智能文件搜索
 
 ---
 
@@ -225,6 +229,7 @@ Halo 开源是因为 AI 应该人人可及。
 git clone https://github.com/openkursar/hello-halo.git
 cd hello-halo
 npm install
+npm run prepare        # 下载当前平台的二进制依赖
 npm run dev
 ```
 
@@ -254,6 +259,16 @@ npm run dev
 ## 许可证
 
 MIT 许可证 — 详见 [LICENSE](../LICENSE)。
+
+---
+
+## 受到 Halo 的启发？
+
+如果本项目给了你灵感，或帮你构建了很酷的东西：
+
+- **给我们一个 Star** — 帮助更多人发现 Halo
+- **分享你的故事** — 我们很想知道你做了什么
+- **提及我们** — 例如 `Inspired by [Halo](https://github.com/openkursar/hello-halo)`
 
 ---
 

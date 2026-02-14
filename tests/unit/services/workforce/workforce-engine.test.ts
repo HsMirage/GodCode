@@ -4,6 +4,8 @@ import { DelegateEngine } from '@/main/services/delegate'
 import { DatabaseService } from '@/main/services/database'
 import { LoggerService } from '@/main/services/logger'
 import { createLLMAdapter } from '@/main/services/llm/factory'
+import fs from 'node:fs'
+import path from 'node:path'
 
 // Mock dependencies
 const mockPrisma: any = {
@@ -22,6 +24,7 @@ const mockPrisma: any = {
     findUnique: vi.fn()
   },
   session: {
+    findUnique: vi.fn(),
     findFirst: vi.fn(),
     create: vi.fn()
   },
@@ -80,14 +83,33 @@ vi.mock('@/main/services/delegate', () => ({
   DelegateEngine: vi.fn(() => mockDelegateEngine)
 }))
 
+const mockBoulderService = {
+  getState: vi.fn(),
+  isSessionTracked: vi.fn()
+}
+
+vi.mock('@/main/services/boulder-state.service', () => ({
+  BoulderStateService: {
+    getInstance: vi.fn(() => mockBoulderService)
+  }
+}))
+
 describe('WorkforceEngine', () => {
   let workforceEngine: WorkforceEngine
 
   beforeEach(() => {
     vi.clearAllMocks()
     workforceEngine = new WorkforceEngine()
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false)
+    vi.spyOn(fs, 'readFileSync').mockImplementation(() => '')
+    mockBoulderService.getState.mockResolvedValue({})
+    mockBoulderService.isSessionTracked.mockResolvedValue(false)
 
     // Default mocks setup
+    mockPrisma.session.findUnique.mockResolvedValue({
+      id: 'test-session-123',
+      space: { id: 'space-1', workDir: '/tmp/workspace-a' }
+    })
     mockPrisma.session.findFirst.mockResolvedValue({ id: 'session-1' })
     mockPrisma.task.create.mockResolvedValue({ id: 'workflow-1', type: 'workflow' })
     mockPrisma.task.update.mockResolvedValue({ id: 'workflow-1' })
@@ -301,6 +323,128 @@ describe('WorkforceEngine', () => {
           data: expect.objectContaining({
             status: 'failed',
             output: expect.stringContaining('Subtask failed')
+          })
+        })
+      )
+    })
+
+    it('should fail fast for kuafu when no executable plan can be resolved', async () => {
+      await expect(
+        workforceEngine.executeWorkflow('执行计划', 'test-session-123', { agentCode: 'kuafu' })
+      ).rejects.toThrow('未找到可执行计划文件')
+
+      expect(mockAdapter.sendMessage).not.toHaveBeenCalled()
+      expect(mockDelegateEngine.delegateTask).not.toHaveBeenCalled()
+    })
+
+    it('should parse plan tasks with dependencies and append haotian review task', async () => {
+      vi.spyOn(fs, 'existsSync').mockImplementation(path => String(path).includes('.sisyphus'))
+      vi.spyOn(fs, 'readFileSync').mockReturnValue(
+        [
+          '# Plan',
+          '- [ ] Task 1: 搜索代码位置 [agent: qianliyan]',
+          '- [ ] Task 2: 修复后端 API 错误',
+          '  depends on: 1',
+          '- [ ] Task 3: 更新页面样式',
+          '  category: visual-engineering',
+          '  依赖: 1'
+        ].join('\n')
+      )
+
+      let counter = 0
+      mockDelegateEngine.delegateTask.mockImplementation(async (input: any) => ({
+        taskId: `persisted-${++counter}`,
+        output: `done:${input.description}`,
+        success: true
+      }))
+
+      const result = await workforceEngine.executeWorkflow(
+        '执行计划 .sisyphus/plans/test-plan.md',
+        'test-session-123',
+        { agentCode: 'haotian' }
+      )
+
+      expect(result.success).toBe(true)
+      expect(result.tasks.map(task => task.id)).toContain('plan-haotian-review')
+
+      const byDescription = new Map(
+        mockDelegateEngine.delegateTask.mock.calls.map(call => [call[0].description, call[0]])
+      )
+
+      expect(byDescription.get('Task 1: 搜索代码位置 [agent: qianliyan]')?.subagent_type).toBe(
+        'qianliyan'
+      )
+      expect(byDescription.get('Task 2: 修复后端 API 错误')?.subagent_type).toBe('kuafu')
+      expect(byDescription.get('Task 3: 更新页面样式')?.subagent_type).toBe('luban')
+      expect(
+        byDescription.get('审查已完成子任务的结果一致性，确认验收标准与风险说明完整。')?.subagent_type
+      ).toBe('leigong')
+      expect(byDescription.get('Task 2: 修复后端 API 错误')?.metadata?.logicalDependencies).toEqual([
+        'plan-1'
+      ])
+    })
+
+    it('should resolve relative plan path against session workspace directory', async () => {
+      mockPrisma.session.findUnique.mockResolvedValue({
+        id: 'test-session-123',
+        space: { id: 'space-2', workDir: '/tmp/other-project' }
+      })
+      vi.spyOn(fs, 'existsSync').mockImplementation(candidate =>
+        path
+          .normalize(String(candidate))
+          .replace(/\\/g, '/')
+          .includes('/tmp/other-project/.sisyphus/plans/site.md')
+      )
+      vi.spyOn(fs, 'readFileSync').mockReturnValue('- [ ] Task 1: 根据网站规划实现首页')
+
+      await workforceEngine.executeWorkflow(
+        '执行计划 .sisyphus/plans/site.md',
+        'test-session-123',
+        { agentCode: 'kuafu' }
+      )
+
+      expect(mockAdapter.sendMessage).not.toHaveBeenCalled()
+      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: 'Task 1: 根据网站规划实现首页'
+        })
+      )
+    })
+
+    it('should route local documentation analysis tasks to qianliyan', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-doc', description: '分析项目规划文档并提取约束', dependencies: [] }]
+        })
+      })
+
+      await workforceEngine.executeWorkflow('根据项目规划文档完成实现', 'test-session-123')
+
+      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: '分析项目规划文档并提取约束',
+          subagent_type: 'qianliyan'
+        })
+      )
+    })
+
+    it('should cancel workflow immediately when abort signal is already requested', async () => {
+      const controller = new AbortController()
+      controller.abort()
+
+      await expect(
+        workforceEngine.executeWorkflow('Cancelled workflow', 'test-session-123', {
+          abortSignal: controller.signal
+        })
+      ).rejects.toThrow('Workflow cancelled by user')
+
+      expect(mockDelegateEngine.delegateTask).not.toHaveBeenCalled()
+      expect(mockPrisma.task.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'workflow-1' },
+          data: expect.objectContaining({
+            status: 'cancelled',
+            output: 'Cancelled by user'
           })
         })
       )

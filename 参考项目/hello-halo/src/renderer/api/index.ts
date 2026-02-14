@@ -15,6 +15,14 @@ import {
   clearAuthToken,
   getAuthToken
 } from './transport'
+import type {
+  HealthStatusResponse,
+  HealthStateResponse,
+  HealthRecoveryResponse,
+  HealthReportResponse,
+  HealthExportResponse,
+  HealthCheckResponse
+} from '../../shared/types'
 
 // Response type
 interface ApiResponse<T = unknown> {
@@ -114,12 +122,13 @@ export const api = {
   validateApi: async (
     apiKey: string,
     apiUrl: string,
-    provider: string
+    provider: string,
+    model?: string
   ): Promise<ApiResponse> => {
     if (isElectron()) {
-      return window.halo.validateApi(apiKey, apiUrl, provider)
+      return window.halo.validateApi(apiKey, apiUrl, provider, model)
     }
-    return httpRequest('POST', '/api/config/validate', { apiKey, apiUrl, provider })
+    return httpRequest('POST', '/api/config/validate', { apiKey, apiUrl, provider, model })
   },
 
   refreshAISourcesConfig: async (): Promise<ApiResponse> => {
@@ -310,6 +319,35 @@ export const api = {
     )
   },
 
+  getMessageThoughts: async (
+    spaceId: string,
+    conversationId: string,
+    messageId: string
+  ): Promise<ApiResponse> => {
+    if (isElectron()) {
+      return window.halo.getMessageThoughts(spaceId, conversationId, messageId)
+    }
+    return httpRequest(
+      'GET',
+      `/api/spaces/${spaceId}/conversations/${conversationId}/messages/${messageId}/thoughts`
+    )
+  },
+
+  toggleStarConversation: async (
+    spaceId: string,
+    conversationId: string,
+    starred: boolean
+  ): Promise<ApiResponse> => {
+    if (isElectron()) {
+      return window.halo.toggleStarConversation(spaceId, conversationId, starred)
+    }
+    return httpRequest(
+      'POST',
+      `/api/spaces/${spaceId}/conversations/${conversationId}/star`,
+      { starred }
+    )
+  },
+
   // ===== Agent =====
   sendMessage: async (request: {
     spaceId: string
@@ -399,6 +437,18 @@ export const api = {
     }))
   },
 
+  // Answer a pending AskUserQuestion
+  answerQuestion: async (data: {
+    conversationId: string
+    id: string
+    answers: Record<string, string>
+  }): Promise<ApiResponse> => {
+    if (isElectron()) {
+      return window.halo.answerQuestion(data)
+    }
+    return httpRequest('POST', '/api/agent/answer-question', data)
+  },
+
   // Test MCP server connections
   testMcpConnections: async (): Promise<{ success: boolean; servers: unknown[]; error?: string }> => {
     if (isElectron()) {
@@ -454,6 +504,25 @@ export const api = {
     }
     // In remote mode, use WebSocket events
     return onEvent('artifact:changed', callback)
+  },
+
+  // Subscribe to tree update events (pre-computed data, zero IPC round-trips)
+  onArtifactTreeUpdate: (callback: (data: {
+    spaceId: string
+    updatedDirs: Array<{ dirPath: string; children: unknown[] }>
+    changes: Array<{
+      type: 'add' | 'change' | 'unlink' | 'addDir' | 'unlinkDir'
+      path: string
+      relativePath: string
+      spaceId: string
+      item?: unknown
+    }>
+  }) => void) => {
+    if (isElectron()) {
+      return window.halo.onArtifactTreeUpdate(callback)
+    }
+    // In remote mode, use WebSocket events
+    return onEvent('artifact:tree-update', callback)
   },
 
   openArtifact: async (filePath: string): Promise<ApiResponse> => {
@@ -623,6 +692,13 @@ export const api = {
     return window.halo.setAutoLaunch(enabled)
   },
 
+  openLogFolder: async (): Promise<ApiResponse> => {
+    if (!isElectron()) {
+      return { success: false, error: 'Only available in desktop app' }
+    }
+    return window.halo.openLogFolder()
+  },
+
   // ===== Window (Electron only) =====
   setTitleBarOverlay: async (options: {
     color: string
@@ -688,6 +764,8 @@ export const api = {
     onEvent('agent:mcp-status', callback),
   onAgentCompact: (callback: (data: unknown) => void) =>
     onEvent('agent:compact', callback),
+  onAgentAskQuestion: (callback: (data: unknown) => void) =>
+    onEvent('agent:ask-question', callback),
   onRemoteStatusChange: (callback: (data: unknown) => void) =>
     onEvent('remote:status-change', callback),
 
@@ -1075,6 +1153,56 @@ export const api = {
       return () => {}
     }
     return window.halo.onBootstrapExtendedReady(callback)
+  },
+
+  // ===== Health System (Electron only) =====
+  getHealthStatus: async (): Promise<ApiResponse<HealthStatusResponse>> => {
+    if (!isElectron()) {
+      return { success: false, error: 'Only available in desktop app' }
+    }
+    return window.halo.getHealthStatus()
+  },
+
+  getHealthState: async (): Promise<ApiResponse<HealthStateResponse>> => {
+    if (!isElectron()) {
+      return { success: false, error: 'Only available in desktop app' }
+    }
+    return window.halo.getHealthState()
+  },
+
+  triggerHealthRecovery: async (strategyId: string, userConsented: boolean): Promise<ApiResponse<HealthRecoveryResponse>> => {
+    if (!isElectron()) {
+      return { success: false, error: 'Only available in desktop app' }
+    }
+    return window.halo.triggerHealthRecovery(strategyId, userConsented)
+  },
+
+  generateHealthReport: async (): Promise<ApiResponse<HealthReportResponse>> => {
+    if (!isElectron()) {
+      return { success: false, error: 'Only available in desktop app' }
+    }
+    return window.halo.generateHealthReport()
+  },
+
+  generateHealthReportText: async (): Promise<ApiResponse<string>> => {
+    if (!isElectron()) {
+      return { success: false, error: 'Only available in desktop app' }
+    }
+    return window.halo.generateHealthReportText()
+  },
+
+  exportHealthReport: async (filePath?: string): Promise<ApiResponse<HealthExportResponse>> => {
+    if (!isElectron()) {
+      return { success: false, error: 'Only available in desktop app' }
+    }
+    return window.halo.exportHealthReport(filePath)
+  },
+
+  runHealthCheck: async (): Promise<ApiResponse<HealthCheckResponse>> => {
+    if (!isElectron()) {
+      return { success: false, error: 'Only available in desktop app' }
+    }
+    return window.halo.runHealthCheck()
   },
 }
 

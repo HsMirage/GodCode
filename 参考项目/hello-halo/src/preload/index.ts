@@ -1,18 +1,27 @@
-/**
+/**		      	    				  	  	  	 		 		       	 	 	         	 	    					 
  * Preload Script - Exposes IPC to renderer
  */
 
 import { contextBridge, ipcRenderer } from 'electron'
+import type {
+  HealthStatusResponse,
+  HealthStateResponse,
+  HealthRecoveryResponse,
+  HealthReportResponse,
+  HealthExportResponse,
+  HealthCheckResponse
+} from '../shared/types'
 
 // Type definitions for exposed API
 export interface HaloAPI {
   // Generic Auth (provider-agnostic)
   authGetProviders: () => Promise<IpcResponse>
+  authGetBuiltinProviders: () => Promise<IpcResponse>
   authStartLogin: (providerType: string) => Promise<IpcResponse>
   authCompleteLogin: (providerType: string, state: string) => Promise<IpcResponse>
-  authRefreshToken: (providerType: string) => Promise<IpcResponse>
-  authCheckToken: (providerType: string) => Promise<IpcResponse>
-  authLogout: (providerType: string) => Promise<IpcResponse>
+  authRefreshToken: (sourceId: string) => Promise<IpcResponse>
+  authCheckToken: (sourceId: string) => Promise<IpcResponse>
+  authLogout: (sourceId: string) => Promise<IpcResponse>
   onAuthLoginProgress: (callback: (data: { provider: string; status: string }) => void) => () => void
 
   // Config
@@ -59,6 +68,16 @@ export interface HaloAPI {
     conversationId: string,
     updates: Record<string, unknown>
   ) => Promise<IpcResponse>
+  getMessageThoughts: (
+    spaceId: string,
+    conversationId: string,
+    messageId: string
+  ) => Promise<IpcResponse>
+  toggleStarConversation: (
+    spaceId: string,
+    conversationId: string,
+    starred: boolean
+  ) => Promise<IpcResponse>
 
   // Agent
   sendMessage: (request: {
@@ -100,6 +119,7 @@ export interface HaloAPI {
   getSessionState: (conversationId: string) => Promise<IpcResponse>
   ensureSessionWarm: (spaceId: string, conversationId: string) => Promise<IpcResponse>
   testMcpConnections: () => Promise<{ success: boolean; servers: unknown[]; error?: string }>
+  answerQuestion: (data: { conversationId: string; id: string; answers: Record<string, string> }) => Promise<IpcResponse>
 
   // Event listeners
   onAgentMessage: (callback: (data: unknown) => void) => () => void
@@ -112,6 +132,7 @@ export interface HaloAPI {
   onAgentThoughtDelta: (callback: (data: unknown) => void) => () => void
   onAgentMcpStatus: (callback: (data: unknown) => void) => () => void
   onAgentCompact: (callback: (data: unknown) => void) => () => void
+  onAgentAskQuestion: (callback: (data: unknown) => void) => () => void
 
   // Artifact
   listArtifacts: (spaceId: string) => Promise<IpcResponse>
@@ -124,6 +145,17 @@ export interface HaloAPI {
     relativePath: string
     spaceId: string
     item?: unknown
+  }) => void) => () => void
+  onArtifactTreeUpdate: (callback: (data: {
+    spaceId: string
+    updatedDirs: Array<{ dirPath: string; children: unknown[] }>
+    changes: Array<{
+      type: 'add' | 'change' | 'unlink' | 'addDir' | 'unlinkDir'
+      path: string
+      relativePath: string
+      spaceId: string
+      item?: unknown
+    }>
   }) => void) => () => void
   openArtifact: (filePath: string) => Promise<IpcResponse>
   showArtifactInFolder: (filePath: string) => Promise<IpcResponse>
@@ -155,6 +187,7 @@ export interface HaloAPI {
   // System Settings
   getAutoLaunch: () => Promise<IpcResponse>
   setAutoLaunch: (enabled: boolean) => Promise<IpcResponse>
+  openLogFolder: () => Promise<IpcResponse>
 
   // Window
   setTitleBarOverlay: (options: { color: string; symbolColor: string }) => Promise<IpcResponse>
@@ -266,6 +299,15 @@ export interface HaloAPI {
     extendedReadyAt: number
   }>>
   onBootstrapExtendedReady: (callback: (data: { timestamp: number; duration: number }) => void) => () => void
+
+  // Health System
+  getHealthStatus: () => Promise<IpcResponse<HealthStatusResponse>>
+  getHealthState: () => Promise<IpcResponse<HealthStateResponse>>
+  triggerHealthRecovery: (strategyId: string, userConsented: boolean) => Promise<IpcResponse<HealthRecoveryResponse>>
+  generateHealthReport: () => Promise<IpcResponse<HealthReportResponse>>
+  generateHealthReportText: () => Promise<IpcResponse<string>>
+  exportHealthReport: (filePath?: string) => Promise<IpcResponse<HealthExportResponse>>
+  runHealthCheck: () => Promise<IpcResponse<HealthCheckResponse>>
 }
 
 interface IpcResponse<T = unknown> {
@@ -295,18 +337,19 @@ function createEventListener(channel: string, callback: (data: unknown) => void)
 const api: HaloAPI = {
   // Generic Auth (provider-agnostic)
   authGetProviders: () => ipcRenderer.invoke('auth:get-providers'),
+  authGetBuiltinProviders: () => ipcRenderer.invoke('auth:get-builtin-providers'),
   authStartLogin: (providerType) => ipcRenderer.invoke('auth:start-login', providerType),
   authCompleteLogin: (providerType, state) => ipcRenderer.invoke('auth:complete-login', providerType, state),
-  authRefreshToken: (providerType) => ipcRenderer.invoke('auth:refresh-token', providerType),
-  authCheckToken: (providerType) => ipcRenderer.invoke('auth:check-token', providerType),
-  authLogout: (providerType) => ipcRenderer.invoke('auth:logout', providerType),
+  authRefreshToken: (sourceId) => ipcRenderer.invoke('auth:refresh-token', sourceId),
+  authCheckToken: (sourceId) => ipcRenderer.invoke('auth:check-token', sourceId),
+  authLogout: (sourceId) => ipcRenderer.invoke('auth:logout', sourceId),
   onAuthLoginProgress: (callback) => createEventListener('auth:login-progress', callback as (data: unknown) => void),
 
   // Config
   getConfig: () => ipcRenderer.invoke('config:get'),
   setConfig: (updates) => ipcRenderer.invoke('config:set', updates),
-  validateApi: (apiKey, apiUrl, provider) =>
-    ipcRenderer.invoke('config:validate-api', apiKey, apiUrl, provider),
+  validateApi: (apiKey, apiUrl, provider, model?) =>
+    ipcRenderer.invoke('config:validate-api', apiKey, apiUrl, provider, model),
   refreshAISourcesConfig: () => ipcRenderer.invoke('config:refresh-ai-sources'),
 
   // Space
@@ -336,6 +379,10 @@ const api: HaloAPI = {
     ipcRenderer.invoke('conversation:add-message', spaceId, conversationId, message),
   updateLastMessage: (spaceId, conversationId, updates) =>
     ipcRenderer.invoke('conversation:update-last-message', spaceId, conversationId, updates),
+  getMessageThoughts: (spaceId, conversationId, messageId) =>
+    ipcRenderer.invoke('conversation:get-thoughts', spaceId, conversationId, messageId),
+  toggleStarConversation: (spaceId, conversationId, starred) =>
+    ipcRenderer.invoke('conversation:toggle-star', spaceId, conversationId, starred),
 
   // Agent
   sendMessage: (request) => ipcRenderer.invoke('agent:send-message', request),
@@ -345,6 +392,7 @@ const api: HaloAPI = {
   getSessionState: (conversationId) => ipcRenderer.invoke('agent:get-session-state', conversationId),
   ensureSessionWarm: (spaceId, conversationId) => ipcRenderer.invoke('agent:ensure-session-warm', spaceId, conversationId),
   testMcpConnections: () => ipcRenderer.invoke('agent:test-mcp'),
+  answerQuestion: (data) => ipcRenderer.invoke('agent:answer-question', data),
 
   // Event listeners
   onAgentMessage: (callback) => createEventListener('agent:message', callback),
@@ -357,6 +405,7 @@ const api: HaloAPI = {
   onAgentThoughtDelta: (callback) => createEventListener('agent:thought-delta', callback),
   onAgentMcpStatus: (callback) => createEventListener('agent:mcp-status', callback),
   onAgentCompact: (callback) => createEventListener('agent:compact', callback),
+  onAgentAskQuestion: (callback) => createEventListener('agent:ask-question', callback),
 
   // Artifact
   listArtifacts: (spaceId) => ipcRenderer.invoke('artifact:list', spaceId),
@@ -364,6 +413,7 @@ const api: HaloAPI = {
   loadArtifactChildren: (spaceId, dirPath) => ipcRenderer.invoke('artifact:load-children', spaceId, dirPath),
   initArtifactWatcher: (spaceId) => ipcRenderer.invoke('artifact:init-watcher', spaceId),
   onArtifactChanged: (callback) => createEventListener('artifact:changed', callback as (data: unknown) => void),
+  onArtifactTreeUpdate: (callback) => createEventListener('artifact:tree-update', callback as (data: unknown) => void),
   openArtifact: (filePath) => ipcRenderer.invoke('artifact:open', filePath),
   showArtifactInFolder: (filePath) => ipcRenderer.invoke('artifact:show-in-folder', filePath),
   readArtifactContent: (filePath) => ipcRenderer.invoke('artifact:read-content', filePath),
@@ -390,6 +440,7 @@ const api: HaloAPI = {
   // System Settings
   getAutoLaunch: () => ipcRenderer.invoke('system:get-auto-launch'),
   setAutoLaunch: (enabled) => ipcRenderer.invoke('system:set-auto-launch', enabled),
+  openLogFolder: () => ipcRenderer.invoke('system:open-log-folder'),
 
   // Window
   setTitleBarOverlay: (options) => ipcRenderer.invoke('window:set-title-bar-overlay', options),
@@ -480,6 +531,15 @@ const api: HaloAPI = {
   // Bootstrap lifecycle
   getBootstrapStatus: () => ipcRenderer.invoke('bootstrap:get-status'),
   onBootstrapExtendedReady: (callback) => createEventListener('bootstrap:extended-ready', callback as (data: unknown) => void),
+
+  // Health System
+  getHealthStatus: () => ipcRenderer.invoke('health:get-status'),
+  getHealthState: () => ipcRenderer.invoke('health:get-state'),
+  triggerHealthRecovery: (strategyId, userConsented) => ipcRenderer.invoke('health:trigger-recovery', strategyId, userConsented),
+  generateHealthReport: () => ipcRenderer.invoke('health:generate-report'),
+  generateHealthReportText: () => ipcRenderer.invoke('health:generate-report-text'),
+  exportHealthReport: (filePath) => ipcRenderer.invoke('health:export-report', filePath),
+  runHealthCheck: () => ipcRenderer.invoke('health:run-check'),
 }
 
 contextBridge.exposeInMainWorld('halo', api)
