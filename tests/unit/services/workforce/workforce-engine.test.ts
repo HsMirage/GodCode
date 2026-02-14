@@ -374,7 +374,7 @@ describe('WorkforceEngine', () => {
       expect(byDescription.get('Task 1: 搜索代码位置 [agent: qianliyan]')?.subagent_type).toBe(
         'qianliyan'
       )
-      expect(byDescription.get('Task 2: 修复后端 API 错误')?.subagent_type).toBe('kuafu')
+      expect(byDescription.get('Task 2: 修复后端 API 错误')?.subagent_type).toBe('luban')
       expect(byDescription.get('Task 3: 更新页面样式')?.subagent_type).toBe('luban')
       expect(
         byDescription.get('审查已完成子任务的结果一致性，确认验收标准与风险说明完整。')?.subagent_type
@@ -382,6 +382,42 @@ describe('WorkforceEngine', () => {
       expect(byDescription.get('Task 2: 修复后端 API 错误')?.metadata?.logicalDependencies).toEqual([
         'plan-1'
       ])
+    })
+
+    it('should remap explicit kuafu assignment to luban when orchestrator is haotian', async () => {
+      vi.spyOn(fs, 'existsSync').mockImplementation(path => String(path).includes('.sisyphus'))
+      vi.spyOn(fs, 'readFileSync').mockReturnValue(
+        ['# Plan', '- [ ] Task 1: 修复后端接口超时 [agent: kuafu]'].join('\n')
+      )
+
+      await workforceEngine.executeWorkflow('执行计划 .sisyphus/plans/test-plan.md', 'test-session-123', {
+        agentCode: 'haotian'
+      })
+
+      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: 'Task 1: 修复后端接口超时 [agent: kuafu]',
+          subagent_type: 'luban'
+        })
+      )
+    })
+
+    it('should fail subtask when delegate returns empty output', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-empty', description: '执行真实实现', dependencies: [] }]
+        })
+      })
+
+      mockDelegateEngine.delegateTask.mockResolvedValue({
+        taskId: 'empty-task',
+        output: '',
+        success: true
+      })
+
+      await expect(workforceEngine.executeWorkflow('空输出检查', 'test-session-123')).rejects.toThrow(
+        'empty output'
+      )
     })
 
     it('should resolve relative plan path against session workspace directory', async () => {

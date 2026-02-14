@@ -95,6 +95,7 @@ const CATEGORY_TO_AGENT: Record<string, string> = {
   'unspecified-high': 'kuafu',
   dayu: 'kuafu'
 }
+const HAOTIAN_DISALLOWED_ASSIGNEES = new Set(['haotian', 'fuxi', 'kuafu'])
 
 export class WorkforceEngine {
   private _prisma: ReturnType<typeof DatabaseService.prototype.getClient> | null = null
@@ -637,40 +638,118 @@ Only return the JSON, no other text.`
     }
 
     if (/(后端|api|数据库|schema|migration|service|controller|单测|测试|test|ci|pipeline|deploy)/i.test(text)) {
-      return 'kuafu'
+      return orchestratorAgentCode === 'haotian' ? 'luban' : 'kuafu'
     }
 
     if (/(实现|修复|feature|bug|refactor|重构|集成)/i.test(text)) {
-      return orchestratorAgentCode === 'haotian' ? 'kuafu' : 'luban'
+      return 'luban'
     }
 
     if (orchestratorAgentCode === 'haotian') {
-      return 'kuafu'
+      return 'luban'
     }
 
     return 'luban'
   }
 
-  private buildTaskPrompt(task: SubTask, taskSource: 'decomposed' | 'plan'): string {
+  private normalizeAssignedAgent(
+    assignedAgent: string,
+    task: SubTask,
+    orchestratorAgentCode?: string
+  ): string {
+    if (orchestratorAgentCode !== 'haotian') {
+      return assignedAgent
+    }
+
+    if (!HAOTIAN_DISALLOWED_ASSIGNEES.has(assignedAgent)) {
+      return assignedAgent
+    }
+
+    const fallbackAgent = this.selectSubagentForTask(task, 'haotian')
+    if (!HAOTIAN_DISALLOWED_ASSIGNEES.has(fallbackAgent)) {
+      return fallbackAgent
+    }
+
+    return 'luban'
+  }
+
+  private buildDependencyContext(task: SubTask, results: Map<string, string>): string {
+    if (task.dependencies.length === 0) {
+      return '无前置依赖结果。'
+    }
+
+    const lines = task.dependencies.map(dep => {
+      const dependencyOutput = results.get(dep)?.trim()
+      if (!dependencyOutput) {
+        return `- ${dep}: (无可用输出)`
+      }
+
+      const compactOutput =
+        dependencyOutput.length > 600 ? `${dependencyOutput.slice(0, 600)}\n[...截断...]` : dependencyOutput
+      return `- ${dep}:\n${compactOutput}`
+    })
+
+    return lines.join('\n')
+  }
+
+  private buildTaskPrompt(
+    task: SubTask,
+    taskSource: 'decomposed' | 'plan',
+    dependencyContext: string
+  ): string {
     if (taskSource === 'plan') {
       return [
         'TASK:',
         task.description,
         '',
         'EXPECTED OUTCOME:',
-        '完成该计划任务并给出可验证结果。',
+        '完成该计划任务，并提供可验证的变更与验证证据。',
+        '',
+        'REQUIRED TOOLS:',
+        'read, write/edit, bash, grep, glob（按需使用）',
         '',
         'MUST DO:',
+        '- 必须在仓库中落地真实改动，不允许只给建议。',
         '- 保持变更最小，遵循现有代码风格。',
-        '- 执行必要验证并报告结果。',
+        '- 列出实际改动的文件路径与关键修改点。',
+        '- 执行必要验证（至少包含一次可复现命令）并报告结果。',
         '',
         'MUST NOT DO:',
+        '- 不得只输出计划、分析、空白内容。',
         '- 不得偏离计划范围。',
-        '- 不得忽略失败或跳过验证。'
+        '- 不得忽略失败或跳过验证。',
+        '',
+        'CONTEXT:',
+        `- task_source: ${taskSource}`,
+        '- dependencies_output:',
+        dependencyContext
       ].join('\n')
     }
 
-    return task.description
+    return [
+      'TASK:',
+      task.description,
+      '',
+      'EXPECTED OUTCOME:',
+      '产出可验证的实际执行结果：如果任务要求实现/修复，必须完成代码改动；如果任务要求调研，必须给出带证据的结论。',
+      '',
+      'REQUIRED TOOLS:',
+      'read, write/edit, bash, grep, glob（按任务需要最小化使用）',
+      '',
+      'MUST DO:',
+      '- 必须返回实质性结果，不允许空输出。',
+      '- 如涉及实现，必须完成真实文件修改并列出改动文件。',
+      '- 如涉及验证，至少给出一条执行命令及关键结果。',
+      '',
+      'MUST NOT DO:',
+      '- 不得仅返回泛化建议或待办清单。',
+      '- 不得在未验证情况下声明完成。',
+      '',
+      'CONTEXT:',
+      `- task_source: ${taskSource}`,
+      '- dependencies_output:',
+      dependencyContext
+    ].join('\n')
   }
 
   async executeWorkflow(input: string, options?: WorkflowOptions): Promise<WorkflowResult>
@@ -748,7 +827,11 @@ Only return the JSON, no other text.`
       const subtasks = this.appendReviewTaskIfNeeded(
         taskResolution.subtasks.map(task => ({
           ...task,
-          assignedAgent: task.assignedAgent ?? this.selectSubagentForTask(task, agentCode)
+          assignedAgent: this.normalizeAssignedAgent(
+            task.assignedAgent ?? this.selectSubagentForTask(task, agentCode),
+            task,
+            agentCode
+          )
         })),
         taskResolution.source,
         agentCode
@@ -764,7 +847,11 @@ Only return the JSON, no other text.`
         throwIfAborted()
         inProgress.add(task.id)
         const taskFullId = `${workflow.id}:${task.id}`
-        const assignedAgent = task.assignedAgent ?? this.selectSubagentForTask(task, agentCode)
+        const assignedAgent = this.normalizeAssignedAgent(
+          task.assignedAgent ?? this.selectSubagentForTask(task, agentCode),
+          task,
+          agentCode
+        )
         const dependencyTaskIds = task.dependencies
           .map(depId => logicalToPersistedTaskId.get(depId))
           .filter((depId): depId is string => Boolean(depId))
@@ -790,12 +877,14 @@ Only return the JSON, no other text.`
 
         const taskOperation = async () => {
           throwIfAborted()
+          const dependencyContext = this.buildDependencyContext(task, results)
           const result = await this.delegateEngine.delegateTask({
             description: task.description,
-            prompt: this.buildTaskPrompt(task, taskResolution.source),
+            prompt: this.buildTaskPrompt(task, taskResolution.source, dependencyContext),
             sessionId: resolvedSessionId,
             category,
             subagent_type: assignedAgent,
+            useDynamicPrompt: false,
             parentTaskId: workflow.id,
             abortSignal,
             metadata: {
@@ -811,6 +900,9 @@ Only return the JSON, no other text.`
           })
           if (!result.success) {
             throw new Error(result.output || 'Delegate task returned unsuccessful status')
+          }
+          if (!result.output?.trim()) {
+            throw new Error(`Delegate task "${task.id}" returned empty output`)
           }
           return result
         }

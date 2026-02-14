@@ -33,6 +33,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { DynamicPromptBuilder, type PromptBuilderConfig } from './dynamic-prompt-builder'
 import { CategoryResolver, type ResolvedAgent } from './category-resolver'
 import { resolveScopedRuntimeToolNames } from './tool-allowlist'
+import { getAgentPromptByCode } from './agents'
 import {
   buildDelegationProtocol,
   serializeDelegationProtocol,
@@ -86,10 +87,12 @@ const DEFAULT_SYSTEM_PROMPT = 'You are CodeAll, an AI coding agent.'
  */
 function resolveSystemPrompt(
   agentPrompt: string | null | undefined,
-  categoryPrompt: string | null | undefined
+  categoryPrompt: string | null | undefined,
+  builtinAgentPrompt: string | null | undefined
 ): string {
   if (agentPrompt?.trim()) return agentPrompt.trim()
   if (categoryPrompt?.trim()) return categoryPrompt.trim()
+  if (builtinAgentPrompt?.trim()) return builtinAgentPrompt.trim()
   return DEFAULT_SYSTEM_PROMPT
 }
 
@@ -316,9 +319,11 @@ export class DelegateEngine {
         systemPromptTokens = this.promptBuilder.estimateTokens(systemPrompt)
       } else {
         // 回退到静态 Prompt (兼容性)
+        const builtinAgentPrompt = subagent_type ? getAgentPromptByCode(subagent_type) : undefined
         systemPrompt = resolveSystemPrompt(
           agentBinding?.systemPrompt,
-          categoryBinding?.systemPrompt
+          categoryBinding?.systemPrompt,
+          builtinAgentPrompt
         )
       }
 
@@ -723,7 +728,10 @@ export class DelegateEngine {
 
     switch (agentCategory) {
       case 'utility':
-        // 编排器类型 (如 haotian)：使用完整的 Orchestrator Prompt
+        // 昊天使用动态编排 Prompt；其他 utility agent 使用各自静态模板避免角色串味
+        if (resolvedAgent.code !== 'haotian') {
+          return getAgentPromptByCode(resolvedAgent.code) || resolvedAgent.description || DEFAULT_SYSTEM_PROMPT
+        }
         return this.buildOrchestratorPromptForAgent(resolvedAgent, availableTools, loadSkills)
 
       case 'exploration':
