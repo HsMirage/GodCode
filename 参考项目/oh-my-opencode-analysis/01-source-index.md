@@ -456,6 +456,149 @@
   - 协同标签：worker
 
 ### src/hooks
-### src/plugin*
+- 路径：`src/hooks/context-window-monitor.ts`
+  - 职责：监控上下文窗口并触发保护策略。
+  - 关键导出：`createContextWindowMonitor`
+  - 公共变量/状态：Token thresholds
+  - Prompt 触点：inject/consume
+  - 上下游：上游 `src/plugin/hooks/create-core-hooks.ts`；下游 `src/hooks/preemptive-compaction.ts`
+  - 协同标签：hook
+- 路径：`src/hooks/todo-continuation-enforcer/handler.ts`
+  - 职责：处理 todo 续跑与状态注入。
+  - 关键导出：`handleTodoContinuation`
+  - 公共变量/状态：Continuation session state
+  - Prompt 触点：inject/dispatch
+  - 上下游：上游 `src/hooks/todo-continuation-enforcer/session-state.ts`；下游 `src/hooks/todo-continuation-enforcer/continuation-injection.ts`
+  - 协同标签：hook
+- 路径：`src/hooks/session-recovery/resume.ts`
+  - 职责：会话恢复与续跑逻辑。
+  - 关键导出：`resumeSession`
+  - 公共变量/状态：Recovery storage state
+  - Prompt 触点：consume/dispatch
+  - 上下游：上游 `src/hooks/session-recovery/storage.ts`；下游 `src/hooks/session-recovery/recover-tool-result-missing.ts`
+  - 协同标签：hook
+- 路径：`src/hooks/atlas/atlas-hook.ts`
+  - 职责：atlas 专属 hook 链路。
+  - 关键导出：`createAtlasHook`
+  - 公共变量/状态：Atlas hook context
+  - Prompt 触点：inject/route
+  - 上下游：上游 `src/plugin/hooks/create-tool-guard-hooks.ts`；下游 `src/hooks/atlas/system-reminder-templates.ts`
+  - 协同标签：hook
+- 路径：`src/hooks/think-mode/hook.ts`
+  - 职责：思考模式切换与提示注入。
+  - 关键导出：`thinkModeHook`
+  - 公共变量/状态：Thinking mode switch state
+  - Prompt 触点：inject/route
+  - 上下游：上游 `src/hooks/think-mode/switcher.ts`；下游 `src/plugin/hooks/create-transform-hooks.ts`
+  - 协同标签：hook
+
+### src/plugin/
+- 路径：`src/plugin/hooks/create-core-hooks.ts`
+  - 职责：组装核心 hooks。
+  - 关键导出：`createCoreHooks`
+  - 公共变量/状态：Hook factory config
+  - Prompt 触点：route/inject
+  - 上下游：上游 `src/plugin/tool-registry.ts`；下游 `src/hooks/context-window-monitor.ts`
+  - 协同标签：orchestrator
+- 路径：`src/plugin/hooks/create-skill-hooks.ts`
+  - 职责：组装 skill 相关 hooks。
+  - 关键导出：`createSkillHooks`
+  - 公共变量/状态：Skill hook bindings
+  - Prompt 触点：route/inject
+  - 上下游：上游 `src/plugin/skill-context.ts`；下游 `src/hooks/category-skill-reminder/hook.ts`
+  - 协同标签：skill
+- 路径：`src/plugin/tool-execute-before.ts`
+  - 职责：执行工具前的策略处理。
+  - 关键导出：`runToolExecuteBefore`
+  - 公共变量/状态：Pre-tool policy state
+  - Prompt 触点：inject/route
+  - 上下游：上游 `src/plugin/tool-registry.ts`；下游 `src/hooks/atlas/tool-execute-before.ts`
+  - 协同标签：transport
+- 路径：`src/plugin/tool-execute-after.ts`
+  - 职责：执行工具后的结果处理。
+  - 关键导出：`runToolExecuteAfter`
+  - 公共变量/状态：Post-tool hook chain
+  - Prompt 触点：consume/dispatch
+  - 上下游：上游 `src/plugin/tool-registry.ts`；下游 `src/hooks/atlas/tool-execute-after.ts`
+  - 协同标签：transport
+- 路径：`src/plugin/skill-context.ts`
+  - 职责：管理 skill 上下文载入与传递。
+  - 关键导出：`buildSkillContext`
+  - 公共变量/状态：Skill context bag
+  - Prompt 触点：inject/compose
+  - 上下游：上游 `src/plugin/hooks/create-skill-hooks.ts`；下游 `src/tools/skill/tools.ts`
+  - 协同标签：skill
+
 ### src/shared
+- 路径：`src/shared/model-availability.ts`
+  - 职责：判断模型可用性。
+  - 关键导出：`getModelAvailability`
+  - 公共变量/状态：Provider availability cache
+  - Prompt 触点：route
+  - 上下游：上游 `src/shared/model-resolver.ts`；下游 `src/cli/doctor/checks/model-resolution.ts`
+  - 协同标签：support
+- 路径：`src/shared/model-resolver.ts`
+  - 职责：执行模型解析与回退。
+  - 关键导出：`resolveModel`
+  - 公共变量/状态：Resolution pipeline
+  - Prompt 触点：route
+  - 上下游：上游 `src/tools/delegate-task/model-selection.ts`；下游 `src/cli/model-fallback.ts`
+  - 协同标签：orchestrator
+- 路径：`src/shared/model-resolution-pipeline.ts`
+  - 职责：定义模型路由决策流水线。
+  - 关键导出：`runModelResolutionPipeline`
+  - 公共变量/状态：Pipeline decision state
+  - Prompt 触点：route/consume
+  - 上下游：上游 `src/shared/model-resolver.ts`；下游 `src/cli/doctor/checks/model-resolution-details.ts`
+  - 协同标签：support
+- 路径：`src/shared/session-utils.ts`
+  - 职责：会话工具函数与辅助路径。
+  - 关键导出：`getSessionPath`
+  - 公共变量/状态：Session path formatters
+  - Prompt 触点：consume
+  - 上下游：上游 `src/cli/run/session-resolver.ts`；下游 `src/hooks/session-recovery/storage.ts`
+  - 协同标签：support
+- 路径：`src/shared/session-cursor.ts`
+  - 职责：追踪会话游标。
+  - 关键导出：`advanceSessionCursor`
+  - 公共变量/状态：Cursor state
+  - Prompt 触点：consume/dispatch
+  - 上下游：上游 `src/cli/run/event-stream-processor.ts`；下游 `src/plugin/recent-synthetic-idles.ts`
+  - 协同标签：transport
+
 ### src/cli
+- 路径：`src/cli/run/runner.ts`
+  - 职责：CLI run 主执行流程。
+  - 关键导出：`runCommand`
+  - 公共变量/状态：Run state machine
+  - Prompt 触点：dispatch/consume
+  - 上下游：上游 `src/cli/cli-program.ts`；下游 `src/cli/run/event-handlers.ts`
+  - 协同标签：orchestrator
+- 路径：`src/cli/run/event-handlers.ts`
+  - 职责：处理 run 流程事件与输出。
+  - 关键导出：`handleRunEvent`
+  - 公共变量/状态：Event handler registry
+  - Prompt 触点：consume
+  - 上下游：上游 `src/cli/run/event-stream-processor.ts`；下游 `src/cli/run/event-formatting.ts`
+  - 协同标签：transport
+- 路径：`src/cli/run/event-stream-processor.ts`
+  - 职责：处理事件流并驱动状态迁移。
+  - 关键导出：`processEventStream`
+  - 公共变量/状态：Event stream cursor
+  - Prompt 触点：consume/dispatch
+  - 上下游：上游 `src/cli/run/server-connection.ts`；下游 `src/cli/run/event-state.ts`
+  - 协同标签：transport
+- 路径：`src/cli/run/session-resolver.ts`
+  - 职责：解析运行会话与恢复点。
+  - 关键导出：`resolveSession`
+  - 公共变量/状态：Session resolution context
+  - Prompt 触点：route/inject
+  - 上下游：上游 `src/cli/run/runner.ts`；下游 `src/shared/session-utils.ts`
+  - 协同标签：orchestrator
+- 路径：`src/cli/run/agent-resolver.ts`
+  - 职责：解析 agent 与模型配置。
+  - 关键导出：`resolveAgent`
+  - 公共变量/状态：Agent selection context
+  - Prompt 触点：route
+  - 上下游：上游 `src/cli/run/runner.ts`；下游 `src/agents/builtin-agents.ts`
+  - 协同标签：planner
