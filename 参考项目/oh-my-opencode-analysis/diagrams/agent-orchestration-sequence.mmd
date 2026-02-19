@@ -1,2 +1,17 @@
-flowchart TD
-  A[placeholder]
+sequenceDiagram
+  participant P as Planner/Caller
+  participant O as BackgroundManager
+  participant T as TmuxSessionManager
+  participant W as Subagent Session
+  participant N as Parent Notification
+
+  P->>O: launch(task)
+  O->>O: queue + concurrency acquire
+  O->>W: create session + promptAsync
+  O->>T: onSubagentSessionCreated (optional)
+  T->>T: query/decide/execute pane actions
+  O->>O: pollRunningTasks + stability checks
+  O->>W: session.status/messages
+  W-->>O: tool/result output
+  O->>N: notifyParentSession
+  N-->>P: completion reminder + task output entry
