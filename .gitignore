@@ -60,6 +60,7 @@ temp/
 *.tmp
 dev-data/
 网站CodeAlltemp_eigent/
+.worktrees/
 
 # Sisyphus runtime state
 .sisyphus/boulder.json
