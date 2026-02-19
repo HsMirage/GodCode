@@ -1,0 +1,13 @@
+flowchart TD
+  A[Task request] --> B{Category provided?}
+  B -- Yes --> C[Resolve category model]
+  B -- No --> D{Agent provided?}
+  D -- Yes --> E[Resolve agent model]
+  D -- No --> F[Use fallback/default model]
+  C --> G{Model available?}
+  E --> G
+  F --> G
+  G -- Yes --> H[dispatch promptAsync]
+  G -- No --> I[apply resolver fallback]
+  I --> H
+  H --> J[consume session output]

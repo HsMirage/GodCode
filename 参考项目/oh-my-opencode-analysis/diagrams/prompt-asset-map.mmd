@@ -1,0 +1,13 @@
+flowchart LR
+  TS[Template Source\nagent/system/hook/skill/category/tool]
+  B[Builder\ndynamic prompt / section builder]
+  I[Injector\nhooks + system content]
+  D[Dispatcher\ndelegate-task / slashcommand]
+  C[Consumer\nsubagent session / model adapter]
+
+  TS -->|define| B
+  B -->|compose| I
+  I -->|inject| D
+  D -->|dispatch| C
+  C -->|consume| D
+  D -->|route| TS
