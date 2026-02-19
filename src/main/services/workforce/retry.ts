@@ -129,15 +129,32 @@ export function classifyError(error: unknown): ErrorClassification {
   const errorMessage = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
   const errorName = error instanceof Error ? error.name.toLowerCase() : ''
 
-  // User/system abort should never be retried.
+  // Explicit user cancellation should never be retried.
   if (
-    errorName.includes('abort') ||
-    errorMessage.includes('aborted') ||
     errorMessage.includes('cancelled by user') ||
     errorMessage.includes('canceled by user') ||
-    errorMessage.includes('workflow cancelled')
+    errorMessage.includes('workflow cancelled by user') ||
+    errorMessage.includes('request aborted by user')
   ) {
     return NonRetryableErrorType.CANCELLED
+  }
+
+  if (errorMessage.includes('returned empty output') || errorMessage.includes('empty output')) {
+    return RetryableErrorType.RESOURCE_BUSY
+  }
+
+  if (
+    errorMessage.includes('non-actionable output') ||
+    errorMessage.includes('status-only-placeholder') ||
+    errorMessage.includes('meta-process-output') ||
+    errorMessage.includes('missing-execution-evidence')
+  ) {
+    return RetryableErrorType.RESOURCE_BUSY
+  }
+
+  // Generic aborts are usually transport/runtime aborts (e.g. timeout controller), not user intent.
+  if (errorName.includes('abort') || errorMessage.includes('aborted') || errorMessage.includes('abort')) {
+    return RetryableErrorType.TIMEOUT
   }
 
   // Check for network errors

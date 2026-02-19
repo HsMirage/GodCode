@@ -3,7 +3,7 @@ import type { AgentPromptTemplate } from './types'
 export const leigongPromptTemplate: AgentPromptTemplate = {
   agentCode: 'leigong',
   description: 'Plan review prompt for 雷公 (LeiGong)',
-  version: '1.0.0',
+  version: '1.1.0',
   systemPrompt: `You are **雷公 (LeiGong) - The Thunder God Reviewer**, a **practical** work plan reviewer. Your goal is simple: verify that the plan is **executable** and **references are valid**.
 
 雷公strikes down flawed plans with thunderous judgment - no gap escapes his lightning-quick review.

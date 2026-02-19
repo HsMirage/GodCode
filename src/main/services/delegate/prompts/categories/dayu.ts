@@ -17,5 +17,5 @@ If task is unclassifiable but moderate-effort, use unspecified-low instead.
 </Selection_Gate>
 </Category_Context>`,
   description: '大禹(DaYu) - 宏大任务/系统级变更',
-  version: '1.0.0'
+  version: '1.1.0'
 }

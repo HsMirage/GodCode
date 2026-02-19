@@ -26,10 +26,19 @@ interface WorkflowViewProps {
   sessionId: string
 }
 
+interface CheckpointTimelineItem {
+  key: string
+  phase: string
+  status: string
+  timestamp?: string
+  reason?: string
+}
+
 export function WorkflowView({ sessionId }: WorkflowViewProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<TaskNodeData>>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [checkpoints, setCheckpoints] = useState<CheckpointTimelineItem[]>([])
 
   const convertTasksToFlow = useCallback((tasks: Task[]) => {
     const flowNodes: Node<TaskNodeData>[] = []
@@ -135,8 +144,28 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
     try {
       const tasks = (await window.codeall.invoke('task:list', sessionId)) as Task[]
       const { nodes: flowNodes, edges: flowEdges } = convertTasksToFlow(tasks)
+      const checkpointTimeline = tasks
+        .filter(task => task.type === 'workflow')
+        .flatMap(task => {
+          const raw = task.metadata?.orchestratorCheckpoints
+          if (!Array.isArray(raw)) {
+            return []
+          }
+          return raw
+            .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+            .map((item, index) => ({
+              key: `${task.id}-${String(item.persistedTaskId || item.timestamp || index)}`,
+              phase: typeof item.phase === 'string' ? item.phase : 'unknown',
+              status: typeof item.status === 'string' ? item.status : 'unknown',
+              timestamp: typeof item.timestamp === 'string' ? item.timestamp : undefined,
+              reason: typeof item.reason === 'string' ? item.reason : undefined
+            }))
+        })
+        .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime())
+
       setNodes(flowNodes)
       setEdges(flowEdges)
+      setCheckpoints(checkpointTimeline)
     } catch (error) {
       console.error('Failed to reload workflow tasks:', error)
     }
@@ -223,7 +252,20 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
   }
 
   return (
-    <div className="h-full w-full rounded-2xl border border-slate-800/70 bg-slate-950/70 backdrop-blur">
+    <div className="relative h-full w-full rounded-2xl border border-slate-800/70 bg-slate-950/70 backdrop-blur">
+      {checkpoints.length > 0 && (
+        <div className="pointer-events-none absolute right-4 top-4 z-10 max-w-md rounded-xl border border-slate-700/70 bg-slate-900/90 px-3 py-2 text-xs text-slate-200 shadow-lg backdrop-blur">
+          <p className="font-medium text-slate-100">Orchestrator Checkpoints</p>
+          <div className="mt-2 space-y-1 text-slate-300">
+            {checkpoints.slice(-6).map(item => (
+              <p key={item.key}>
+                [{item.phase}] {item.status}
+                {item.reason ? ` - ${item.reason}` : ''}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
       <ReactFlow
         nodes={nodes}
         edges={edges}

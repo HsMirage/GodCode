@@ -1,0 +1,226 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户表
+model User {
+  id            String    @id @default(cuid())
+  username      String    @unique
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  avatar        String?
+  role          Role      @default(USER)
+  status        UserStatus @default(ACTIVE)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  events        Event[]
+  comments      Comment[]
+  favorites     Favorite[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+// 品牌表
+model Brand {
+  id            String    @id @default(cuid())
+  name          String
+  englishName   String?   @map("english_name")
+  logo          String?
+  country       String?
+  industry      String?
+  description   String?
+  blackCount    Int       @default(0) @map("black_count")
+  redCount      Int       @default(0) @map("red_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  events        Event[]
+
+  @@map("brands")
+}
+
+// 事件表
+model Event {
+  id              String        @id @default(cuid())
+  brandId         String        @map("brand_id")
+  userId          String        @map("user_id")
+  type            EventType
+  title           String
+  content         String
+  eventDate       DateTime      @map("event_date")
+  eventLocation   String?       @map("event_location")
+  affectedCountry String?       @map("affected_country")
+  severity        Int           @default(1) @db.SmallInt
+  sourceUrls      String?       @map("source_urls") // JSON array
+  status          EventStatus   @default(PENDING)
+  rejectReason    String?       @map("reject_reason")
+  viewCount       Int           @default(0) @map("view_count")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  brand           Brand         @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images          EventImage[]
+  eventTags       EventTag[]
+  comments        Comment[]
+  favorites       Favorite[]
+  auditLogs       AuditLog[]
+
+  @@map("events")
+}
+
+// 事件图片表
+model EventImage {
+  id         String   @id @default(cuid())
+  eventId    String   @map("event_id")
+  imageUrl   String   @map("image_url")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  event      Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@map("event_images")
+}
+
+// 标签表
+model Tag {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  type        TagType  @default(BOTH)
+  usageCount  Int      @default(0) @map("usage_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  eventTags   EventTag[]
+
+  @@map("tags")
+}
+
+// 事件标签关联表
+model EventTag {
+  eventId   String   @map("event_id")
+  tagId     String   @map("tag_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, tagId])
+  @@map("event_tags")
+}
+
+// 评论表
+model Comment {
+  id        String        @id @default(cuid())
+  eventId   String        @map("event_id")
+  userId    String        @map("user_id")
+  parentId  String?       @map("parent_id")
+  content   String
+  status    CommentStatus @default(ACTIVE)
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  event     Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Comment?      @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[]     @relation("CommentReplies")
+
+  @@map("comments")
+}
+
+// 收藏表
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  eventId   String   @map("event_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@map("favorites")
+}
+
+// 审核日志表
+model AuditLog {
+  id        String      @id @default(cuid())
+  eventId   String      @map("event_id")
+  adminId   String      @map("admin_id")
+  action    AuditAction
+  reason    String?
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  // Relations
+  event     Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  admin     User        @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@map("audit_logs")
+}
+
+// 行业分类表
+model Industry {
+  id         String   @id @default(cuid())
+  name       String   @unique
+  icon       String?
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("industries")
+}
+
+// Enums
+enum Role {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BANNED
+}
+
+enum EventType {
+  BLACK
+  RED
+}
+
+enum EventStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TagType {
+  BLACK
+  RED
+  BOTH
+}
+
+enum CommentStatus {
+  ACTIVE
+  HIDDEN
+  DELETED
+}
+
+enum AuditAction {
+  APPROVE
+  REJECT
+  DELETE
+  EDIT
+}

@@ -2,8 +2,11 @@ import fs from 'fs/promises'
 import path from 'path'
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
+import type { ChatCompletionContentPart } from 'openai/resources/chat/completions'
+import type { ContentBlockParam, MessageParam as AnthropicMessageParam } from '@anthropic-ai/sdk/resources/messages/messages'
 import { LoggerService } from '@/main/services/logger'
 import { BindingService } from '@/main/services/binding.service'
+import { normalizeOpenAICompatibleBaseURL } from './openai-base-url'
 
 const MULTIMODAL_LOOKER_AGENT_CODE = 'multimodal-looker'
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
@@ -18,6 +21,8 @@ const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   'image/heic',
   'image/heif'
 ])
+
+type AnthropicImageMimeType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
 
 interface MultimodalMediaInput {
   goal: string
@@ -115,14 +120,6 @@ function buildExtractionPrompt(goal: string): string {
 
 function normalizeProvider(provider: string): string {
   return provider.trim().toLowerCase()
-}
-
-function normalizeOpenAIBaseURL(baseURL: string): string {
-  let normalized = baseURL.replace(/\/+$/, '')
-  if (!/\/v\d+$/.test(normalized)) {
-    normalized = `${normalized}/v1`
-  }
-  return normalized
 }
 
 export class MultimodalLookerService {
@@ -286,7 +283,7 @@ export class MultimodalLookerService {
     const normalizedBaseURL =
       provider === 'openai-compatible' || provider === 'openai-compat' || provider === 'custom'
         ? baseURL
-          ? normalizeOpenAIBaseURL(baseURL)
+          ? normalizeOpenAICompatibleBaseURL(baseURL)
           : undefined
         : baseURL
 
@@ -294,6 +291,16 @@ export class MultimodalLookerService {
       apiKey,
       ...(normalizedBaseURL ? { baseURL: normalizedBaseURL } : {})
     })
+
+    const userContent: ChatCompletionContentPart[] = [
+      { type: 'text', text: prompt },
+      {
+        type: 'image_url',
+        image_url: {
+          url: `data:${media.mimeType};base64,${media.base64Data}`
+        }
+      }
+    ]
 
     const response = await client.chat.completions.create({
       model,
@@ -307,15 +314,7 @@ export class MultimodalLookerService {
         },
         {
           role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            {
-              type: 'image_url',
-              image_url: {
-                url: `data:${media.mimeType};base64,${media.base64Data}`
-              }
-            }
-          ] as any
+          content: userContent
         }
       ]
     })
@@ -362,7 +361,7 @@ export class MultimodalLookerService {
           type: 'image',
           source: {
             type: 'base64',
-            media_type: media.mimeType,
+            media_type: media.mimeType as AnthropicImageMimeType,
             data: media.base64Data
           }
         } as const)
@@ -386,21 +385,16 @@ export class MultimodalLookerService {
       ...(baseURL ? { baseURL } : {})
     })
 
+    const userContent: ContentBlockParam[] = [{ type: 'text', text: prompt }, mediaBlock]
+    const messages: AnthropicMessageParam[] = [{ role: 'user', content: userContent }]
+
     const response = await client.messages.create({
       model,
       max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
       temperature,
       system:
         'You are a multimodal extraction assistant. Return only the extracted content relevant to the goal.',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            mediaBlock
-          ] as any
-        }
-      ]
+      messages
     })
 
     const text = response.content

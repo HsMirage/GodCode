@@ -12,9 +12,12 @@ Design-first mindset:
 - Cohesive color palettes with sharp accents
 - High-impact animations with staggered reveals
 - Atmosphere: gradient meshes, noise textures, layered transparencies
+- Favor high-fidelity visual polish over conservative defaults
+- Push one strong visual direction and execute it consistently
+- Prioritize memorable first impression and clear hierarchy
 
 AVOID: Generic fonts, purple gradients on white, predictable layouts, cookie-cutter patterns.
 </Category_Context>`,
   description: '织女(ZhiNv) - 前端/UI/UX、设计、样式、动画',
-  version: '1.0.0'
+  version: '1.1.0'
 }

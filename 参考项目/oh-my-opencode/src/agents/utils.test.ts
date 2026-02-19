@@ -19,7 +19,7 @@ describe("createBuiltinAgents with model overrides", () => {
         "kimi-for-coding/k2p5",
         "opencode/kimi-k2.5-free",
         "zai-coding-plan/glm-4.7",
-        "opencode/glm-4.7-free",
+        "opencode/big-pickle",
       ])
     )
 
@@ -54,7 +54,7 @@ describe("createBuiltinAgents with model overrides", () => {
   test("Atlas uses uiSelectedModel when provided", async () => {
     // #given
     const fetchSpy = spyOn(shared, "fetchAvailableModels").mockResolvedValue(
-      new Set(["openai/gpt-5.2", "anthropic/claude-sonnet-4-5"])
+      new Set(["openai/gpt-5.2", "anthropic/claude-sonnet-4-6"])
     )
     const uiSelectedModel = "openai/gpt-5.2"
 
@@ -84,7 +84,7 @@ describe("createBuiltinAgents with model overrides", () => {
   test("user config model takes priority over uiSelectedModel for sisyphus", async () => {
     // #given
     const fetchSpy = spyOn(shared, "fetchAvailableModels").mockResolvedValue(
-      new Set(["openai/gpt-5.2", "anthropic/claude-sonnet-4-5"])
+      new Set(["openai/gpt-5.2", "anthropic/claude-sonnet-4-6"])
     )
     const uiSelectedModel = "openai/gpt-5.2"
     const overrides = {
@@ -117,7 +117,7 @@ describe("createBuiltinAgents with model overrides", () => {
   test("user config model takes priority over uiSelectedModel for atlas", async () => {
     // #given
     const fetchSpy = spyOn(shared, "fetchAvailableModels").mockResolvedValue(
-      new Set(["openai/gpt-5.2", "anthropic/claude-sonnet-4-5"])
+      new Set(["openai/gpt-5.2", "anthropic/claude-sonnet-4-6"])
     )
     const uiSelectedModel = "openai/gpt-5.2"
     const overrides = {
@@ -260,7 +260,7 @@ describe("createBuiltinAgents with model overrides", () => {
         "kimi-for-coding/k2p5",
         "opencode/kimi-k2.5-free",
         "zai-coding-plan/glm-4.7",
-        "opencode/glm-4.7-free",
+        "opencode/big-pickle",
         "openai/gpt-5.2",
       ])
     )
@@ -428,7 +428,7 @@ describe("createBuiltinAgents with model overrides", () => {
       )
 
       // #then
-      const matches = agents.sisyphus.prompt.match(/Custom agent: researcher/gi) ?? []
+      const matches = (agents.sisyphus?.prompt ?? "").match(/Custom agent: researcher/gi) ?? []
       expect(matches.length).toBe(1)
     } finally {
       fetchSpy.mockRestore()
@@ -506,7 +506,7 @@ describe("createBuiltinAgents without systemDefaultModel", () => {
         "kimi-for-coding/k2p5",
         "opencode/kimi-k2.5-free",
         "zai-coding-plan/glm-4.7",
-        "opencode/glm-4.7-free",
+        "opencode/big-pickle",
       ])
     )
 
@@ -525,6 +525,34 @@ describe("createBuiltinAgents without systemDefaultModel", () => {
 })
 
 describe("createBuiltinAgents with requiresProvider gating (hephaestus)", () => {
+  test("hephaestus is created when provider-models cache connected list includes required provider", async () => {
+    // #given
+    const connectedCacheSpy = spyOn(connectedProvidersCache, "readConnectedProvidersCache").mockReturnValue(["anthropic"])
+    const providerModelsSpy = spyOn(connectedProvidersCache, "readProviderModelsCache").mockReturnValue({
+      connected: ["openai"],
+      models: {},
+      updatedAt: new Date().toISOString(),
+    })
+    const fetchSpy = spyOn(shared, "fetchAvailableModels").mockImplementation(async (_, options) => {
+      const providers = options?.connectedProviders ?? []
+      return providers.includes("openai")
+        ? new Set(["openai/gpt-5.3-codex"])
+        : new Set(["anthropic/claude-opus-4-6"])
+    })
+
+    try {
+      // #when
+      const agents = await createBuiltinAgents([], {}, undefined, TEST_DEFAULT_MODEL, undefined, undefined, [], {})
+
+      // #then
+      expect(agents.hephaestus).toBeDefined()
+    } finally {
+      connectedCacheSpy.mockRestore()
+      providerModelsSpy.mockRestore()
+      fetchSpy.mockRestore()
+    }
+  })
+
   test("hephaestus is not created when no required provider is connected", async () => {
     // #given - only anthropic models available, not in hephaestus requiresProvider
     const fetchSpy = spyOn(shared, "fetchAvailableModels").mockResolvedValue(

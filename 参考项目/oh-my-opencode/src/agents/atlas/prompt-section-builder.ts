@@ -7,7 +7,8 @@
 
 import type { CategoryConfig } from "../../config/schema"
 import { formatCustomSkillsBlock, type AvailableAgent, type AvailableSkill } from "../dynamic-agent-prompt-builder"
-import { DEFAULT_CATEGORIES, CATEGORY_DESCRIPTIONS } from "../../tools/delegate-task/constants"
+import { CATEGORY_DESCRIPTIONS } from "../../tools/delegate-task/constants"
+import { mergeCategories } from "../../shared/merge-categories"
 import { truncateDescription } from "../../shared/truncate-description"
 
 export const getCategoryDescription = (name: string, userCategories?: Record<string, CategoryConfig>) =>
@@ -22,29 +23,26 @@ export function buildAgentSelectionSection(agents: AvailableAgent[]): string {
 
    const rows = agents.map((a) => {
      const shortDesc = truncateDescription(a.description)
-     return `| \`${a.name}\` | ${shortDesc} |`
+     return `- **\`${a.name}\`** — ${shortDesc}`
    })
 
   return `##### Option B: Use AGENT directly (for specialized experts)
 
-| Agent | Best For |
-|-------|----------|
 ${rows.join("\n")}`
 }
 
 export function buildCategorySection(userCategories?: Record<string, CategoryConfig>): string {
-  const allCategories = { ...DEFAULT_CATEGORIES, ...userCategories }
+  const allCategories = mergeCategories(userCategories)
   const categoryRows = Object.entries(allCategories).map(([name, config]) => {
     const temp = config.temperature ?? 0.5
-    return `| \`${name}\` | ${temp} | ${getCategoryDescription(name, userCategories)} |`
+    const desc = getCategoryDescription(name, userCategories)
+    return `- **\`${name}\`** (${temp}): ${desc}`
   })
 
   return `##### Option A: Use CATEGORY (for domain-specific work)
 
 Categories spawn \`Sisyphus-Junior-{category}\` with optimized settings:
 
-| Category | Temperature | Best For |
-|----------|-------------|----------|
 ${categoryRows.join("\n")}
 
 \`\`\`typescript
@@ -62,13 +60,13 @@ export function buildSkillsSection(skills: AvailableSkill[]): string {
 
    const builtinRows = builtinSkills.map((s) => {
      const shortDesc = truncateDescription(s.description)
-     return `| \`${s.name}\` | ${shortDesc} |`
+     return `- **\`${s.name}\`** — ${shortDesc}`
    })
 
    const customRows = customSkills.map((s) => {
      const shortDesc = truncateDescription(s.description)
      const source = s.location === "project" ? "project" : "user"
-     return `| \`${s.name}\` | ${shortDesc} | ${source} |`
+     return `- **\`${s.name}\`** (${source}): ${shortDesc}`
    })
 
   const customSkillBlock = formatCustomSkillsBlock(customRows, customSkills, "**")
@@ -78,17 +76,13 @@ export function buildSkillsSection(skills: AvailableSkill[]): string {
   if (customSkills.length > 0 && builtinSkills.length > 0) {
     skillsTable = `**Built-in Skills:**
 
-| Skill | When to Use |
-|-------|-------------|
 ${builtinRows.join("\n")}
 
 ${customSkillBlock}`
   } else if (customSkills.length > 0) {
     skillsTable = customSkillBlock
   } else {
-    skillsTable = `| Skill | When to Use |
-|-------|-------------|
-${builtinRows.join("\n")}`
+    skillsTable = `${builtinRows.join("\n")}`
   }
 
   return `
@@ -116,21 +110,20 @@ task(category="[category]", load_skills=["skill-1", "skill-2"], run_in_backgroun
 }
 
 export function buildDecisionMatrix(agents: AvailableAgent[], userCategories?: Record<string, CategoryConfig>): string {
-  const allCategories = { ...DEFAULT_CATEGORIES, ...userCategories }
+  const allCategories = mergeCategories(userCategories)
 
-  const categoryRows = Object.entries(allCategories).map(([name]) =>
-    `| ${getCategoryDescription(name, userCategories)} | \`category="${name}", load_skills=[...]\` |`
-  )
+  const categoryRows = Object.entries(allCategories).map(([name]) => {
+    const desc = getCategoryDescription(name, userCategories)
+    return `- **${desc}**: \`category="${name}", load_skills=[...]\``
+  })
 
    const agentRows = agents.map((a) => {
      const shortDesc = truncateDescription(a.description)
-     return `| ${shortDesc} | \`agent="${a.name}"\` |`
+     return `- **${shortDesc}**: \`agent="${a.name}"\``
    })
 
   return `##### Decision Matrix
 
-| Task Domain | Use |
-|-------------|-----|
 ${categoryRows.join("\n")}
 ${agentRows.join("\n")}
 

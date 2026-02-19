@@ -5,7 +5,9 @@ import { DatabaseService } from './database'
 
 export async function createSpace(input: { name: string; workDir: string }): Promise<Space> {
   try {
-    const prisma = DatabaseService.getInstance().getClient()
+    const dbService = DatabaseService.getInstance()
+    await dbService.init()
+    const prisma = dbService.getClient()
 
     const artifactsDir = path.join(input.workDir, '.codeall', 'artifacts')
     const downloadsDir = path.join(input.workDir, '.codeall', 'downloads')
@@ -31,6 +33,7 @@ export async function createSpace(input: { name: string; workDir: string }): Pro
 export async function listSpaces(): Promise<Space[]> {
   try {
     const dbService = DatabaseService.getInstance()
+    await dbService.init()
     // In E2E test environment, database may not be initialized
     if (process.env.CODEALL_E2E_TEST === '1') {
       try {
@@ -61,7 +64,9 @@ export async function listSpaces(): Promise<Space[]> {
 
 export async function getSpace(spaceId: string): Promise<Space | null> {
   try {
-    const prisma = DatabaseService.getInstance().getClient()
+    const dbService = DatabaseService.getInstance()
+    await dbService.init()
+    const prisma = dbService.getClient()
     const space = await prisma.space.findUnique({
       where: {
         id: spaceId
@@ -76,7 +81,9 @@ export async function getSpace(spaceId: string): Promise<Space | null> {
 
 export async function deleteSpace(spaceId: string): Promise<boolean> {
   try {
-    const prisma = DatabaseService.getInstance().getClient()
+    const dbService = DatabaseService.getInstance()
+    await dbService.init()
+    const prisma = dbService.getClient()
 
     // Manual cascade delete (schema relations do not specify onDelete: Cascade).
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -101,7 +108,9 @@ export async function updateSpace(
   updates: { name?: string; workDir?: string }
 ): Promise<Space | null> {
   try {
-    const prisma = DatabaseService.getInstance().getClient()
+    const dbService = DatabaseService.getInstance()
+    await dbService.init()
+    const prisma = dbService.getClient()
     const space = await prisma.space.update({
       where: {
         id: spaceId

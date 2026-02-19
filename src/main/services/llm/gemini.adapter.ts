@@ -11,6 +11,7 @@ import { logger } from '@/shared/logger'
 import { browserViewManager } from '@/main/services/browser-view.service'
 import { toolExecutionService, type ToolCall } from '@/main/services/tools/tool-execution.service'
 import { resolveLLMRuntimeConfig } from './runtime-config'
+import { llmRetryNotifier } from './retry-notifier'
 
 // ============= 常量配置 =============
 
@@ -93,12 +94,53 @@ interface GeminiStreamChunk {
 // ============= 辅助函数 =============
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+const MAX_RECONNECT_DELAY_MS = 30_000
+
+const getReconnectDelay = (baseDelayMs: number, attempt: number): number => {
+  const safeBaseDelayMs = Math.max(500, baseDelayMs)
+  const factor = Math.min(Math.max(attempt - 1, 0), 6)
+  return Math.min(safeBaseDelayMs * Math.pow(2, factor), MAX_RECONNECT_DELAY_MS)
+}
+
+const hasUserCancellationMarker = (message: string): boolean => {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('cancelled by user') ||
+    normalized.includes('canceled by user') ||
+    normalized.includes('workflow cancelled by user') ||
+    normalized.includes('request aborted by user')
+  )
+}
 
 const isAbortRequested = (error: unknown, signal?: AbortSignal): boolean => {
   if (signal?.aborted) return true
   if (!(error instanceof Error)) return false
-  if (error.name === 'AbortError') return true
-  return /aborted|abort/i.test(error.message)
+  return hasUserCancellationMarker(error.message)
+}
+
+const isRetryableApiError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return true
+  const message = error.message.toLowerCase()
+  return (
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('network') ||
+    message.includes('fetch failed') ||
+    message.includes('econn') ||
+    message.includes('socket') ||
+    message.includes('connection') ||
+    message.includes('service unavailable') ||
+    message.includes('temporarily unavailable') ||
+    message.includes('overloaded') ||
+    message.includes('rate limit') ||
+    message.includes('too many requests') ||
+    message.includes('429') ||
+    message.includes('500') ||
+    message.includes('502') ||
+    message.includes('503') ||
+    message.includes('504') ||
+    message.includes('abort')
+  )
 }
 
 /**
@@ -275,7 +317,7 @@ export class GeminiAdapter implements LLMAdapter {
     const totalUsage = { prompt_tokens: 0, completion_tokens: 0 }
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
-      for (let attempt = 1; attempt <= runtime.maxRetries; attempt++) {
+      for (let attempt = 1; ; attempt++) {
         let timeoutId: ReturnType<typeof setTimeout> | null = null
         let externalAbortHandler: (() => void) | null = null
         try {
@@ -404,15 +446,24 @@ export class GeminiAdapter implements LLMAdapter {
             logger.info('Gemini request aborted by user')
             throw error instanceof Error ? error : new Error('Request aborted by user')
           }
-
-          logger.warn(`Gemini request failed (attempt ${attempt}/${runtime.maxRetries})`, { error })
-
-          if (attempt === runtime.maxRetries) {
-            logger.error('Gemini request failed after all retries', { error })
+          if (!isRetryableApiError(error)) {
             throw error
           }
 
-          const delay = runtime.baseDelayMs * Math.pow(2, attempt - 1)
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          const delay = getReconnectDelay(runtime.baseDelayMs, attempt)
+          logger.warn(`Gemini request failed (attempt ${attempt}), reconnecting`, {
+            error,
+            delayMs: delay
+          })
+          llmRetryNotifier.notify({
+            sessionId: config.sessionId,
+            provider: 'gemini',
+            attempt,
+            delayMs: delay,
+            error: errorMessage,
+            occurredAt: new Date()
+          })
           await sleep(delay)
         }
       }
@@ -444,7 +495,7 @@ export class GeminiAdapter implements LLMAdapter {
     })
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
-      for (let attempt = 1; attempt <= runtime.maxRetries; attempt++) {
+      for (let attempt = 1; ; attempt++) {
         let timeoutId: ReturnType<typeof setTimeout> | null = null
         let externalAbortHandler: (() => void) | null = null
         try {
@@ -642,28 +693,24 @@ export class GeminiAdapter implements LLMAdapter {
             yield { content: '', done: true, type: 'done' }
             return
           }
-
-          logger.warn(
-            `Gemini streaming failed (attempt ${attempt}/${runtime.maxRetries})`,
-            { error }
-          )
-
-          if (attempt === runtime.maxRetries) {
-            logger.error('Gemini streaming failed after all retries', { error })
-            const errorMessage = error instanceof Error ? error.message : String(error)
-            yield {
-              content: '',
-              done: true,
-              type: 'error',
-              error: {
-                message: errorMessage,
-                code: 'STREAM_ERROR'
-              }
-            }
+          if (!isRetryableApiError(error)) {
             throw error
           }
 
-          const delay = runtime.baseDelayMs * Math.pow(2, attempt - 1)
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          const delay = getReconnectDelay(runtime.baseDelayMs, attempt)
+          logger.warn(`Gemini streaming failed (attempt ${attempt}), reconnecting`, {
+            error,
+            delayMs: delay
+          })
+          llmRetryNotifier.notify({
+            sessionId: config.sessionId,
+            provider: 'gemini',
+            attempt,
+            delayMs: delay,
+            error: errorMessage,
+            occurredAt: new Date()
+          })
           await sleep(delay)
         }
       }

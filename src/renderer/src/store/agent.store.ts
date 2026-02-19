@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { AGENT_DEFINITIONS } from '@shared/agent-definitions'
+import { AGENT_DEFINITIONS, CATEGORY_DEFINITIONS } from '@shared/agent-definitions'
 import type { Task } from '../types/domain'
 
 export interface Agent {
@@ -38,9 +38,35 @@ interface AgentState {
 }
 
 const taskStatusLogDedupe = new Set<string>()
+const orchestratorCheckpointLogDedupe = new Set<string>()
+
+interface OrchestratorCheckpointMeta {
+  timestamp?: string
+  phase?: string
+  status?: string
+  reason?: string
+  persistedTaskId?: string
+}
+
+function readOrchestratorCheckpoints(task: Task): OrchestratorCheckpointMeta[] {
+  const raw = task.metadata?.orchestratorCheckpoints
+  if (!Array.isArray(raw)) {
+    return []
+  }
+
+  return raw
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map(item => ({
+      timestamp: typeof item.timestamp === 'string' ? item.timestamp : undefined,
+      phase: typeof item.phase === 'string' ? item.phase : undefined,
+      status: typeof item.status === 'string' ? item.status : undefined,
+      reason: typeof item.reason === 'string' ? item.reason : undefined,
+      persistedTaskId: typeof item.persistedTaskId === 'string' ? item.persistedTaskId : undefined
+    }))
+}
 
 function createBaseAgents(): Agent[] {
-  return AGENT_DEFINITIONS.map(def => ({
+  const coreAgents: Agent[] = AGENT_DEFINITIONS.map(def => ({
     id: def.code,
     name: def.name,
     role: def.description,
@@ -50,6 +76,19 @@ function createBaseAgents(): Agent[] {
     tokensUsed: 0,
     model: undefined
   }))
+
+  const categoryAgents: Agent[] = CATEGORY_DEFINITIONS.map(def => ({
+    id: def.code,
+    name: def.name,
+    role: `类别执行通道 · ${def.description}`,
+    status: 'idle' as const,
+    currentTask: undefined,
+    tasksCompleted: 0,
+    tokensUsed: 0,
+    model: undefined
+  }))
+
+  return [...coreAgents, ...categoryAgents]
 }
 
 function toAgentCode(task: Task): string | undefined {
@@ -185,6 +224,53 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
       })
       nextWorkLogs[agentCode] = currentLogs
+    }
+
+    for (const task of tasks) {
+      const checkpoints = readOrchestratorCheckpoints(task)
+      if (checkpoints.length === 0) continue
+
+      const orchestratorAgentValue = task.metadata?.orchestratorAgent
+      const orchestratorAgent =
+        typeof orchestratorAgentValue === 'string' && orchestratorAgentValue.trim()
+          ? orchestratorAgentValue.trim()
+          : 'haotian'
+
+      for (const [index, checkpoint] of checkpoints.entries()) {
+        const stableId = checkpoint.persistedTaskId || checkpoint.timestamp || `${task.id}-${index}`
+        const phase = checkpoint.phase || 'unknown'
+        const status = checkpoint.status || 'unknown'
+        const logKey = `${orchestratorAgent}:checkpoint:${task.id}:${stableId}:${phase}:${status}`
+        if (orchestratorCheckpointLogDedupe.has(logKey)) continue
+        orchestratorCheckpointLogDedupe.add(logKey)
+
+        const message =
+          status === 'halt'
+            ? `主编排检查点 [${phase}] 阻断流程: ${checkpoint.reason || '未提供原因'}`
+            : status === 'fallback'
+              ? `主编排检查点 [${phase}] 回退到 DAG 调度`
+              : `主编排检查点 [${phase}] 允许继续`
+
+        const type: WorkLogEntry['type'] =
+          status === 'halt' ? 'error' : status === 'fallback' ? 'thinking' : 'result'
+        const logTimestamp = checkpoint.timestamp ? new Date(checkpoint.timestamp) : new Date(task.createdAt)
+
+        const currentLogs = nextWorkLogs[orchestratorAgent] || []
+        currentLogs.push({
+          id: crypto.randomUUID(),
+          agentId: orchestratorAgent,
+          type,
+          message,
+          timestamp: logTimestamp,
+          metadata: {
+            workflowTaskId: task.id,
+            checkpointPhase: phase,
+            checkpointStatus: status,
+            persistedTaskId: checkpoint.persistedTaskId
+          }
+        })
+        nextWorkLogs[orchestratorAgent] = currentLogs
+      }
     }
 
     set(state => {

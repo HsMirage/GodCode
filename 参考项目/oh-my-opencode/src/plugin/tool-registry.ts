@@ -25,6 +25,7 @@ import {
   createTaskGetTool,
   createTaskList,
   createTaskUpdateTool,
+  createHashlineEditTool,
 } from "../tools"
 import { getMainSessionID } from "../features/claude-code-session-state"
 import { filterDisabledTools } from "../shared/disabled-tools"
@@ -48,7 +49,7 @@ export function createToolRegistry(args: {
   const { ctx, pluginConfig, managers, skillContext, availableCategories } = args
 
   const backgroundTools = createBackgroundTools(managers.backgroundManager, ctx.client)
-  const callOmoAgent = createCallOmoAgent(ctx, managers.backgroundManager)
+  const callOmoAgent = createCallOmoAgent(ctx, managers.backgroundManager, pluginConfig.disabled_agents ?? [])
 
   const isMultimodalLookerEnabled = !(pluginConfig.disabled_agents ?? []).some(
     (agent) => agent.toLowerCase() === "multimodal-looker",
@@ -60,6 +61,7 @@ export function createToolRegistry(args: {
     client: ctx.client,
     directory: ctx.directory,
     userCategories: pluginConfig.categories,
+    agentOverrides: pluginConfig.agents,
     gitMasterConfig: pluginConfig.git_master,
     sisyphusJuniorModel: pluginConfig.agents?.["sisyphus-junior"]?.model,
     browserProvider: skillContext.browserProvider,
@@ -101,7 +103,7 @@ export function createToolRegistry(args: {
     getSessionID: getSessionIDForMcp,
   })
 
-  const commands = discoverCommandsSync()
+  const commands = discoverCommandsSync(ctx.directory)
   const slashcommandTool = createSlashcommandTool({
     commands,
     skills: skillContext.mergedSkills,
@@ -115,6 +117,11 @@ export function createToolRegistry(args: {
         task_list: createTaskList(pluginConfig),
         task_update: createTaskUpdateTool(pluginConfig, ctx),
       }
+    : {}
+
+  const hashlineEnabled = pluginConfig.experimental?.hashline_edit ?? false
+  const hashlineToolsRecord: Record<string, ToolDefinition> = hashlineEnabled
+    ? { edit: createHashlineEditTool() }
     : {}
 
   const allTools: Record<string, ToolDefinition> = {
@@ -132,6 +139,7 @@ export function createToolRegistry(args: {
     slashcommand: slashcommandTool,
     interactive_bash,
     ...taskToolsRecord,
+    ...hashlineToolsRecord,
   }
 
   const filteredTools = filterDisabledTools(allTools, pluginConfig.disabled_tools)

@@ -62,6 +62,27 @@ describe('WorkflowEventEmitter', () => {
     expect(callback).toHaveBeenCalledTimes(1)
   })
 
+  it('should emit workflow checkpoint events to listeners', () => {
+    const callback = vi.fn()
+    emitter.on('workflow:checkpoint', callback)
+
+    const event: WorkflowEvent = {
+      type: 'workflow:checkpoint',
+      workflowId: 'wf-3',
+      taskId: 'task-checkpoint-1',
+      timestamp: new Date(),
+      data: {
+        phase: 'pre-dispatch',
+        status: 'continue'
+      }
+    }
+
+    emitter.emit(event)
+
+    expect(callback).toHaveBeenCalledWith(event)
+    expect(callback).toHaveBeenCalledTimes(1)
+  })
+
   it('should not trigger listeners for different events', () => {
     const callback = vi.fn()
     emitter.on('task:failed', callback)

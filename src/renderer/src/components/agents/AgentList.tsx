@@ -94,6 +94,9 @@ function AgentCard({ agent, isSelected, onClick }: AgentCardProps) {
             <span>{(agent.tokensUsed / 1000).toFixed(1)}k tok</span>
           </div>
         </div>
+        <div className="mt-1 text-[11px] text-slate-500 truncate" title={agent.model || '未识别'}>
+          model: {agent.model || '未识别'}
+        </div>
       </div>
 
       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">

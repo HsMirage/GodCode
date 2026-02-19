@@ -4,13 +4,18 @@ import { DatabaseService } from '@/main/services/database'
 import { LoggerService } from '@/main/services/logger'
 import type { Task } from '@/types/domain'
 
+async function getPrismaClient() {
+  const db = DatabaseService.getInstance()
+  await db.init()
+  return db.getClient()
+}
+
 export async function handleTaskList(
   _event: IpcMainInvokeEvent,
   sessionId: string
 ): Promise<Task[]> {
   const logger = LoggerService.getInstance().getLogger()
-  const db = DatabaseService.getInstance()
-  const prisma = db.getClient()
+  const prisma = await getPrismaClient()
 
   try {
     const tasks = await prisma.task.findMany({
@@ -46,8 +51,7 @@ export async function handleTaskCreate(
   data: Omit<Task, 'id' | 'createdAt' | 'startedAt' | 'completedAt'>
 ): Promise<Task> {
   const logger = LoggerService.getInstance().getLogger()
-  const db = DatabaseService.getInstance()
-  const prisma = db.getClient()
+  const prisma = await getPrismaClient()
 
   try {
     const task = await prisma.task.create({
@@ -87,8 +91,7 @@ export async function handleTaskCreate(
 
 export async function handleTaskGet(_event: IpcMainInvokeEvent, taskId: string): Promise<Task> {
   const logger = LoggerService.getInstance().getLogger()
-  const db = DatabaseService.getInstance()
-  const prisma = db.getClient()
+  const prisma = await getPrismaClient()
 
   try {
     const task = await prisma.task.findUniqueOrThrow({
@@ -121,8 +124,7 @@ export async function handleTaskUpdate(
   data: { id: string } & Partial<Omit<Task, 'id' | 'createdAt'>>
 ): Promise<Task> {
   const logger = LoggerService.getInstance().getLogger()
-  const db = DatabaseService.getInstance()
-  const prisma = db.getClient()
+  const prisma = await getPrismaClient()
 
   try {
     const { id, ...updateData } = data

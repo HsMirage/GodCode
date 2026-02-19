@@ -38,6 +38,7 @@ describe('SmartRouter', () => {
       workflowId: 'workforce-id',
       tasks: [],
       results: new Map(),
+      executions: new Map(),
       success: true
     })
   })

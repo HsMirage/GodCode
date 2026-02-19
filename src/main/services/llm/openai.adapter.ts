@@ -8,16 +8,62 @@ import type { LLMAdapter, LLMChunk, LLMConfig, LLMResponse } from './adapter.int
 import type { Message } from '@/types/domain'
 import { logger } from '@/shared/logger'
 import { browserViewManager } from '@/main/services/browser-view.service'
-import { toolExecutionService, type ToolCall } from '@/main/services/tools/tool-execution.service'
+import {
+  toolExecutionService,
+  type ToolCall,
+  type ToolExecutionOutput
+} from '@/main/services/tools/tool-execution.service'
 import { resolveLLMRuntimeConfig } from './runtime-config'
+import { llmRetryNotifier } from './retry-notifier'
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+const MAX_RECONNECT_DELAY_MS = 30_000
+
+const getReconnectDelay = (baseDelayMs: number, attempt: number): number => {
+  const safeBaseDelayMs = Math.max(500, baseDelayMs)
+  const factor = Math.min(Math.max(attempt - 1, 0), 6)
+  return Math.min(safeBaseDelayMs * Math.pow(2, factor), MAX_RECONNECT_DELAY_MS)
+}
+
+const hasUserCancellationMarker = (message: string): boolean => {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('cancelled by user') ||
+    normalized.includes('canceled by user') ||
+    normalized.includes('workflow cancelled by user') ||
+    normalized.includes('request aborted by user')
+  )
+}
 
 const isAbortRequested = (error: unknown, signal?: AbortSignal): boolean => {
   if (signal?.aborted) return true
   if (!(error instanceof Error)) return false
-  if (error.name === 'AbortError') return true
-  return /aborted|abort/i.test(error.message)
+  return hasUserCancellationMarker(error.message)
+}
+
+const isRetryableApiError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return true
+  const message = error.message.toLowerCase()
+  return (
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('network') ||
+    message.includes('fetch failed') ||
+    message.includes('econn') ||
+    message.includes('socket') ||
+    message.includes('connection') ||
+    message.includes('service unavailable') ||
+    message.includes('temporarily unavailable') ||
+    message.includes('overloaded') ||
+    message.includes('rate limit') ||
+    message.includes('too many requests') ||
+    message.includes('429') ||
+    message.includes('500') ||
+    message.includes('502') ||
+    message.includes('503') ||
+    message.includes('504') ||
+    message.includes('abort')
+  )
 }
 
 const toOpenAIMessages = (messages: Message[]): ChatCompletionMessageParam[] => {
@@ -68,6 +114,85 @@ const parseToolCalls = (toolCalls: ChatCompletionMessageFunctionToolCall[]): Too
 const isFunctionToolCall = (tc: { type?: string }): tc is ChatCompletionMessageFunctionToolCall =>
   tc.type === 'function'
 
+const extractTextFromUnknown = (value: unknown): string => {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    return value.map(item => extractTextFromUnknown(item)).join('')
+  }
+  if (!value || typeof value !== 'object') return ''
+
+  const record = value as Record<string, unknown>
+  const textLikeKeys = [
+    'text',
+    'content',
+    'value',
+    'output_text',
+    'reasoning_content',
+    'reasoning',
+    'final_text'
+  ] as const
+
+  return textLikeKeys.map(key => extractTextFromUnknown(record[key])).join('')
+}
+
+const extractMessageText = (message: unknown): string => {
+  if (!message || typeof message !== 'object') return ''
+
+  const record = message as Record<string, unknown>
+  const contentText = extractTextFromUnknown(record.content)
+  if (contentText.trim()) return contentText
+
+  const fallbackText = [
+    record.output_text,
+    record.text,
+    record.final_text,
+    record.reasoning_content,
+    record.reasoning
+  ]
+    .map(item => extractTextFromUnknown(item))
+    .map(item => item.trim())
+    .filter(Boolean)
+    .join('\n')
+
+  return fallbackText
+}
+
+const extractDeltaText = (delta: unknown): string => {
+  if (!delta || typeof delta !== 'object') return ''
+  const record = delta as Record<string, unknown>
+
+  const contentText = extractTextFromUnknown(record.content)
+  if (contentText.trim()) return contentText
+
+  return [record.output_text, record.text, record.reasoning_content, record.reasoning]
+    .map(item => extractTextFromUnknown(item))
+    .join('')
+}
+
+const truncateText = (text: string, maxLength = 280): string => {
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength)}...`
+}
+
+const formatToolExecutionFallback = (outputs: ToolExecutionOutput[]): string => {
+  if (!outputs.length) return ''
+
+  const lines = outputs.map(output => {
+    const rawResult = (output.result ?? {}) as unknown as Record<string, unknown>
+    const extracted =
+      extractTextFromUnknown(rawResult?.output) ||
+      extractTextFromUnknown(rawResult?.error) ||
+      extractTextFromUnknown(rawResult)
+    const normalized = extracted.replace(/\s+/g, ' ').trim()
+    const preview = truncateText(normalized || 'tool result emitted without text payload')
+    const status = output.success ? 'ok' : 'error'
+    return `- ${output.toolCall.name} [${status}]: ${preview}`
+  })
+
+  return ['TOOL_EXECUTION_SUMMARY:', ...lines].join('\n')
+}
+
 /**
  * Accumulator for streaming tool call deltas
  */
@@ -100,10 +225,11 @@ export class OpenAIAdapter implements LLMAdapter {
     const tools = getOpenAITools(config.tools)
 
     let fullContent = ''
+    let lastToolExecutionFallback = ''
     const totalUsage = { prompt_tokens: 0, completion_tokens: 0 }
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
-      for (let attempt = 1; attempt <= runtime.maxRetries; attempt++) {
+      for (let attempt = 1; ; attempt++) {
         let timeoutId: ReturnType<typeof setTimeout> | null = null
         let externalAbortHandler: (() => void) | null = null
         try {
@@ -139,20 +265,50 @@ export class OpenAIAdapter implements LLMAdapter {
             externalAbortHandler = null
           }
 
-          const choice = response.choices[0]
+          const choice = Array.isArray((response as { choices?: unknown }).choices)
+            ? response.choices[0]
+            : undefined
+          if (!choice) {
+            logger.warn('OpenAI-compatible response missing choices[0], returning accumulated content', {
+              model,
+              hasUsage: Boolean(response.usage),
+              responseKeys:
+                response && typeof response === 'object'
+                  ? Object.keys(response as unknown as Record<string, unknown>)
+                  : []
+            })
+            return { content: fullContent, usage: totalUsage }
+          }
           const message = choice?.message
 
           // Accumulate usage
           totalUsage.prompt_tokens += response.usage?.prompt_tokens ?? 0
           totalUsage.completion_tokens += response.usage?.completion_tokens ?? 0
 
-          // Accumulate text content
-          if (message?.content) {
-            fullContent += message.content
+          // Accumulate text content (support OpenAI-compatible non-standard fields)
+          const messageText = extractMessageText(message)
+          if (messageText) {
+            fullContent += messageText
+          } else if ((response.usage?.completion_tokens ?? 0) > 0) {
+            logger.warn('OpenAI-compatible response contained completion tokens but no extractable text', {
+              model,
+              finishReason: choice?.finish_reason,
+              messageKeys:
+                message && typeof message === 'object'
+                  ? Object.keys(message as unknown as Record<string, unknown>)
+                  : []
+            })
           }
 
           const toolCalls = message?.tool_calls
           if (!toolCalls || toolCalls.length === 0 || choice?.finish_reason !== 'tool_calls') {
+            if (!fullContent.trim() && lastToolExecutionFallback.trim()) {
+              logger.warn('OpenAI-compatible response returned no extractable text; using tool fallback summary', {
+                model,
+                finishReason: choice?.finish_reason
+              })
+              return { content: lastToolExecutionFallback, usage: totalUsage }
+            }
             return { content: fullContent, usage: totalUsage }
           }
 
@@ -187,6 +343,7 @@ export class OpenAIAdapter implements LLMAdapter {
             allSucceeded: executionResult.allSucceeded,
             durationMs: executionResult.totalDurationMs
           })
+          lastToolExecutionFallback = formatToolExecutionFallback(executionResult.outputs)
 
           // Append assistant message with tool_calls
           openaiMessages = [
@@ -221,15 +378,24 @@ export class OpenAIAdapter implements LLMAdapter {
             logger.info('OpenAI request aborted by user')
             throw error instanceof Error ? error : new Error('Request aborted by user')
           }
-
-          logger.warn(`OpenAI request failed (attempt ${attempt}/${runtime.maxRetries})`, { error })
-
-          if (attempt === runtime.maxRetries) {
-            logger.error('OpenAI request failed after all retries', { error })
+          if (!isRetryableApiError(error)) {
             throw error
           }
 
-          const delay = runtime.baseDelayMs * Math.pow(2, attempt - 1)
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          const delay = getReconnectDelay(runtime.baseDelayMs, attempt)
+          logger.warn(`OpenAI request failed (attempt ${attempt}), reconnecting`, {
+            error,
+            delayMs: delay
+          })
+          llmRetryNotifier.notify({
+            sessionId: config.sessionId,
+            provider: 'openai',
+            attempt,
+            delayMs: delay,
+            error: errorMessage,
+            occurredAt: new Date()
+          })
           await sleep(delay)
         }
       }
@@ -239,6 +405,12 @@ export class OpenAIAdapter implements LLMAdapter {
     logger.warn('sendMessage: max tool iterations exceeded', {
       maxIterations: runtime.maxToolIterations
     })
+    if (!fullContent.trim() && lastToolExecutionFallback.trim()) {
+      logger.warn('sendMessage: returning tool fallback summary after max tool iterations', {
+        maxIterations: runtime.maxToolIterations
+      })
+      return { content: lastToolExecutionFallback, usage: totalUsage }
+    }
     return { content: fullContent, usage: totalUsage }
   }
 
@@ -260,7 +432,7 @@ export class OpenAIAdapter implements LLMAdapter {
     })
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
-      for (let attempt = 1; attempt <= runtime.maxRetries; attempt++) {
+      for (let attempt = 1; ; attempt++) {
         let timeoutId: ReturnType<typeof setTimeout> | null = null
         let externalAbortHandler: (() => void) | null = null
         try {
@@ -295,13 +467,19 @@ export class OpenAIAdapter implements LLMAdapter {
           let assistantContent = ''
 
           for await (const chunk of stream) {
-            const choice = chunk.choices[0]
+            const choice = Array.isArray((chunk as { choices?: unknown }).choices)
+              ? chunk.choices[0]
+              : undefined
+            if (!choice) {
+              continue
+            }
             const delta = choice?.delta
 
-            // Accumulate text content
-            if (delta?.content) {
-              assistantContent += delta.content
-              yield { content: delta.content, done: false, type: 'content' }
+            // Accumulate text content (support OpenAI-compatible non-standard delta fields)
+            const deltaText = extractDeltaText(delta)
+            if (deltaText) {
+              assistantContent += deltaText
+              yield { content: deltaText, done: false, type: 'content' }
             }
 
             // Accumulate tool call deltas by index
@@ -472,26 +650,24 @@ export class OpenAIAdapter implements LLMAdapter {
             yield { content: '', done: true, type: 'done' }
             return
           }
-
-          logger.warn(`OpenAI streaming failed (attempt ${attempt}/${runtime.maxRetries})`, { error })
-
-          if (attempt === runtime.maxRetries) {
-            logger.error('OpenAI streaming failed after all retries', { error })
-            // Emit error event before throwing
-            const errorMessage = error instanceof Error ? error.message : String(error)
-            yield {
-              content: '',
-              done: true,
-              type: 'error',
-              error: {
-                message: errorMessage,
-                code: 'STREAM_ERROR'
-              }
-            }
+          if (!isRetryableApiError(error)) {
             throw error
           }
 
-          const delay = runtime.baseDelayMs * Math.pow(2, attempt - 1)
+          const errorMessage = error instanceof Error ? error.message : String(error)
+          const delay = getReconnectDelay(runtime.baseDelayMs, attempt)
+          logger.warn(`OpenAI streaming failed (attempt ${attempt}), reconnecting`, {
+            error,
+            delayMs: delay
+          })
+          llmRetryNotifier.notify({
+            sessionId: config.sessionId,
+            provider: 'openai',
+            attempt,
+            delayMs: delay,
+            error: errorMessage,
+            occurredAt: new Date()
+          })
           await sleep(delay)
         }
       }

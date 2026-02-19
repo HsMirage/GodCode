@@ -110,6 +110,7 @@ export function useStreamingEvents(sessionId: string | null) {
   const handleStreamError = useCallback(
     (event: StreamErrorEvent) => {
       if (!sessionId || event.sessionId !== sessionId) return
+      if (event.code === 'API_RETRYING') return
       setError(sessionId, { message: event.message, code: event.code })
     },
     [sessionId, setError]

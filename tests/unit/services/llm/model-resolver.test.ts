@@ -125,6 +125,21 @@ describe('Model Resolver', () => {
       })
     })
 
+    it('should return the actual matched configured model name from fallback chain', () => {
+      const fallbackChain = [{ model: 'gpt-4o', providers: ['openai-compatible'] }]
+      const result = resolveModelWithFallback({
+        fallbackChain,
+        availableModels: new Set(['openai-compatible/gpt-4o-2024-11-20'])
+      })
+
+      expect(result).toEqual({
+        model: 'gpt-4o-2024-11-20',
+        provider: 'openai-compatible',
+        source: 'provider-fallback',
+        variant: undefined
+      })
+    })
+
     it('should resolve to system default when fallback chain fails', () => {
       const fallbackChain = [{ model: 'non-existent', providers: ['anthropic'] }]
       const result = resolveModelWithFallback({
@@ -146,6 +161,19 @@ describe('Model Resolver', () => {
         // no systemDefaultModel
       })
       expect(result).toBeNull()
+    })
+
+    it('should infer provider from available models when system default has no provider prefix', () => {
+      const result = resolveModelWithFallback({
+        availableModels: new Set(['openai-compatible/gpt-4o']),
+        systemDefaultModel: 'gpt-4o'
+      })
+
+      expect(result).toEqual({
+        model: 'gpt-4o',
+        provider: 'openai-compatible',
+        source: 'system-default'
+      })
     })
   })
 

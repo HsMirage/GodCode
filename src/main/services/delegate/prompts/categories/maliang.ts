@@ -19,5 +19,5 @@ Approach:
 - This is for tasks requiring exceptional creativity
 </Category_Context>`,
   description: '马良(MaLiang) - 创意/艺术/发散思维',
-  version: '1.0.0'
+  version: '1.1.0'
 }

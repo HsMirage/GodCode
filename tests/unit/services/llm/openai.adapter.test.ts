@@ -77,6 +77,29 @@ describe('OpenAIAdapter', () => {
     )
   })
 
+  it('should extract non-standard reasoning_content when content is empty', async () => {
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: null, reasoning_content: 'Recovered text from gateway' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 5 }
+    })
+
+    const result = await adapter.sendMessage(
+      [
+        {
+          role: 'user',
+          content: 'Hi',
+          id: '1',
+          sessionId: 's1',
+          createdAt: new Date(),
+          metadata: {}
+        }
+      ],
+      { model: 'gpt-4' }
+    )
+
+    expect(result.content).toContain('Recovered text from gateway')
+  })
+
   it('should retry on failure', async () => {
     mockCreate.mockRejectedValueOnce(new Error('Network error')).mockResolvedValueOnce({
       choices: [{ message: { content: 'Success' }, finish_reason: 'stop' }],
@@ -100,6 +123,61 @@ describe('OpenAIAdapter', () => {
     expect(result.content).toBe('Success')
     expect(mockCreate).toHaveBeenCalledTimes(2)
   })
+
+  it('should not throw when OpenAI-compatible response is missing choices', async () => {
+    mockCreate.mockResolvedValue({
+      usage: { prompt_tokens: 10, completion_tokens: 0 }
+    })
+
+    const result = await adapter.sendMessage(
+      [
+        {
+          role: 'user',
+          content: 'Hi',
+          id: '1',
+          sessionId: 's1',
+          createdAt: new Date(),
+          metadata: {}
+        }
+      ],
+      { model: 'gpt-4' }
+    )
+
+    expect(result.content).toBe('')
+    expect(result.usage.prompt_tokens).toBe(0)
+  })
+
+  it(
+    'should keep reconnecting beyond configured maxRetries for retryable API failures',
+    async () => {
+      mockCreate
+        .mockRejectedValueOnce(new Error('Network error 1'))
+        .mockRejectedValueOnce(new Error('Network error 2'))
+        .mockRejectedValueOnce(new Error('Network error 3'))
+        .mockResolvedValueOnce({
+          choices: [{ message: { content: 'Recovered' }, finish_reason: 'stop' }],
+          usage: {}
+        })
+
+      const result = await adapter.sendMessage(
+        [
+          {
+            role: 'user',
+            content: 'Hi',
+            id: '1',
+            sessionId: 's1',
+            createdAt: new Date(),
+            metadata: {}
+          }
+        ],
+        { model: 'gpt-4', maxRetries: 1 }
+      )
+
+      expect(result.content).toBe('Recovered')
+      expect(mockCreate).toHaveBeenCalledTimes(4)
+    },
+    15000
+  )
 
   it('should stream messages', async () => {
     const mockStream = (async function* () {
@@ -131,6 +209,36 @@ describe('OpenAIAdapter', () => {
     expect(chunks[0].content).toBe('Hel')
     expect(chunks[1].content).toBe('lo')
     expect(chunks[2].done).toBe(true)
+  })
+
+  it('should ignore malformed streaming chunks without choices', async () => {
+    const mockStream = (async function* () {
+      yield { malformed: true }
+      yield { choices: [{ delta: { content: 'OK' }, finish_reason: null }] }
+      yield { choices: [{ delta: {}, finish_reason: 'stop' }] }
+    })()
+
+    mockCreate.mockResolvedValue(mockStream)
+
+    const chunks = []
+    for await (const chunk of adapter.streamMessage(
+      [
+        {
+          role: 'user',
+          content: 'Hi',
+          id: '1',
+          sessionId: 's1',
+          createdAt: new Date(),
+          metadata: {}
+        }
+      ],
+      { model: 'gpt-4' }
+    )) {
+      chunks.push(chunk)
+    }
+
+    expect(chunks.some(chunk => chunk.content === 'OK')).toBe(true)
+    expect(chunks[chunks.length - 1].done).toBe(true)
   })
 
   it('should handle tool calls in sendMessage', async () => {
@@ -193,6 +301,60 @@ describe('OpenAIAdapter', () => {
       [{ id: 'call_1', name: 'test_tool', arguments: { arg: 'value' } }],
       expect.anything()
     )
+  })
+
+  it('should fallback to tool execution summary when tool loop ends without final text', async () => {
+    const { toolExecutionService } = await import('@/main/services/tools/tool-execution.service')
+
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'file_read', arguments: '{"path":"/tmp/spec.md"}' }
+              }
+            ]
+          },
+          finish_reason: 'tool_calls'
+        }
+      ],
+      usage: { prompt_tokens: 12, completion_tokens: 6 }
+    })
+
+    vi.mocked(toolExecutionService.executeToolCalls).mockResolvedValueOnce({
+      outputs: [
+        {
+          toolCall: { id: 'call_1', name: 'file_read', arguments: { path: '/tmp/spec.md' } },
+          result: { success: true, output: 'SPEC: homepage, blacklist, search' },
+          success: true,
+          durationMs: 42
+        }
+      ],
+      allSucceeded: true,
+      totalDurationMs: 42
+    })
+
+    const result = await adapter.sendMessage(
+      [
+        {
+          role: 'user',
+          content: 'Read spec and continue',
+          id: '1',
+          sessionId: 's1',
+          createdAt: new Date(),
+          metadata: {}
+        }
+      ],
+      { model: 'gpt-4', maxToolIterations: 1 }
+    )
+
+    expect(result.content).toContain('TOOL_EXECUTION_SUMMARY')
+    expect(result.content).toContain('file_read')
+    expect(result.content).toContain('SPEC: homepage, blacklist, search')
   })
 
   it('should handle tool calls in streamMessage', async () => {

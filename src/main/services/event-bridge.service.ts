@@ -7,6 +7,7 @@ const WORKFLOW_EVENT_TYPES = [
   'task:started',
   'task:completed',
   'task:failed',
+  'workflow:checkpoint',
   'workflow:completed'
 ] as const
 
@@ -16,7 +17,8 @@ const WORKFLOW_TO_TASK_STATUS: Partial<Record<WorkflowEvent['type'], string>> = 
   'task:assigned': 'pending',
   'task:started': 'running',
   'task:completed': 'completed',
-  'task:failed': 'failed'
+  'task:failed': 'failed',
+  'workflow:checkpoint': 'running'
 }
 
 let initialized = false

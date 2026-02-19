@@ -12,6 +12,7 @@ export const AgentOverrideConfigSchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   top_p: z.number().min(0).max(1).optional(),
   prompt: z.string().optional(),
+  /** Text to append to agent prompt. Supports file:// URIs (file:///abs, file://./rel, file://~/home) */
   prompt_append: z.string().optional(),
   tools: z.record(z.string(), z.boolean()).optional(),
   disable: z.boolean().optional(),
@@ -31,6 +32,11 @@ export const AgentOverrideConfigSchema = z.object({
       budgetTokens: z.number().optional(),
     })
     .optional(),
+  /** Ultrawork model override configuration. */
+  ultrawork: z.object({
+    model: z.string(),
+    variant: z.string().optional(),
+  }).optional(),
   /** Reasoning effort level (OpenAI). Overrides category and default settings. */
   reasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
   /** Text verbosity level. */

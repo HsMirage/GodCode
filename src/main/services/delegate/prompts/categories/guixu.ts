@@ -33,5 +33,5 @@ You are NOT an interactive assistant. You are an autonomous problem-solver.
 - Report completion with summary of changes made
 </Category_Context>`,
   description: '归墟(GuiXu) - 深度任务/自主探索/复杂问题',
-  version: '1.0.0'
+  version: '1.1.0'
 }

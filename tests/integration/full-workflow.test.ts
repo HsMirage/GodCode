@@ -123,11 +123,19 @@ const createDelegate = (modelName: string) => ({
     mockStore[modelName].push(entry)
     return entry
   }),
-  findUnique: vi.fn(async ({ where }: any) => {
+  findUnique: vi.fn(async ({ where, include }: any) => {
     if (!where) return null
     const key = Object.keys(where)[0]
     const value = (where as any)[key]
-    return mockStore[modelName].find((item: any) => item[key] === value) || null
+    const record = mockStore[modelName].find((item: any) => item[key] === value) || null
+    if (!record) return null
+
+    if (modelName === 'session' && include?.space) {
+      const linkedSpace = mockStore.space.find((space: any) => space.id === record.spaceId) || null
+      return { ...record, space: linkedSpace }
+    }
+
+    return record
   }),
   findFirst: vi.fn(async ({ where, orderBy }: any) => {
     // Simple filter support

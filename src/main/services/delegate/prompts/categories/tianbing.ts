@@ -18,41 +18,35 @@ Approach:
 </Category_Context>
 
 <Caller_Warning>
-THIS CATEGORY USES A LESS CAPABLE MODEL (claude-haiku-4-5).
+THIS CATEGORY USUALLY RUNS A COST-OPTIMIZED LIGHTWEIGHT MODEL PROFILE.
 
-The model executing this task has LIMITED reasoning capacity. Your prompt MUST be:
-
-**EXHAUSTIVELY EXPLICIT** - Leave NOTHING to interpretation:
-1. MUST DO: List every required action as atomic, numbered steps
+Prompts for this category MUST be exhaustively explicit:
+1. MUST DO: List required actions as atomic numbered steps
 2. MUST NOT DO: Explicitly forbid likely mistakes and deviations
-3. EXPECTED OUTPUT: Describe exact success criteria with concrete examples
+3. EXPECTED OUTPUT: Define exact success criteria and deliverables
 
-**WHY THIS MATTERS:**
-- Less capable models WILL deviate without explicit guardrails
-- Vague instructions → unpredictable results
-- Implicit expectations → missed requirements
+Why this matters:
+- Lightweight models drift without clear guardrails
+- Vague instructions produce unstable output
+- Implicit expectations are often missed
 
-**PROMPT STRUCTURE (MANDATORY):**
-\`\`\`
-TASK: [One-sentence goal]
+Mandatory prompt skeleton:
+
+TASK: [one-sentence goal]
 
 MUST DO:
-1. [Specific action with exact details]
-2. [Another specific action]
-...
+1. [specific action with concrete details]
+2. [next action]
 
 MUST NOT DO:
-- [Forbidden action + why]
-- [Another forbidden action]
-...
+- [forbidden action + reason]
 
 EXPECTED OUTPUT:
-- [Exact deliverable description]
-- [Success criteria / verification method]
-\`\`\`
+- [exact deliverable]
+- [verification criteria]
 
-If your prompt lacks this structure, REWRITE IT before delegating.
+If this structure is missing, rewrite the prompt before delegating.
 </Caller_Warning>`,
   description: '天兵(TianBing) - 快速任务/小修改',
-  version: '1.0.0'
+  version: '1.1.0'
 }

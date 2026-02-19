@@ -12,7 +12,13 @@
  */
 
 export interface WorkflowEvent {
-  type: 'task:assigned' | 'task:started' | 'task:completed' | 'task:failed' | 'workflow:completed'
+  type:
+    | 'task:assigned'
+    | 'task:started'
+    | 'task:completed'
+    | 'task:failed'
+    | 'workflow:checkpoint'
+    | 'workflow:completed'
   workflowId: string
   taskId: string
   timestamp: Date

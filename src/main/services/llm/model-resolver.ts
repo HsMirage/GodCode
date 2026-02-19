@@ -32,6 +32,35 @@ export interface ModelResolutionInput {
   systemDefaultModel?: string
 }
 
+function splitProviderAndModel(value: string): { provider: string; model: string } {
+  const parts = value.split('/')
+  if (parts.length < 2) {
+    return {
+      provider: 'unknown',
+      model: value
+    }
+  }
+
+  return {
+    provider: parts[0] || 'unknown',
+    model: parts.slice(1).join('/')
+  }
+}
+
+function parseMatchedModel(
+  matched: string,
+  providerHint?: string
+): { provider: string; model: string } {
+  if (matched.includes('/')) {
+    return splitProviderAndModel(matched)
+  }
+
+  return {
+    provider: providerHint || 'unknown',
+    model: matched
+  }
+}
+
 function normalizeModel(model?: string): string | undefined {
   const trimmed = model?.trim()
   return trimmed || undefined
@@ -101,17 +130,20 @@ export function resolveModelWithFallback(
     for (const entry of fallbackChain) {
       for (const provider of entry.providers) {
         const fullModel = `${provider}/${entry.model}`
-        const match = fuzzyMatchModel(fullModel, availableModels, [provider])
+        const match =
+          fuzzyMatchModel(fullModel, availableModels, [provider]) ||
+          fuzzyMatchModel(entry.model, availableModels, [provider])
         if (match) {
+          const resolved = parseMatchedModel(match, provider)
           logger.info('[ModelResolver] Model resolved via fallback chain', {
-            provider,
+            provider: resolved.provider,
             model: entry.model,
             match,
             variant: entry.variant
           })
           return {
-            model: entry.model,
-            provider,
+            model: resolved.model,
+            provider: resolved.provider,
             source: 'provider-fallback',
             variant: entry.variant
           }
@@ -129,9 +161,30 @@ export function resolveModelWithFallback(
     return null
   }
 
-  const parts = systemDefaultModel.split('/')
-  const provider = parts.length > 1 ? parts[0] : 'unknown'
-  const model = parts.length > 1 ? parts.slice(1).join('/') : systemDefaultModel
+  const normalizedSystemDefault = normalizeModel(systemDefaultModel)
+  if (!normalizedSystemDefault) {
+    logger.warn('[ModelResolver] No model resolved - systemDefaultModel is empty')
+    return null
+  }
+
+  let provider: string
+  let model: string
+
+  if (normalizedSystemDefault.includes('/')) {
+    const parsed = splitProviderAndModel(normalizedSystemDefault)
+    provider = parsed.provider
+    model = parsed.model
+  } else {
+    const matched = fuzzyMatchModel(normalizedSystemDefault, availableModels)
+    if (matched) {
+      const parsed = parseMatchedModel(matched)
+      provider = parsed.provider
+      model = parsed.model
+    } else {
+      provider = fallbackChain?.[0]?.providers?.[0] || 'openai-compatible'
+      model = normalizedSystemDefault
+    }
+  }
 
   logger.info('[ModelResolver] Model resolved via system default', { model: systemDefaultModel })
   return {
@@ -166,3 +219,62 @@ export const DEFAULT_FALLBACK_CHAINS = {
     { model: 'gpt-4o', providers: ['openai-compatible'] }
   ]
 } as const
+
+/**
+ * 将 AgentDefinition 或 CategoryDefinition 的 fallbackModels 转换为 FallbackEntry[] 格式
+ */
+function toFallbackEntries(
+  fallbackModels: Array<{ model: string; provider: string }>
+): FallbackEntry[] {
+  return fallbackModels.map((entry) => ({
+    model: entry.model,
+    providers: [entry.provider, 'openai-compatible']
+  }))
+}
+
+/**
+ * 为 Agent 解析模型，结合 UI 选择和 Agent 自身的 fallback chain
+ *
+ * - 如果 Agent mode 为 'primary'，会尊重 userModel（UI 选择）
+ * - 如果 Agent mode 为 'subagent'，忽略 userModel 直接使用自身 fallback chain
+ */
+export function resolveModelForAgent(
+  agentDef: {
+    mode: 'primary' | 'subagent'
+    defaultModel: string
+    fallbackModels: Array<{ model: string; provider: string }>
+  },
+  availableModels: Set<string>,
+  userModel?: string
+): ModelResolutionResult | null {
+  const fallbackChain = toFallbackEntries(agentDef.fallbackModels)
+  const effectiveUserModel = agentDef.mode === 'primary' ? userModel : undefined
+
+  return resolveModelWithFallback({
+    userModel: effectiveUserModel,
+    fallbackChain,
+    availableModels,
+    systemDefaultModel: agentDef.defaultModel
+  })
+}
+
+/**
+ * 为 Category 解析模型，使用 Category 的 fallback chain
+ */
+export function resolveModelForCategory(
+  categoryDef: {
+    defaultModel: string
+    fallbackModels: Array<{ model: string; provider: string }>
+  },
+  availableModels: Set<string>,
+  userModel?: string
+): ModelResolutionResult | null {
+  const fallbackChain = toFallbackEntries(categoryDef.fallbackModels)
+
+  return resolveModelWithFallback({
+    userModel,
+    fallbackChain,
+    availableModels,
+    systemDefaultModel: categoryDef.defaultModel
+  })
+}

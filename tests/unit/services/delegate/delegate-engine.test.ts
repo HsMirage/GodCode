@@ -175,6 +175,27 @@ describe('DelegateEngine', () => {
       expect(result.output).toBe('Task completed result')
     })
 
+    it('should include builtin category prompt when delegating by category', async () => {
+      const input = {
+        description: 'Build UI task',
+        prompt: 'Create UI components',
+        category: 'quick',
+        sessionId: 'test-session-123',
+        useDynamicPrompt: false as const
+      }
+
+      await delegateEngine.delegateTask(input)
+
+      const sentMessages = mocks.mockAdapter.sendMessage.mock.calls[0]?.[0] as Array<{
+        role: string
+        content: string
+      }>
+      const systemMessage = sentMessages.find(message => message.role === 'system')
+
+      expect(systemMessage?.content).toContain('<Category_Context>')
+      expect(systemMessage?.content).toContain('SMALL / QUICK tasks')
+    })
+
     it('should delegate task successfully with subagent_type', async () => {
       const input = {
         description: 'Research task',
@@ -255,6 +276,61 @@ describe('DelegateEngine', () => {
       await expect(delegateEngine.delegateTask(input)).rejects.toThrow(
         'Must provide either category or subagent_type'
       )
+    })
+
+    it('should recover from empty model output with a follow-up prompt', async () => {
+      mocks.mockAdapter.sendMessage
+        .mockResolvedValueOnce({
+          content: '',
+          usage: { prompt_tokens: 8, completion_tokens: 0 }
+        })
+        .mockResolvedValueOnce({
+          content: 'Recovered summary with concrete output',
+          usage: { prompt_tokens: 5, completion_tokens: 9 }
+        })
+
+      const result = await delegateEngine.delegateTask({
+        description: 'Implement feature X',
+        prompt: 'Implement feature X in codebase',
+        category: 'quick',
+        sessionId: 'test-session-123'
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.output).toContain('Recovered summary')
+      expect(mocks.mockAdapter.sendMessage).toHaveBeenCalledTimes(2)
+      expect(mocks.mockPrisma.task.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'task-1' },
+          data: expect.objectContaining({
+            status: 'completed',
+            output: expect.stringContaining('Recovered summary')
+          })
+        })
+      )
+    })
+
+    it('should synthesize fallback output when model keeps returning empty content', async () => {
+      mocks.mockAdapter.sendMessage
+        .mockResolvedValueOnce({
+          content: '',
+          usage: {}
+        })
+        .mockResolvedValueOnce({
+          content: '',
+          usage: {}
+        })
+
+      const result = await delegateEngine.delegateTask({
+        description: 'Implement feature Y',
+        prompt: 'Implement feature Y in codebase',
+        category: 'quick',
+        sessionId: 'test-session-123'
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.output).toContain('模型返回了空文本输出')
+      expect(result.output.trim().length).toBeGreaterThan(0)
     })
 
     it('should handle model not found error', async () => {

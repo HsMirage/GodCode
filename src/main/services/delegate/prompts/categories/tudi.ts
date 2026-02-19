@@ -17,13 +17,15 @@ This is NOT a default choice - it's for genuinely unclassifiable moderate-effort
 </Category_Context>
 
 <Caller_Warning>
-THIS CATEGORY USES A MID-TIER MODEL (claude-sonnet-4-5).
+THIS CATEGORY USES A GENERAL LOW-TO-MID COMPLEXITY MODEL PROFILE.
 
-**PROVIDE CLEAR STRUCTURE:**
+Provide clear structure in delegation prompts:
 1. MUST DO: Enumerate required actions explicitly
 2. MUST NOT DO: State forbidden actions to prevent scope creep
 3. EXPECTED OUTPUT: Define concrete success criteria
+
+Do not pass ambiguous, under-specified prompts to this category.
 </Caller_Warning>`,
   description: '土地(TuDi) - 中等难度/常规任务',
-  version: '1.0.0'
+  version: '1.1.0'
 }

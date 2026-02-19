@@ -216,7 +216,7 @@ describe('WorkforceEngine', () => {
     it('should execute tasks in dependency order', async () => {
       const input = 'Do workflow'
 
-      await workforceEngine.executeWorkflow(input, 'test-session-123')
+      const workflowResult = await workforceEngine.executeWorkflow(input, 'test-session-123')
 
       expect(mockPrisma.task.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -255,6 +255,414 @@ describe('WorkforceEngine', () => {
           })
         })
       )
+
+      expect(workflowResult.executions.size).toBe(2)
+      expect(workflowResult.executions.get('task-1')?.persistedTaskId).toBe('subtask-id')
+    })
+
+    it('should run pre-dispatch/between-waves/final orchestrator checkpoints for dependent waves', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            {
+              id: 'task-1',
+              description: '扫描代码并汇总证据',
+              dependencies: [],
+              subagent_type: 'qianliyan'
+            },
+            {
+              id: 'task-2',
+              description: '实现后端接口修复并给出验证',
+              dependencies: ['task-1'],
+              category: 'dayu'
+            }
+          ]
+        })
+      })
+
+      const callTrace: any[] = []
+      let seq = 0
+      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+        callTrace.push(delegateInput)
+
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          return {
+            taskId: `checkpoint-${++seq}`,
+            output: JSON.stringify({
+              status: 'continue',
+              approved_task_ids: ['task-2']
+            }),
+            success: true
+          }
+        }
+
+        return {
+          taskId: `subtask-${++seq}`,
+          output: delegateInput.description === '实现后端接口修复并给出验证'
+            ? [
+                'Changed files:',
+                '- src/main/services/workforce/workforce-engine.ts',
+                '',
+                'Verification command:',
+                '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+              ].join('\n')
+            : [
+                'EVIDENCE_PATHS:',
+                '- src/main/services/workforce/workforce-engine.ts',
+                'KEY_FINDINGS:',
+                '- 依赖链完整',
+                'RISKS_AND_CONCLUSIONS:',
+                '- 可继续执行'
+              ].join('\n'),
+          success: true
+        }
+      })
+
+      await workforceEngine.executeWorkflow('请先扫描代码，再实现后端接口修复', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      const task1Index = callTrace.findIndex(call => call.description === '扫描代码并汇总证据')
+      const task2Index = callTrace.findIndex(call => call.description === '实现后端接口修复并给出验证')
+      const checkpointCalls = callTrace.filter(call => call.metadata?.orchestrationCheckpoint === true)
+      const checkpointIndices = callTrace
+        .map((call, index) => ({ call, index }))
+        .filter(item => item.call.metadata?.orchestrationCheckpoint === true)
+
+      expect(task1Index).toBeGreaterThan(-1)
+      expect(task2Index).toBeGreaterThan(task1Index)
+      expect(checkpointCalls.length).toBeGreaterThanOrEqual(3)
+      expect(checkpointIndices[0]?.index).toBeLessThan(task1Index) // pre-dispatch
+      expect(checkpointIndices[1]?.index).toBeGreaterThan(task1Index) // between-waves
+      expect(checkpointIndices[1]?.index).toBeLessThan(task2Index)
+      expect(checkpointIndices[checkpointIndices.length - 1]?.index).toBeGreaterThan(task2Index) // final
+
+      expect(checkpointCalls[0]?.subagent_type).toBe('haotian')
+      expect(checkpointCalls[0]?.availableTools).toEqual([])
+      expect(checkpointCalls[0]?.metadata?.checkpointPhase).toBe('pre-dispatch')
+      expect(checkpointCalls.some(call => call.metadata?.checkpointPhase === 'between-waves')).toBe(true)
+      expect(checkpointCalls.some(call => call.metadata?.checkpointPhase === 'final')).toBe(true)
+    })
+
+    it('should trigger orchestrator checkpoint in single-wave workflows', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            { id: 'task-1', description: '实现首页', dependencies: [] },
+            { id: 'task-2', description: '实现后端接口', dependencies: [] }
+          ]
+        })
+      })
+
+      const callTrace: any[] = []
+      let seq = 0
+      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+        callTrace.push(delegateInput)
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          const readyTaskIds = Array.isArray(delegateInput.metadata?.readyTaskIds)
+            ? delegateInput.metadata.readyTaskIds
+            : []
+          return {
+            taskId: `checkpoint-${++seq}`,
+            output: JSON.stringify({
+              status: 'continue',
+              approved_task_ids: readyTaskIds
+            }),
+            success: true
+          }
+        }
+
+        return {
+          taskId: `subtask-${++seq}`,
+          output: [
+            'Changed files:',
+            '- src/main/services/workforce/workforce-engine.ts',
+            '',
+            'Verification command:',
+            '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+          ].join('\n'),
+          success: true
+        }
+      })
+
+      await workforceEngine.executeWorkflow('请实现网站首页、后端接口和后台页面', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      const checkpointCalls = callTrace.filter(call => call.metadata?.orchestrationCheckpoint === true)
+      const checkpointPhases = checkpointCalls.map(call => call.metadata?.checkpointPhase)
+
+      expect(checkpointPhases).toContain('pre-dispatch')
+      expect(checkpointPhases).toContain('final')
+      expect(checkpointPhases).not.toContain('between-waves')
+    })
+
+    it('should persist final checkpoint phase and orchestrator participation metadata', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            { id: 'task-1', description: '实现首页', dependencies: [] },
+            { id: 'task-2', description: '实现后端接口', dependencies: ['task-1'] }
+          ]
+        })
+      })
+
+      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          return {
+            taskId: `checkpoint-${delegateInput.metadata.checkpointPhase}`,
+            output: JSON.stringify({
+              status: 'continue',
+              approved_task_ids: delegateInput.metadata.readyTaskIds || []
+            }),
+            success: true
+          }
+        }
+
+        return {
+          taskId: `subtask-${delegateInput.description}`,
+          output: [
+            'Changed files:',
+            '- src/main/services/workforce/workforce-engine.ts',
+            '',
+            'Verification command:',
+            '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+          ].join('\n'),
+          success: true
+        }
+      })
+
+      const result = await workforceEngine.executeWorkflow('请实现网站首页和后端接口', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      expect(result.orchestratorParticipation).toBe(true)
+      expect(result.orchestratorCheckpoints?.some(item => item.phase === 'final')).toBe(true)
+
+      const finalUpdate = mockPrisma.task.update.mock.calls.at(-1)?.[0]
+      const metadata = finalUpdate?.data?.metadata || {}
+      const checkpoints = metadata.orchestratorCheckpoints || []
+      expect(metadata.orchestratorParticipation).toBe(true)
+      expect(checkpoints.some((item: any) => item.phase === 'final')).toBe(true)
+    })
+
+    it('should fallback to DAG scheduling when checkpoint output is not parseable JSON', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-1', description: '实现首页', dependencies: [] }]
+        })
+      })
+
+      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          return {
+            taskId: `checkpoint-${delegateInput.metadata.checkpointPhase}`,
+            output: 'checkpoint acknowledged without structured json',
+            success: true
+          }
+        }
+
+        return {
+          taskId: 'subtask-impl',
+          output: [
+            'Changed files:',
+            '- src/main/services/workforce/workforce-engine.ts',
+            '',
+            'Verification command:',
+            '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+          ].join('\n'),
+          success: true
+        }
+      })
+
+      const result = await workforceEngine.executeWorkflow('请实现网站首页', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.orchestratorCheckpoints?.some(item => item.status === 'fallback')).toBe(true)
+    })
+
+    it('should downgrade no-evidence halt when completed output contains concrete evidence', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            { id: 'task-1', description: '实现 Prisma schema', dependencies: [] },
+            { id: 'task-2', description: '实现后端接口', dependencies: ['task-1'] }
+          ]
+        })
+      })
+
+      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          if (delegateInput.metadata.checkpointPhase === 'between-waves') {
+            return {
+              taskId: 'checkpoint-between',
+              output: JSON.stringify({
+                status: 'halt',
+                approved_task_ids: [],
+                reason:
+                  'task-1 output_preview only shows intent/plan, no evidence of actual execution: no schema content, no Prisma validation.'
+              }),
+              success: true
+            }
+          }
+
+          return {
+            taskId: `checkpoint-${delegateInput.metadata.checkpointPhase}`,
+            output: JSON.stringify({
+              status: 'continue',
+              approved_task_ids: delegateInput.metadata.readyTaskIds || []
+            }),
+            success: true
+          }
+        }
+
+        if (delegateInput.description === '实现 Prisma schema') {
+          return {
+            taskId: 'subtask-schema',
+            output: [
+              '完成了 schema 设计与实体关系收敛。',
+              '',
+              'Changed files:',
+              '- prisma/schema.prisma',
+              '- src/main/services/user.service.ts',
+              '',
+              'Verification command:',
+              '- pnpm prisma validate',
+              '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+            ].join('\n'),
+            success: true
+          }
+        }
+
+        return {
+          taskId: 'subtask-api',
+          output: [
+            'Changed files:',
+            '- src/main/services/workforce/workforce-engine.ts',
+            '',
+            'Verification command:',
+            '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+          ].join('\n'),
+          success: true
+        }
+      })
+
+      const result = await workforceEngine.executeWorkflow('实现 schema 后继续实现后端接口', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.orchestratorCheckpoints?.some(item => item.status === 'halt')).toBe(false)
+      expect(
+        result.orchestratorCheckpoints?.some(
+          item =>
+            item.phase === 'between-waves' &&
+            item.status === 'continue' &&
+            String(item.reason || '').includes('auto-downgraded')
+        )
+      ).toBe(true)
+    })
+
+    it('should retry halted checkpoint tasks instead of failing user request', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            { id: 'task-1', description: '实现 Prisma schema', dependencies: [] },
+            { id: 'task-2', description: '实现后端接口', dependencies: ['task-1'] }
+          ]
+        })
+      })
+
+      let schemaRunCount = 0
+      let betweenWavesCheckpointCount = 0
+
+      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          const phase = delegateInput.metadata.checkpointPhase
+          if (phase === 'between-waves') {
+            betweenWavesCheckpointCount++
+            if (betweenWavesCheckpointCount === 1) {
+              return {
+                taskId: 'checkpoint-between-1',
+                output: JSON.stringify({
+                  status: 'halt',
+                  approved_task_ids: [],
+                  reason:
+                    "task-1 evidence_detected=no 且 output_preview 被截断，末尾显示'让我开始创建缺失的部分'，需验证 schema/依赖是否已就绪。"
+                }),
+                success: true
+              }
+            }
+          }
+
+          return {
+            taskId: `checkpoint-${phase}-${betweenWavesCheckpointCount}`,
+            output: JSON.stringify({
+              status: 'continue',
+              approved_task_ids: delegateInput.metadata.readyTaskIds || []
+            }),
+            success: true
+          }
+        }
+
+        if (delegateInput.description === '实现 Prisma schema') {
+          schemaRunCount++
+          if (schemaRunCount === 1) {
+            return {
+              taskId: 'subtask-schema-1',
+              output: '已经完成初步分析，让我开始创建缺失的部分。',
+              success: true
+            }
+          }
+
+          return {
+            taskId: 'subtask-schema-2',
+            output: [
+              'Changed files:',
+              '- prisma/schema.prisma',
+              '- src/main/services/user.service.ts',
+              '',
+              'Verification command:',
+              '- pnpm prisma validate',
+              '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+            ].join('\n'),
+            success: true
+          }
+        }
+
+        return {
+          taskId: 'subtask-api',
+          output: [
+            'Changed files:',
+            '- src/main/services/workforce/workforce-engine.ts',
+            '',
+            'Verification command:',
+            '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+          ].join('\n'),
+          success: true
+        }
+      })
+
+      const result = await workforceEngine.executeWorkflow('实现 schema 后继续实现后端接口', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      expect(result.success).toBe(true)
+      expect(schemaRunCount).toBe(2)
+      expect(result.orchestratorCheckpoints?.some(item => item.status === 'halt')).toBe(true)
+      expect(
+        result.orchestratorCheckpoints?.some(
+          item => item.phase === 'between-waves' && item.status === 'continue'
+        )
+      ).toBe(true)
     })
 
     it('should respect MAX_CONCURRENT limit', async () => {
@@ -337,7 +745,7 @@ describe('WorkforceEngine', () => {
       expect(mockDelegateEngine.delegateTask).not.toHaveBeenCalled()
     })
 
-    it('should parse plan tasks with dependencies and append haotian review task', async () => {
+    it('should parse plan tasks with dependencies and inject chongming plan review gate', async () => {
       vi.spyOn(fs, 'existsSync').mockImplementation(path => String(path).includes('.sisyphus'))
       vi.spyOn(fs, 'readFileSync').mockReturnValue(
         [
@@ -365,7 +773,8 @@ describe('WorkforceEngine', () => {
       )
 
       expect(result.success).toBe(true)
-      expect(result.tasks.map(task => task.id)).toContain('plan-haotian-review')
+      const planReviewTask = result.tasks.find(task => task.assignedAgent === 'chongming')
+      expect(planReviewTask).toBeDefined()
 
       const byDescription = new Map(
         mockDelegateEngine.delegateTask.mock.calls.map(call => [call[0].description, call[0]])
@@ -374,14 +783,253 @@ describe('WorkforceEngine', () => {
       expect(byDescription.get('Task 1: 搜索代码位置 [agent: qianliyan]')?.subagent_type).toBe(
         'qianliyan'
       )
-      expect(byDescription.get('Task 2: 修复后端 API 错误')?.subagent_type).toBe('luban')
-      expect(byDescription.get('Task 3: 更新页面样式')?.subagent_type).toBe('luban')
+      expect(byDescription.get('Task 2: 修复后端 API 错误')?.category).toBe('dayu')
+      expect(byDescription.get('Task 3: 更新页面样式')?.category).toBe('zhinv')
+      expect(byDescription.get('Task 2: 修复后端 API 错误')?.subagent_type).toBeUndefined()
+      expect(byDescription.get('Task 3: 更新页面样式')?.subagent_type).toBeUndefined()
       expect(
-        byDescription.get('审查已完成子任务的结果一致性，确认验收标准与风险说明完整。')?.subagent_type
-      ).toBe('leigong')
-      expect(byDescription.get('Task 2: 修复后端 API 错误')?.metadata?.logicalDependencies).toEqual([
+        byDescription.get('由 chongming 审查任务分解与依赖关系，指出歧义、缺失和风险，并给出可执行修正建议。')
+          ?.subagent_type
+      ).toBe('chongming')
+      expect(byDescription.get('Task 2: 修复后端 API 错误')?.metadata?.logicalDependencies).toContain(
         'plan-1'
-      ])
+      )
+      expect(byDescription.get('Task 2: 修复后端 API 错误')?.metadata?.logicalDependencies).toContain(
+        planReviewTask?.id
+      )
+    })
+
+    it('should enforce discovery-to-execution flow for implementation requests', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            {
+              id: 'task-1',
+              description: '扫描代码库定位后端相关模块',
+              dependencies: [],
+              subagent_type: 'qianliyan'
+            },
+            {
+              id: 'task-2',
+              description: '评估实现风险并给出建议',
+              dependencies: ['task-1'],
+              subagent_type: 'baize'
+            },
+            {
+              id: 'task-3',
+              description: '整理第三方依赖相关文档约束',
+              dependencies: ['task-1'],
+              subagent_type: 'diting'
+            }
+          ]
+        })
+      })
+
+      let counter = 0
+      mockDelegateEngine.delegateTask.mockImplementation(async (input: any) => ({
+        taskId: `persisted-${++counter}`,
+        output: `done:${input.description}`,
+        success: true
+      }))
+
+      const result = await workforceEngine.executeWorkflow(
+        '新增某个后端功能，并且在前端页面中设置对应UI按钮',
+        'test-session-123',
+        {
+          agentCode: 'haotian',
+          enableRetry: false
+        }
+      )
+
+      const planReviewTask = result.tasks.find(task => task.assignedAgent === 'chongming')
+      expect(planReviewTask).toBeUndefined()
+
+      const backendExecutionTask = result.tasks.find(
+        task => task.workflowPhase === 'execution' && task.assignedCategory === 'dayu'
+      )
+      const frontendExecutionTask = result.tasks.find(
+        task => task.workflowPhase === 'execution' && task.assignedCategory === 'zhinv'
+      )
+      expect(backendExecutionTask?.assignedCategory).toBe('dayu')
+      expect(frontendExecutionTask?.assignedCategory).toBe('zhinv')
+      expect(backendExecutionTask?.dependencies).toContain('task-1')
+      expect(frontendExecutionTask?.dependencies).not.toContain(planReviewTask?.id)
+
+      const byDescription = new Map(
+        mockDelegateEngine.delegateTask.mock.calls.map(call => [call[0].description, call[0]])
+      )
+      expect(byDescription.get(backendExecutionTask!.description)?.category).toBe('dayu')
+      expect(byDescription.get(frontendExecutionTask!.description)?.category).toBe('zhinv')
+      expect(byDescription.get(backendExecutionTask!.description)?.subagent_type).toBeUndefined()
+      expect(byDescription.get(frontendExecutionTask!.description)?.subagent_type).toBeUndefined()
+    })
+
+    it('should avoid synthetic discovery/review tasks when markdown specification is explicitly referenced', async () => {
+      vi.spyOn(fs, 'existsSync').mockImplementation(candidate =>
+        path.normalize(String(candidate)).replace(/\\/g, '/').endsWith('/tmp/workspace-a/网站规划.md')
+      )
+      const statSpy = vi.spyOn(fs, 'statSync').mockReturnValue({
+        isFile: () => true
+      } as unknown as fs.Stats)
+      vi.spyOn(fs, 'readFileSync').mockImplementation(filePath => {
+        if (String(filePath).includes('网站规划.md')) {
+          return '# 网站规划\n- 首页\n- 黑榜页\n- 红榜页'
+        }
+        return ''
+      })
+
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-1', description: '实现首页与事件列表页面', dependencies: [] }]
+        })
+      })
+
+      try {
+        const result = await workforceEngine.executeWorkflow(
+          '请根据 网站规划.md 制作一个网站',
+          'test-session-123',
+          { agentCode: 'haotian', enableRetry: false }
+        )
+
+        expect(result.tasks.some(task => task.id.startsWith('stage-discovery-'))).toBe(false)
+        expect(result.tasks.some(task => task.id.startsWith('stage-plan-review-'))).toBe(false)
+      } finally {
+        statSpy.mockRestore()
+      }
+    })
+
+    it('should participate with orchestrator checkpoints for /tests/ceshi 网站规划 prompt', async () => {
+      const ceshiDir = path.resolve(process.cwd(), 'tests/ceshi')
+
+      mockPrisma.session.findUnique.mockResolvedValue({
+        id: 'test-session-123',
+        space: { id: 'space-1', workDir: ceshiDir }
+      })
+
+      vi.spyOn(fs, 'existsSync').mockImplementation(candidate =>
+        path
+          .normalize(String(candidate))
+          .replace(/\\/g, '/')
+          .endsWith(`${path.normalize(ceshiDir).replace(/\\/g, '/')}/网站规划.md`)
+      )
+      const statSpy = vi.spyOn(fs, 'statSync').mockReturnValue({
+        isFile: () => true
+      } as unknown as fs.Stats)
+      vi.spyOn(fs, 'readFileSync').mockImplementation(filePath => {
+        if (String(filePath).includes('网站规划.md')) {
+          return '# 网站规划\n- 首页\n- 黑榜页\n- 红榜页'
+        }
+        return ''
+      })
+
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            { id: 'task-1', description: '实现首页与导航', dependencies: [] },
+            { id: 'task-2', description: '实现后端审核API', dependencies: [] }
+          ]
+        })
+      })
+
+      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          const readyTaskIds = Array.isArray(delegateInput.metadata?.readyTaskIds)
+            ? delegateInput.metadata.readyTaskIds
+            : []
+          return {
+            taskId: `checkpoint-${delegateInput.metadata.checkpointPhase}`,
+            output: JSON.stringify({
+              status: 'continue',
+              approved_task_ids: readyTaskIds
+            }),
+            success: true
+          }
+        }
+        return {
+          taskId: `subtask-${delegateInput.description}`,
+          output:
+            'Changed files:\n- src/renderer/src/pages/ChatPage.tsx\n\nVerification command:\n- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts',
+          success: true
+        }
+      })
+
+      try {
+        const result = await workforceEngine.executeWorkflow(
+          '请你根据 网站规划.md 制作一个网站',
+          'test-session-123',
+          { agentCode: 'haotian', enableRetry: false }
+        )
+
+        expect(result.success).toBe(true)
+        expect(result.orchestratorParticipation).toBe(true)
+        expect(result.orchestratorCheckpoints?.some(item => item.phase === 'pre-dispatch')).toBe(true)
+        expect(result.orchestratorCheckpoints?.some(item => item.phase === 'final')).toBe(true)
+        expect(result.tasks.some(task => task.id.startsWith('stage-discovery-'))).toBe(false)
+        expect(result.tasks.some(task => task.id.startsWith('stage-plan-review-'))).toBe(false)
+      } finally {
+        statSpy.mockRestore()
+      }
+    })
+
+    it('should keep implementation prompt contract in read-only execution tasks', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            {
+              id: 'task-1',
+              description: '扫描代码库定位后端相关模块',
+              dependencies: [],
+              subagent_type: 'qianliyan'
+            },
+            {
+              id: 'task-2',
+              description: '评估实现风险并给出建议',
+              dependencies: ['task-1'],
+              subagent_type: 'baize'
+            }
+          ]
+        })
+      })
+
+      await workforceEngine.executeWorkflow(
+        '只读模式下新增后端接口并在前端页面增加按钮，不要改代码',
+        'test-session-123',
+        {
+          agentCode: 'haotian',
+          enableRetry: false
+        }
+      )
+
+      const delegateCalls = mockDelegateEngine.delegateTask.mock.calls.map(call => call[0])
+      const backendExecutionCall = delegateCalls.find(input => input.category === 'dayu')
+      expect(backendExecutionCall?.prompt).toContain(
+        '当前工作流是只读模式：请输出可执行实现方案与验证方案，不得改代码。'
+      )
+      expect(backendExecutionCall?.prompt).not.toContain('EVIDENCE_PATHS / KEY_FINDINGS')
+    })
+
+    it('should resolve OMO-style subagent_type and category hints from plan blocks', async () => {
+      vi.spyOn(fs, 'existsSync').mockImplementation(path => String(path).includes('.sisyphus'))
+      vi.spyOn(fs, 'readFileSync').mockReturnValue(
+        [
+          '# Plan',
+          '- [ ] Task 1: 扫描代码结构',
+          '  task(subagent_type="explore")',
+          '- [ ] Task 2: 快速修复小问题',
+          "  task(category='quick')"
+        ].join('\n')
+      )
+
+      await workforceEngine.executeWorkflow('执行计划 .sisyphus/plans/test-plan.md', 'test-session-123', {
+        agentCode: 'haotian'
+      })
+
+      const byDescription = new Map(
+        mockDelegateEngine.delegateTask.mock.calls.map(call => [call[0].description, call[0]])
+      )
+
+      expect(byDescription.get('Task 1: 扫描代码结构')?.subagent_type).toBe('qianliyan')
+      expect(byDescription.get('Task 2: 快速修复小问题')?.category).toBe('tianbing')
     })
 
     it('should remap explicit kuafu assignment to luban when orchestrator is haotian', async () => {
@@ -415,9 +1063,28 @@ describe('WorkforceEngine', () => {
         success: true
       })
 
-      await expect(workforceEngine.executeWorkflow('空输出检查', 'test-session-123')).rejects.toThrow(
-        'empty output'
-      )
+      await expect(
+        workforceEngine.executeWorkflow('空输出检查', 'test-session-123', { enableRetry: false })
+      ).rejects.toThrow('empty-output')
+    })
+
+    it('should fail subtask when delegate returns non-actionable read-only output', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-impl', description: '实现网站首页', dependencies: [] }]
+        })
+      })
+
+      mockDelegateEngine.delegateTask.mockResolvedValue({
+        taskId: 'impl-task',
+        output:
+          'I am unable to execute because this environment is read-only and cannot modify files.',
+        success: true
+      })
+
+      await expect(
+        workforceEngine.executeWorkflow('请实现网站首页', 'test-session-123', { enableRetry: false })
+      ).rejects.toThrow('non-actionable output')
     })
 
     it('should resolve relative plan path against session workspace directory', async () => {
@@ -462,6 +1129,199 @@ describe('WorkforceEngine', () => {
           subagent_type: 'qianliyan'
         })
       )
+    })
+
+    it('should fail early when required referenced markdown file is missing', async () => {
+      await expect(
+        workforceEngine.executeWorkflow('请根据 网站规划.md 制作一个网站', 'test-session-123', {
+          enableRetry: false
+        })
+      ).rejects.toThrow('请求依赖的 Markdown 文件不存在')
+
+      expect(mockAdapter.sendMessage).not.toHaveBeenCalled()
+      expect(mockDelegateEngine.delegateTask).not.toHaveBeenCalled()
+    })
+
+    it('should include referenced markdown content in decomposition prompt when file exists', async () => {
+      vi.spyOn(fs, 'existsSync').mockImplementation(candidate =>
+        path.normalize(String(candidate)).replace(/\\/g, '/').endsWith('/tmp/workspace-a/项目规划.md')
+      )
+      const statSpy = vi.spyOn(fs, 'statSync').mockReturnValue({
+        isFile: () => true
+      } as unknown as fs.Stats)
+      vi.spyOn(fs, 'readFileSync').mockImplementation(filePath => {
+        if (String(filePath).includes('项目规划.md')) {
+          return '# 项目规划\n- 目标: 落地首页、功能页与API'
+        }
+        return ''
+      })
+
+      try {
+        await workforceEngine.executeWorkflow('请根据 项目规划.md 实现网站', 'test-session-123', {
+          enableRetry: false
+        })
+
+        const sentMessages = mockAdapter.sendMessage.mock.calls[0]?.[0]
+        expect(sentMessages?.[1]?.content).toContain('REFERENCED MARKDOWN CONTEXT')
+        expect(sentMessages?.[1]?.content).toContain('FILE: 项目规划.md')
+      } finally {
+        statSpy.mockRestore()
+      }
+    })
+
+    it('should not append haotian review task for decomposed workflows', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            { id: 'task-1', description: '实现首页', dependencies: [] },
+            { id: 'task-2', description: '实现后端接口', dependencies: [] }
+          ]
+        })
+      })
+
+      const result = await workforceEngine.executeWorkflow('做一个网站', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      expect(result.tasks.find(task => task.id === 'haotian-review')).toBeUndefined()
+    })
+
+    it('should fail subtask when delegate returns status-only placeholder output', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-status', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockDelegateEngine.delegateTask.mockResolvedValue({
+        taskId: 'status-task',
+        output: 'Inspecting repository',
+        success: true
+      })
+
+      await expect(
+        workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
+      ).rejects.toThrow('status-only-placeholder')
+    })
+
+    it('should fail subtask when delegate returns deciding status-only output', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-status', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockDelegateEngine.delegateTask.mockResolvedValue({
+        taskId: 'status-task',
+        output: 'Deciding on task organization method',
+        success: true
+      })
+
+      await expect(
+        workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
+      ).rejects.toThrow('status-only-placeholder')
+    })
+
+    it('should recover once when delegate first returns status-only placeholder', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-status', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockDelegateEngine.delegateTask
+        .mockResolvedValueOnce({
+          taskId: 'status-task-1',
+          output: 'Inspecting repository',
+          success: true
+        })
+        .mockResolvedValueOnce({
+          taskId: 'status-task-2',
+          output:
+            'Changed files:\n- src/renderer/src/pages/ChatPage.tsx\n\nVerification command:\n- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts',
+          success: true
+        })
+
+      const result = await workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', {
+        enableRetry: false
+      })
+
+      expect(result.success).toBe(true)
+      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledTimes(2)
+      expect(mockDelegateEngine.delegateTask.mock.calls[1]?.[0]?.prompt).toContain(
+        'ACTIONABILITY RECOVERY DIRECTIVE'
+      )
+      expect(mockDelegateEngine.delegateTask.mock.calls[1]?.[0]?.useDynamicPrompt).toBe(false)
+    })
+
+    it('should recover once when delegate first returns capability-limited output', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-capability', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockDelegateEngine.delegateTask
+        .mockResolvedValueOnce({
+          taskId: 'capability-task-1',
+          output: 'I cannot modify files in this environment.',
+          success: true
+        })
+        .mockResolvedValueOnce({
+          taskId: 'capability-task-2',
+          output:
+            'Changed files:\n- src/renderer/src/pages/ChatPage.tsx\n\nVerification command:\n- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts',
+          success: true
+        })
+
+      const result = await workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', {
+        enableRetry: false
+      })
+
+      expect(result.success).toBe(true)
+      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledTimes(2)
+      expect(mockDelegateEngine.delegateTask.mock.calls[1]?.[0]?.prompt).toContain(
+        'reason: capability-limited-output'
+      )
+      expect(mockDelegateEngine.delegateTask.mock.calls[1]?.[0]?.useDynamicPrompt).toBe(false)
+    })
+
+    it('should fail subtask when delegate returns markdown-wrapped status placeholder', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-status', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockDelegateEngine.delegateTask.mockResolvedValue({
+        taskId: 'status-task',
+        output: '**Inspecting repository structure**',
+        success: true
+      })
+
+      await expect(
+        workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
+      ).rejects.toThrow('status-only-placeholder')
+    })
+
+    it('should fail subtask when delegate returns instruction-conflict meta output', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-meta', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockDelegateEngine.delegateTask.mockResolvedValue({
+        taskId: 'meta-task',
+        output:
+          "Resolving conflicting instructions for initial actions. I'm wrestling with instructions that say to launch 3+ tools simultaneously in the first action.",
+        success: true
+      })
+
+      await expect(
+        workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
+      ).rejects.toThrow('meta-process-output')
     })
 
     it('should cancel workflow immediately when abort signal is already requested', async () => {

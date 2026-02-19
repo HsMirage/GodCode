@@ -24,5 +24,5 @@ Response format:
 - Risks and mitigations (if relevant)
 </Category_Context>`,
   description: '鬼谷(GuiGu) - 逻辑推理/架构设计',
-  version: '1.0.0'
+  version: '1.1.0'
 }

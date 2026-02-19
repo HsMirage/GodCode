@@ -1,4 +1,5 @@
 import type { OhMyOpenCodeConfig, HookName } from "../../config"
+import type { ModelCacheState } from "../../plugin-state"
 import type { PluginContext } from "../types"
 
 import {
@@ -13,16 +14,18 @@ import {
   createInteractiveBashSessionHook,
   createRalphLoopHook,
   createEditErrorRecoveryHook,
+  createJsonErrorRecoveryHook,
   createDelegateTaskRetryHook,
   createTaskResumeInfoHook,
   createStartWorkHook,
   createPrometheusMdOnlyHook,
   createSisyphusJuniorNotepadHook,
+  createNoSisyphusGptHook,
   createQuestionLabelTruncatorHook,
-  createSubagentQuestionBlockerHook,
   createPreemptiveCompactionHook,
 } from "../../hooks"
 import { createAnthropicEffortHook } from "../../hooks/anthropic-effort"
+import { createUltraworkModelOverrideHook } from "../../hooks/ultrawork-model-override"
 import {
   detectExternalNotificationPlugin,
   getNotificationConflictWarning,
@@ -44,34 +47,39 @@ export type SessionHooks = {
   interactiveBashSession: ReturnType<typeof createInteractiveBashSessionHook> | null
   ralphLoop: ReturnType<typeof createRalphLoopHook> | null
   editErrorRecovery: ReturnType<typeof createEditErrorRecoveryHook> | null
+  jsonErrorRecovery: ReturnType<typeof createJsonErrorRecoveryHook> | null
   delegateTaskRetry: ReturnType<typeof createDelegateTaskRetryHook> | null
   startWork: ReturnType<typeof createStartWorkHook> | null
   prometheusMdOnly: ReturnType<typeof createPrometheusMdOnlyHook> | null
   sisyphusJuniorNotepad: ReturnType<typeof createSisyphusJuniorNotepadHook> | null
+  noSisyphusGpt: ReturnType<typeof createNoSisyphusGptHook> | null
   questionLabelTruncator: ReturnType<typeof createQuestionLabelTruncatorHook>
-  subagentQuestionBlocker: ReturnType<typeof createSubagentQuestionBlockerHook>
   taskResumeInfo: ReturnType<typeof createTaskResumeInfoHook>
   anthropicEffort: ReturnType<typeof createAnthropicEffortHook> | null
+  ultraworkModelOverride: ReturnType<typeof createUltraworkModelOverrideHook> | null
 }
 
 export function createSessionHooks(args: {
   ctx: PluginContext
   pluginConfig: OhMyOpenCodeConfig
+  modelCacheState: ModelCacheState
   isHookEnabled: (hookName: HookName) => boolean
   safeHookEnabled: boolean
 }): SessionHooks {
-  const { ctx, pluginConfig, isHookEnabled, safeHookEnabled } = args
+  const { ctx, pluginConfig, modelCacheState, isHookEnabled, safeHookEnabled } = args
   const safeHook = <T>(hookName: HookName, factory: () => T): T | null =>
     safeCreateHook(hookName, factory, { enabled: safeHookEnabled })
 
   const contextWindowMonitor = isHookEnabled("context-window-monitor")
-    ? safeHook("context-window-monitor", () => createContextWindowMonitorHook(ctx))
+    ? safeHook("context-window-monitor", () =>
+        createContextWindowMonitorHook(ctx, modelCacheState))
     : null
 
   const preemptiveCompaction =
     isHookEnabled("preemptive-compaction") &&
     pluginConfig.experimental?.preemptive_compaction
-      ? safeHook("preemptive-compaction", () => createPreemptiveCompactionHook(ctx))
+      ? safeHook("preemptive-compaction", () =>
+          createPreemptiveCompactionHook(ctx, modelCacheState))
       : null
 
   const sessionRecovery = isHookEnabled("session-recovery")
@@ -124,12 +132,16 @@ export function createSessionHooks(args: {
     ? safeHook("ralph-loop", () =>
         createRalphLoopHook(ctx, {
           config: pluginConfig.ralph_loop,
-          checkSessionExists: async (sessionId) => sessionExists(sessionId),
+          checkSessionExists: async (sessionId) => await sessionExists(sessionId),
         }))
     : null
 
   const editErrorRecovery = isHookEnabled("edit-error-recovery")
     ? safeHook("edit-error-recovery", () => createEditErrorRecoveryHook(ctx))
+    : null
+
+  const jsonErrorRecovery = isHookEnabled("json-error-recovery")
+    ? safeHook("json-error-recovery", () => createJsonErrorRecoveryHook(ctx))
     : null
 
   const delegateTaskRetry = isHookEnabled("delegate-task-retry")
@@ -148,12 +160,19 @@ export function createSessionHooks(args: {
     ? safeHook("sisyphus-junior-notepad", () => createSisyphusJuniorNotepadHook(ctx))
     : null
 
+  const noSisyphusGpt = isHookEnabled("no-sisyphus-gpt")
+    ? safeHook("no-sisyphus-gpt", () => createNoSisyphusGptHook(ctx))
+    : null
+
   const questionLabelTruncator = createQuestionLabelTruncatorHook()
-  const subagentQuestionBlocker = createSubagentQuestionBlockerHook()
   const taskResumeInfo = createTaskResumeInfoHook()
 
   const anthropicEffort = isHookEnabled("anthropic-effort")
     ? safeHook("anthropic-effort", () => createAnthropicEffortHook())
+    : null
+
+  const ultraworkModelOverride = isHookEnabled("ultrawork-model-override")
+    ? safeHook("ultrawork-model-override", () => createUltraworkModelOverrideHook({ agents: pluginConfig.agents }))
     : null
 
   return {
@@ -169,13 +188,15 @@ export function createSessionHooks(args: {
     interactiveBashSession,
     ralphLoop,
     editErrorRecovery,
+    jsonErrorRecovery,
     delegateTaskRetry,
     startWork,
     prometheusMdOnly,
     sisyphusJuniorNotepad,
+    noSisyphusGpt,
     questionLabelTruncator,
-    subagentQuestionBlocker,
     taskResumeInfo,
     anthropicEffort,
+    ultraworkModelOverride,
   }
 }

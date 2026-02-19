@@ -13,6 +13,7 @@ import { backgroundTaskManager, cancelTasks } from '@/main/services/tools/backgr
 import { toolExecutionService } from '@/main/services/tools/tool-execution.service'
 import { getAgentPromptByCode } from '@/main/services/delegate/agents'
 import { resolveScopedRuntimeToolNames } from '@/main/services/delegate/tool-allowlist'
+import { llmRetryNotifier } from '@/main/services/llm/retry-notifier'
 import { EVENT_CHANNELS } from '@/shared/ipc-channels'
 import { PRIMARY_AGENTS, CATEGORY_AGENTS } from '@/shared/agent-definitions'
 import { BoulderStateService } from '@/main/services/boulder-state.service'
@@ -65,13 +66,49 @@ function extractRouteOutput(result: RouteResult): string {
       return '工作流执行完成：当前计划没有未完成任务。'
     }
     const taskSummary = result.tasks
-      .map(task => `- ${task.description}${task.assignedAgent ? `（执行: ${task.assignedAgent}）` : ''}`)
+      .map(task => {
+        const execution = result.executions.get(task.id)
+        const assignment = task.assignedAgent
+          ? `执行: ${task.assignedAgent}`
+          : task.assignedCategory
+            ? `类别: ${task.assignedCategory}`
+            : ''
+        const model = execution?.model ? `模型: ${execution.model}` : ''
+        const details = [assignment, model].filter(Boolean).join('，')
+        return `- ${task.description}${details ? `（${details}）` : ''}`
+      })
       .join('\n')
     const outputs = Array.from(result.results.entries())
-      .map(([taskId, output]) => `### ${taskId}\n${output}`)
+      .map(([taskId, output]) => {
+        const execution = result.executions.get(taskId)
+        const heading = execution?.model
+          ? `### ${taskId} (${execution.model})`
+          : `### ${taskId}`
+        return `${heading}\n${output}`
+      })
       .join('\n\n---\n\n')
 
-    return `工作流执行完成。\n\n任务分解与分配:\n${taskSummary}\n\n执行结果:\n\n${outputs}`
+    const checkpoints = Array.isArray(result.orchestratorCheckpoints)
+      ? result.orchestratorCheckpoints
+      : []
+    const checkpointSummary =
+      checkpoints.length > 0
+        ? (() => {
+            const fallbackCount = checkpoints.filter(item => item.status === 'fallback').length
+            const haltCount = checkpoints.filter(item => item.status === 'halt').length
+            const last = checkpoints[checkpoints.length - 1]
+            return [
+              'Orchestrator Checkpoints:',
+              `- 参与状态: ${result.orchestratorParticipation ? '已参与' : '未参与'}`,
+              `- 总次数: ${checkpoints.length}`,
+              `- 最后检查点: ${last.phase} / ${last.status}`,
+              `- fallback次数: ${fallbackCount}`,
+              `- halt次数: ${haltCount}`
+            ].join('\n')
+          })()
+        : 'Orchestrator Checkpoints:\n- 参与状态: 未记录检查点'
+
+    return `工作流执行完成。\n\n任务分解与分配:\n${taskSummary}\n\n${checkpointSummary}\n\n执行结果:\n\n${outputs}`
   }
   return ''
 }
@@ -151,6 +188,24 @@ export async function handleMessageSend(
   const streamAbortController = new AbortController()
   let streamDoneSent = false
   let streamWasAborted = false
+  let lastRetryNoticeAt = 0
+  const unsubscribeRetryNotice = llmRetryNotifier.subscribe(notification => {
+    if (notification.sessionId !== input.sessionId) return
+    if (streamAbortController.signal.aborted) return
+
+    const now = Date.now()
+    if (now - lastRetryNoticeAt < 1000) return
+    lastRetryNoticeAt = now
+
+    event.sender.send(EVENT_CHANNELS.MESSAGE_STREAM_ERROR, {
+      sessionId: input.sessionId,
+      message: `api请求失败，正在尝试重连（第${notification.attempt}次，约${Math.max(
+        1,
+        Math.ceil(notification.delayMs / 1000)
+      )}秒后）`,
+      code: 'API_RETRYING'
+    })
+  })
 
   // Ensure only one active stream per session.
   const previousController = activeStreamControllers.get(input.sessionId)
@@ -248,6 +303,7 @@ export async function handleMessageSend(
         resolvedModelId,
         provider: resolvedModel.provider,
         modelName: resolvedModel.modelName,
+        baseURL: resolvedBaseURL,
         temperature: llmConfig.temperature,
         hasAgentSystemPrompt: Boolean(agentSystemPrompt),
         agentToolCount: agentToolNames.length
@@ -367,6 +423,8 @@ export async function handleMessageSend(
       throw error
     }
   } finally {
+    unsubscribeRetryNotice()
+
     if (streamAbortController.signal.aborted) {
       streamWasAborted = true
     }
@@ -517,7 +575,9 @@ export async function handleMessageList(
   _event: IpcMainInvokeEvent,
   sessionId: string
 ): Promise<PrismaMessage[]> {
-  const prisma = DatabaseService.getInstance().getClient()
+  const db = DatabaseService.getInstance()
+  await db.init()
+  const prisma = db.getClient()
   return prisma.message.findMany({
     where: { sessionId },
     orderBy: { createdAt: 'asc' }

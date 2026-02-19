@@ -18,7 +18,8 @@ const mocks = vi.hoisted(() => {
     },
     session: {
       create: vi.fn(),
-      findFirst: vi.fn()
+      findFirst: vi.fn(),
+      findUnique: vi.fn()
     },
     space: {
       create: vi.fn(),
@@ -94,8 +95,25 @@ describe('Workforce Engine Integration', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.llmAdapter.sendMessage.mockReset()
+    mocks.llmAdapter.streamMessage.mockReset()
+    mocks.prisma.task.create.mockReset()
+    mocks.prisma.task.update.mockReset()
+    mocks.prisma.model.findMany.mockReset()
+    mocks.prisma.model.findFirst.mockReset()
+    mocks.prisma.session.findFirst.mockReset()
+    mocks.prisma.session.findUnique.mockReset()
+    mocks.prisma.space.findFirst.mockReset()
+    mocks.bindingService.getCategoryModelConfig.mockReset()
+    mocks.bindingService.getAgentModelConfig.mockReset()
+    mocks.bindingService.getCategoryBinding.mockReset()
+    mocks.bindingService.getAgentBinding.mockReset()
 
     mocks.prisma.session.findFirst.mockResolvedValue({ id: 'sess_123' })
+    mocks.prisma.session.findUnique.mockResolvedValue({
+      id: 'test-session-123',
+      space: { id: 'space_123', workDir: '/tmp/workspace-a' }
+    })
     mocks.prisma.space.findFirst.mockResolvedValue({ id: 'space_123' })
     mocks.prisma.model.findFirst.mockResolvedValue({
       id: 'model_123',

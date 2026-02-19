@@ -22,6 +22,7 @@ export function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
+  const [retryNotice, setRetryNotice] = useState<string | null>(null)
   const streamingContentRef = useRef('')
   const [streamingContent, setStreamingContent] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
@@ -112,6 +113,7 @@ export function ChatPage() {
     setStreamingContent('')
     setIsLoading(false)
     setSendError(null)
+    setRetryNotice(null)
 
     if (!currentSessionId) {
       setMessages([])
@@ -173,10 +175,37 @@ export function ChatPage() {
         streamingContentRef.current = ''
         setStreamingContent('')
         setIsLoading(false)
+        setRetryNotice(null)
       } else {
         streamingContentRef.current += content
         setStreamingContent(streamingContentRef.current)
       }
+    })
+
+    return () => {
+      removeListener()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!window.codeall) return
+
+    const removeListener = window.codeall.on('message:stream-error', payload => {
+      const { sessionId, message, code } = payload as {
+        sessionId?: string
+        message: string
+        code?: string
+      }
+      if (sessionId && sessionId !== activeSessionIdRef.current) return
+
+      if (code === 'API_RETRYING') {
+        setRetryNotice(message)
+        return
+      }
+
+      setRetryNotice(null)
+      setSendError(message)
+      setIsLoading(false)
     })
 
     return () => {
@@ -196,6 +225,7 @@ export function ChatPage() {
     setMessages(prev => [...prev, userMessage])
     setIsLoading(true)
     setSendError(null)
+    setRetryNotice(null)
     bumpSessionActivity(currentSpaceId, currentSessionId)
 
     streamingContentRef.current = ''
@@ -217,6 +247,7 @@ export function ChatPage() {
     } catch (error) {
       console.error('Failed to send message:', error)
       setIsLoading(false)
+      setRetryNotice(null)
       setSendError(error instanceof Error ? error.message : String(error))
 
       // Reconcile with DB state: message:send may have already persisted the user message
@@ -366,6 +397,12 @@ export function ChatPage() {
               </div>
             )}
 
+            {retryNotice && (
+              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                {retryNotice}
+              </div>
+            )}
+
             {isLoading && (
               <div className="flex justify-center">
                 <TypingIndicator />
@@ -435,6 +472,11 @@ export function ChatPage() {
 
         {viewMode === 'workflow' && (
           <div className="flex-1 overflow-hidden relative">
+            {retryNotice && (
+              <div className="absolute top-2 right-3 z-20 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200 backdrop-blur">
+                {retryNotice}
+              </div>
+            )}
             {isLoading && (
               <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10">
                 <div className="px-3 py-1.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-sky-500 text-xs font-medium flex items-center gap-2 backdrop-blur-sm animate-in fade-in slide-in-from-top-2">

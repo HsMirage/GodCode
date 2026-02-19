@@ -56,12 +56,16 @@ export class SecureStorageService {
       return ciphertext
     }
 
+    const looksEncryptedBase64 = /^[A-Za-z0-9+/=]+$/.test(ciphertext) && ciphertext.length % 4 === 0
+
     try {
       const buffer = Buffer.from(ciphertext, 'base64')
       return safeStorage.decryptString(buffer)
     } catch (error) {
       // If decryption fails, it might be plaintext (legacy data or dev mode fallback)
-      console.warn('[SecureStorage] Decryption failed, returning original text:', error)
+      if (looksEncryptedBase64) {
+        console.warn('[SecureStorage] Decryption failed, returning original text:', error)
+      }
       return ciphertext
     }
   }
