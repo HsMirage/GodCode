@@ -6,13 +6,15 @@
 - 生命周期边类型统一使用：define / compose / inject / route / dispatch / consume。
 
 ## 模板分类统计
+> 统计口径：`数量` 表示“来源路径清单”中的证据锚点数量（按 `file:line` 计数），不等于独立文件数或函数数。
+
 | 分类 | 数量 | 代表样例 | 说明 |
 |---|---:|---|---|
-| agent | 5 | `src/agents/dynamic-agent-prompt-builder.ts:175` | Agent 级提示段定义与拼装 |
-| system | 3 | `src/agents/prometheus/system-prompt.ts:12` | 系统提示拼接与权限策略 |
+| agent | 7 | `src/agents/dynamic-agent-prompt-builder.ts:175` | Agent 级提示段定义与拼装 |
+| system | 5 | `src/agents/prometheus/system-prompt.ts:12` | 系统提示拼接与权限策略 |
 | hook | 4 | `src/hooks/ralph-loop/continuation-prompt-injector.ts:14` | Hook 中的续跑/注入提示 |
-| skill | 4 | `src/features/opencode-skill-loader/index.ts:12` | 技能发现、合并、缓存、分发 |
-| category | 3 | `src/agents/atlas/prompt-section-builder.ts:35` | 按类别映射最佳提示与模型 |
+| skill | 6 | `src/features/opencode-skill-loader/index.ts:12` | 技能发现、合并、缓存、分发 |
+| category | 4 | `src/agents/atlas/prompt-section-builder.ts:35` | 按类别映射最佳提示与模型 |
 | tool | 4 | `src/tools/delegate-task/prompt-builder.ts:8` | 工具层拼接与发送 prompt |
 
 ## 来源路径清单
