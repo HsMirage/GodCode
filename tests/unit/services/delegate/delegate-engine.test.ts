@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => {
       update: vi.fn()
     },
     model: {
-      findFirst: vi.fn()
+      findFirst: vi.fn(),
+      findMany: vi.fn()
     },
     session: {
       findUnique: vi.fn(),
@@ -96,6 +97,7 @@ describe('DelegateEngine', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.mockAdapter.sendMessage.mockReset()
     delegateEngine = new DelegateEngine()
 
     // Default mocks setup
@@ -275,6 +277,31 @@ describe('DelegateEngine', () => {
 
       await expect(delegateEngine.delegateTask(input)).rejects.toThrow(
         'Must provide either category or subagent_type'
+      )
+    })
+
+    it('returns pending result when runInBackground is true', async () => {
+      const result = await delegateEngine.delegateTask({
+        description: 'Background task',
+        prompt: 'Run in background',
+        category: 'quick',
+        sessionId: 'test-session-123',
+        runInBackground: true
+      })
+
+      expect(result.success).toBe(true)
+      expect(result.output).toContain('Background task started:')
+      expect(createLLMAdapter).not.toHaveBeenCalled()
+      expect(mocks.mockPrisma.task.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'task-1' },
+          data: expect.objectContaining({
+            metadata: expect.objectContaining({
+              runInBackground: true,
+              backgroundPending: true
+            })
+          })
+        })
       )
     })
 

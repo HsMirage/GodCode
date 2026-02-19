@@ -161,6 +161,7 @@ export class DelegateEngine {
       parentTaskId,
       metadata,
       abortSignal,
+      runInBackground,
       model: overrideModel,
       baseURL: overrideBaseURL,
       apiKey: overrideApiKey
@@ -290,7 +291,7 @@ export class DelegateEngine {
         parentTaskId,
         type: 'subtask',
         input: description,
-        status: 'running',
+        status: runInBackground ? 'pending' : 'running',
         assignedModel: modelConfig.model,
         assignedAgent: subagent_type || category,
         metadata: {
@@ -299,6 +300,7 @@ export class DelegateEngine {
           parentTaskId,
           model: modelConfig.model,
           modelSource,
+          runInBackground: Boolean(runInBackground),
           ...(metadata || {})
         }
       }
@@ -314,6 +316,29 @@ export class DelegateEngine {
 
     this.ensureToolExecutionRunLogging()
 
+    if (runInBackground) {
+      await this.prisma.task.update({
+        where: { id: task.id },
+        data: {
+          metadata: {
+            ...(task.metadata as Record<string, unknown> | undefined),
+            runInBackground: true,
+            backgroundPending: true
+          }
+        }
+      })
+
+      return {
+        taskId: task.id,
+        output: `Background task started: ${task.id}`,
+        success: true,
+        agentType: subagent_type || category,
+        model: modelConfig.model,
+        modelSource,
+        systemPromptTokens: 0
+      }
+    }
+
     const runId = await this.safeCreateRun(task.id, subagent_type || category)
     await this.safeAddRunLog(runId, {
       timestamp: new Date().toISOString(),
@@ -323,7 +348,8 @@ export class DelegateEngine {
         taskId: task.id,
         category,
         subagent_type,
-        model: modelConfig.model
+        model: modelConfig.model,
+        runInBackground: false
       }
     })
 
@@ -507,19 +533,56 @@ export class DelegateEngine {
         tools: scopedToolDefinitions,
         abortSignal
       }
-      const invokeModel = async () =>
-        await toolExecutionService.withAllowedTools(effectiveScopedToolNames, async () =>
-          adapter.sendMessage(messages, llmConfig)
-        )
+      const invokeModel = async (inputMessages: Message[]) => {
+        const invoke = async () =>
+          await toolExecutionService.withAllowedTools(effectiveScopedToolNames, async () =>
+            adapter.sendMessage(inputMessages, llmConfig)
+          )
 
-      const response = runId
-        ? await DelegateEngine.runLogContext.run({ runId }, async () =>
-          invokeModel()
-        )
-        : await invokeModel()
-      const normalizedUsage = this.normalizeUsage((response as { usage?: unknown }).usage)
+        return runId
+          ? await DelegateEngine.runLogContext.run({ runId }, async () =>
+            invoke()
+          )
+          : await invoke()
+      }
 
-      const truncatedOutput = truncateToTokenLimit(response.content, 50000).result
+      let response = await invokeModel(messages)
+      let normalizedUsage = this.normalizeUsage((response as { usage?: unknown }).usage)
+      let truncatedOutput = truncateToTokenLimit(response.content, 50000).result
+
+      if (!truncatedOutput.trim()) {
+        await this.safeAddRunLog(runId, {
+          timestamp: new Date().toISOString(),
+          level: 'warn',
+          message: 'Delegate task produced empty output; issuing recovery prompt',
+          data: { taskId: task.id }
+        })
+
+        const recoveryMessages: Message[] = [
+          ...messages,
+          {
+            id: 'user-empty-output-recovery',
+            sessionId: resolvedSessionId,
+            role: 'user',
+            content:
+              '你的上一条回复为空。请基于同一任务直接给出最终结果，必须包含可执行的具体内容，禁止空输出。',
+            createdAt: new Date(),
+            metadata: {}
+          }
+        ]
+
+        response = await invokeModel(recoveryMessages)
+        normalizedUsage = this.normalizeUsage((response as { usage?: unknown }).usage)
+        truncatedOutput = truncateToTokenLimit(response.content, 50000).result
+
+        if (!truncatedOutput.trim()) {
+          truncatedOutput = [
+            '模型返回了空文本输出。',
+            `任务描述：${description}`,
+            '请重试该任务并返回可执行结果。'
+          ].join('\n')
+        }
+      }
 
       if (abortSignal?.aborted) {
         await this.prisma.task.update({
@@ -822,16 +885,6 @@ export class DelegateEngine {
       candidates.push(providerLatest)
     }
 
-    const globalLatest = await this.prisma.model.findFirst({
-      where: {
-        OR: [{ apiKeyId: { not: null } }, { apiKey: { not: null } }]
-      },
-      include: { apiKeyRef: true },
-      orderBy: { createdAt: 'desc' }
-    })
-    if (globalLatest) {
-      candidates.push(globalLatest)
-    }
 
     for (const candidate of candidates) {
       const apiKey = this.extractDecryptedApiKeyFromModel(candidate)
