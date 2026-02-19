@@ -40,7 +40,7 @@
 
 ### skill
 - `src/features/opencode-skill-loader/index.ts:12`
-- `src/features/opencode-skill-loader/index.ts:22`
+- `src/features/opencode-skill-loader/index.ts:13`
 - `src/features/opencode-skill-loader/loader.ts:39`
 - `src/features/opencode-skill-loader/skill-discovery.ts:39`
 - `src/features/opencode-skill-loader/merger.ts:14`

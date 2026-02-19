@@ -11,7 +11,7 @@
 - merge 主逻辑先载入 builtin，再应用 config，再覆盖文件系统 skill：`src/features/opencode-skill-loader/merger.ts:25`、`src/features/opencode-skill-loader/merger.ts:32`、`src/features/opencode-skill-loader/merger.ts:49`。
 - 同名冲突按 SCOPE_PRIORITY 覆盖：`src/features/opencode-skill-loader/merger.ts:58`。
 - 最后执行 enable/disable 过滤：`src/features/opencode-skill-loader/merger.ts:80`、`src/features/opencode-skill-loader/merger.ts:84`。
-- 运行态缓存按 browserProvider 分桶：`src/features/opencode-skill-loader/skill-content.ts:6`、`src/features/opencode-skill-loader/skill-content.ts:13`、`src/features/opencode-skill-loader/skill-content.ts:72`。
+- 运行态缓存按 browserProvider 分桶：`src/features/opencode-skill-loader/skill-discovery.ts:6`、`src/features/opencode-skill-loader/skill-discovery.ts:13`、`src/features/opencode-skill-loader/skill-discovery.ts:72`。
 
 ## 执行流程
 - skill 工具执行器负责从缓存/发现结果定位 skill：`src/tools/skill/tools.ts:129`、`src/tools/skill/tools.ts:167`。
