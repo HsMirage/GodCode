@@ -1,2 +1,9 @@
 flowchart TD
-  A[placeholder]
+  A[discoverSkills / getAllSkills] --> B[mergeSkills by scope priority]
+  B --> C[cache by browserProvider]
+  C --> D[skill tool lookup by name]
+  D --> E[extractSkillBody / lazyContent]
+  E --> F[optional MCP capability introspection]
+  F --> G[inject into delegate system content]
+  G --> H[sync-prompt-sender dispatch]
+  H --> I[result consume / error formatting]
