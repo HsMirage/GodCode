@@ -167,6 +167,294 @@
   - 协同标签：transport
 
 ### src/tools
+- 路径：`src/tools/delegate-task/index.ts`
+  - 职责：delegate-task 入口装配与导出。
+  - 关键导出：`delegateTaskTools`
+  - 公共变量/状态：Tool registry bindings
+  - Prompt 触点：route/dispatch
+  - 上下游：上游 `src/tools/index.ts`；下游 `src/tools/delegate-task/tools.ts`
+  - 协同标签：orchestrator
+- 路径：`src/tools/delegate-task/prompt-builder.ts`
+  - 职责：组装委派子任务 prompt。
+  - 关键导出：`buildDelegatePrompt`
+  - 公共变量/状态：Prompt fragments
+  - Prompt 触点：compose/inject
+  - 上下游：上游 `src/tools/delegate-task/executor.ts`；下游 `src/tools/delegate-task/skill-content-resolver.ts`
+  - 协同标签：planner
+- 路径：`src/tools/delegate-task/executor.ts`
+  - 职责：执行委派任务并处理响应。
+  - 关键导出：`executeDelegateTask`
+  - 公共变量/状态：Execution context
+  - Prompt 触点：dispatch/consume
+  - 上下游：上游 `src/tools/delegate-task/tools.ts`；下游 `src/tools/delegate-task/subagent-resolver.ts`
+  - 协同标签：worker
+- 路径：`src/tools/delegate-task/subagent-resolver.ts`
+  - 职责：解析 subagent 类型与运行参数。
+  - 关键导出：`resolveSubagent`
+  - 公共变量/状态：Subagent mapping
+  - Prompt 触点：route
+  - 上下游：上游 `src/tools/delegate-task/executor.ts`；下游 `src/agents/builtin-agents.ts`
+  - 协同标签：orchestrator
+- 路径：`src/tools/delegate-task/category-resolver.ts`
+  - 职责：根据 category 选择 agent 与模型。
+  - 关键导出：`resolveCategory`
+  - 公共变量/状态：Category-route map
+  - Prompt 触点：route
+  - 上下游：上游 `src/tools/delegate-task/categories.ts`；下游 `src/tools/delegate-task/model-selection.ts`
+  - 协同标签：planner
+- 路径：`src/tools/delegate-task/skill-resolver.ts`
+  - 职责：将任务关联到可用 skills。
+  - 关键导出：`resolveDelegateSkills`
+  - 公共变量/状态：Skill resolution options
+  - Prompt 触点：inject
+  - 上下游：上游 `src/tools/delegate-task/prompt-builder.ts`；下游 `src/features/opencode-skill-loader/loader.ts`
+  - 协同标签：skill
+- 路径：`src/tools/delegate-task/skill-content-resolver.ts`
+  - 职责：提取 skill 内容注入委派 prompt。
+  - 关键导出：`resolveSkillContent`
+  - 公共变量/状态：Skill content cache
+  - Prompt 触点：inject/compose
+  - 上下游：上游 `src/tools/delegate-task/prompt-builder.ts`；下游 `src/features/opencode-skill-loader/merger.ts`
+  - 协同标签：skill
+- 路径：`src/tools/delegate-task/background-task.ts`
+  - 职责：提供异步委派入口。
+  - 关键导出：`runDelegateTaskInBackground`
+  - 公共变量/状态：Background task options
+  - Prompt 触点：dispatch/consume
+  - 上下游：上游 `src/tools/delegate-task/tools.ts`；下游 `src/tools/background-task/create-background-task.ts`
+  - 协同标签：worker
+- 路径：`src/tools/delegate-task/sync-task.ts`
+  - 职责：执行同步委派任务流程。
+  - 关键导出：`runSyncDelegateTask`
+  - 公共变量/状态：Sync continuation deps
+  - Prompt 触点：dispatch/consume
+  - 上下游：上游 `src/tools/delegate-task/tools.ts`；下游 `src/tools/delegate-task/sync-result-fetcher.ts`
+  - 协同标签：worker
+- 路径：`src/tools/delegate-task/tools.ts`
+  - 职责：注册 delegate-task 工具定义。
+  - 关键导出：`createDelegateTaskTool`
+  - 公共变量/状态：Tool metadata
+  - Prompt 触点：route/dispatch
+  - 上下游：上游 `src/tools/delegate-task/index.ts`；下游 `src/tools/delegate-task/executor.ts`
+  - 协同标签：transport
+- 路径：`src/tools/delegate-task/model-selection.ts`
+  - 职责：解析并选择模型。
+  - 关键导出：`selectDelegateModel`
+  - 公共变量/状态：Model fallback settings
+  - Prompt 触点：route
+  - 上下游：上游 `src/tools/delegate-task/category-resolver.ts`；下游 `src/cli/model-fallback.ts`
+  - 协同标签：orchestrator
+- 路径：`src/tools/delegate-task/model-string-parser.ts`
+  - 职责：解析模型字符串语法。
+  - 关键导出：`parseModelString`
+  - 公共变量/状态：Parsed model tuple
+  - Prompt 触点：route
+  - 上下游：上游 `src/tools/delegate-task/model-selection.ts`；下游 `src/shared/model-id.ts`
+  - 协同标签：support
+- 路径：`src/tools/delegate-task/parent-context-resolver.ts`
+  - 职责：提取父会话上下文并注入。
+  - 关键导出：`resolveParentContext`
+  - 公共变量/状态：Context excerpts
+  - Prompt 触点：inject
+  - 上下游：上游 `src/tools/delegate-task/prompt-builder.ts`；下游 `src/hooks/compaction-context-injector/hook.ts`
+  - 协同标签：hook
+- 路径：`src/tools/delegate-task/background-continuation.ts`
+  - 职责：后台任务续跑与补发。
+  - 关键导出：`continueBackgroundDelegateTask`
+  - 公共变量/状态：Continuation checkpoint
+  - Prompt 触点：dispatch/consume
+  - 上下游：上游 `src/tools/delegate-task/background-task.ts`；下游 `src/features/background-agent/task-poller.ts`
+  - 协同标签：orchestrator
+- 路径：`src/tools/delegate-task/sync-continuation.ts`
+  - 职责：同步任务续跑流程。
+  - 关键导出：`runSyncContinuation`
+  - 公共变量/状态：Continuation deps
+  - Prompt 触点：dispatch/consume
+  - 上下游：上游 `src/tools/delegate-task/sync-task.ts`；下游 `src/tools/delegate-task/sync-session-poller.ts`
+  - 协同标签：worker
+- 路径：`src/tools/delegate-task/sync-result-fetcher.ts`
+  - 职责：抓取同步任务结果文本。
+  - 关键导出：`fetchSyncTaskResult`
+  - 公共变量/状态：Message dir pointer
+  - Prompt 触点：consume
+  - 上下游：上游 `src/tools/delegate-task/sync-task.ts`；下游 `src/tools/delegate-task/sync-session-poller.ts`
+  - 协同标签：transport
+- 路径：`src/tools/delegate-task/sync-session-creator.ts`
+  - 职责：创建同步任务会话。
+  - 关键导出：`createSyncSession`
+  - 公共变量/状态：Session creation args
+  - Prompt 触点：dispatch
+  - 上下游：上游 `src/tools/delegate-task/sync-task.ts`；下游 `src/tools/call-omo-agent/session-creator.ts`
+  - 协同标签：transport
+- 路径：`src/tools/delegate-task/sync-session-poller.ts`
+  - 职责：轮询同步会话完成状态。
+  - 关键导出：`pollSyncSession`
+  - 公共变量/状态：Polling interval
+  - Prompt 触点：consume
+  - 上下游：上游 `src/tools/delegate-task/sync-task.ts`；下游 `src/tools/background-task/task-status-format.ts`
+  - 协同标签：worker
+- 路径：`src/tools/delegate-task/categories.ts`
+  - 职责：维护 delegate-task 可选分类。
+  - 关键导出：`DELEGATE_TASK_CATEGORIES`
+  - 公共变量/状态：Category constants
+  - Prompt 触点：define/route
+  - 上下游：上游 `src/tools/delegate-task/category-resolver.ts`；下游 `src/config/schema/categories.ts`
+  - 协同标签：planner
+- 路径：`src/tools/delegate-task/constants.ts`
+  - 职责：定义委派任务常量。
+  - 关键导出：`DELEGATE_TASK_DEFAULTS`
+  - 公共变量/状态：Retry/timeout defaults
+  - Prompt 触点：define
+  - 上下游：上游 `src/tools/delegate-task/executor.ts`；下游 `src/tools/delegate-task/timing.ts`
+  - 协同标签：support
+- 路径：`src/tools/delegate-task/error-formatting.ts`
+  - 职责：格式化委派任务错误输出。
+  - 关键导出：`formatDelegateTaskError`
+  - 公共变量/状态：Error classification rules
+  - Prompt 触点：consume
+  - 上下游：上游 `src/tools/delegate-task/executor.ts`；下游 `src/tools/background-task/task-result-format.ts`
+  - 协同标签：support
+- 路径：`src/tools/delegate-task/available-models.ts`
+  - 职责：查询可用模型供委派选择。
+  - 关键导出：`getAvailableDelegateModels`
+  - 公共变量/状态：Provider model list
+  - Prompt 触点：route
+  - 上下游：上游 `src/tools/delegate-task/model-selection.ts`；下游 `src/shared/model-availability.ts`
+  - 协同标签：support
+- 路径：`src/tools/delegate-task/sisyphus-junior-agent.ts`
+  - 职责：适配 sisyphus-junior 委派代理。
+  - 关键导出：`resolveSisyphusJuniorAgent`
+  - 公共变量/状态：Agent override defaults
+  - Prompt 触点：route/dispatch
+  - 上下游：上游 `src/tools/delegate-task/subagent-resolver.ts`；下游 `src/agents/sisyphus-junior/agent.ts`
+  - 协同标签：worker
+- 路径：`src/tools/delegate-task/time-formatter.ts`
+  - 职责：格式化委派耗时信息。
+  - 关键导出：`formatDelegateTaskTime`
+  - 公共变量/状态：Time unit settings
+  - Prompt 触点：consume
+  - 上下游：上游 `src/tools/delegate-task/timing.ts`；下游 `src/tools/background-task/time-format.ts`
+  - 协同标签：support
+- 路径：`src/tools/delegate-task/timing.ts`
+  - 职责：记录并计算执行时序。
+  - 关键导出：`measureDelegateTaskTiming`
+  - 公共变量/状态：Timing metrics
+  - Prompt 触点：consume
+  - 上下游：上游 `src/tools/delegate-task/executor.ts`；下游 `src/tools/delegate-task/time-formatter.ts`
+  - 协同标签：support
+- 路径：`src/tools/skill/index.ts`
+  - 职责：skill 工具模块入口。
+  - 关键导出：`skillTool`
+  - 公共变量/状态：Skill tool registration
+  - Prompt 触点：route/dispatch
+  - 上下游：上游 `src/tools/index.ts`；下游 `src/tools/skill/tools.ts`
+  - 协同标签：skill
+- 路径：`src/tools/skill/constants.ts`
+  - 职责：定义 skill 工具常量。
+  - 关键导出：`SKILL_TOOL_NAME`
+  - 公共变量/状态：Tool constants
+  - Prompt 触点：define
+  - 上下游：上游 `src/tools/skill/tools.ts`；下游 `src/features/builtin-skills/skills.ts`
+  - 协同标签：support
+- 路径：`src/tools/skill/types.ts`
+  - 职责：声明 skill 工具输入输出类型。
+  - 关键导出：`SkillToolInput`
+  - 公共变量/状态：Type declarations
+  - Prompt 触点：define
+  - 上下游：上游 `src/tools/skill/tools.ts`；下游 `src/features/opencode-skill-loader/loader.ts`
+  - 协同标签：support
+- 路径：`src/tools/skill/tools.ts`
+  - 职责：实现 skill 工具调用流程。
+  - 关键导出：`createSkillTool`
+  - 公共变量/状态：Skill invocation context
+  - Prompt 触点：dispatch/consume
+  - 上下游：上游 `src/tools/skill/index.ts`；下游 `src/features/opencode-skill-loader/merger.ts`
+  - 协同标签：skill
+- 路径：`src/tools/slashcommand/index.ts`
+  - 职责：slashcommand 工具入口。
+  - 关键导出：`slashCommandTools`
+  - 公共变量/状态：Slash command registry
+  - Prompt 触点：route/dispatch
+  - 上下游：上游 `src/tools/index.ts`；下游 `src/tools/slashcommand/slashcommand-tool.ts`
+  - 协同标签：transport
+- 路径：`src/tools/slashcommand/skill-command-converter.ts`
+  - 职责：将 `/command` 转换为 skill 调用。
+  - 关键导出：`convertSlashCommandToSkill`
+  - 公共变量/状态：Command-to-skill map
+  - Prompt 触点：route/inject
+  - 上下游：上游 `src/tools/slashcommand/slashcommand-tool.ts`；下游 `src/tools/skill/tools.ts`
+  - 协同标签：skill
+- 路径：`src/tools/slashcommand/command-discovery.ts`
+  - 职责：发现可用 slash commands。
+  - 关键导出：`discoverCommands`
+  - 公共变量/状态：Command catalog
+  - Prompt 触点：define/route
+  - 上下游：上游 `src/tools/slashcommand/slashcommand-tool.ts`；下游 `src/features/claude-code-command-loader/loader.ts`
+  - 协同标签：orchestrator
+- 路径：`src/tools/slashcommand/slashcommand-tool.ts`
+  - 职责：执行 slashcommand 工具。
+  - 关键导出：`createSlashcommandTool`
+  - 公共变量/状态：Tool input parser
+  - Prompt 触点：dispatch/consume
+  - 上下游：上游 `src/tools/slashcommand/index.ts`；下游 `src/tools/slashcommand/command-output-formatter.ts`
+  - 协同标签：worker
+- 路径：`src/tools/slashcommand/command-output-formatter.ts`
+  - 职责：格式化 slashcommand 执行结果。
+  - 关键导出：`formatSlashcommandOutput`
+  - 公共变量/状态：Output style config
+  - Prompt 触点：consume
+  - 上下游：上游 `src/tools/slashcommand/slashcommand-tool.ts`；下游 `src/cli/run/event-formatting.ts`
+  - 协同标签：support
+- 路径：`src/tools/background-task/index.ts`
+  - 职责：background-task 工具入口。
+  - 关键导出：`backgroundTaskTools`
+  - 公共变量/状态：Background task registrations
+  - Prompt 触点：route/dispatch
+  - 上下游：上游 `src/tools/index.ts`；下游 `src/tools/background-task/tools.ts`
+  - 协同标签：orchestrator
+- 路径：`src/tools/background-task/create-background-task.ts`
+  - 职责：创建后台任务并返回 task_id。
+  - 关键导出：`createBackgroundTask`
+  - 公共变量/状态：Task queue metadata
+  - Prompt 触点：dispatch
+  - 上下游：上游 `src/tools/background-task/tools.ts`；下游 `src/features/background-agent/spawner.ts`
+  - 协同标签：worker
+- 路径：`src/tools/background-task/task-result-format.ts`
+  - 职责：格式化后台任务结果。
+  - 关键导出：`formatTaskResult`
+  - 公共变量/状态：Result truncation settings
+  - Prompt 触点：consume
+  - 上下游：上游 `src/tools/background-task/modules/background-output.ts`；下游 `src/tools/background-task/tools.ts`
+  - 协同标签：support
+- 路径：`src/tools/background-task/task-status-format.ts`
+  - 职责：格式化后台任务状态。
+  - 关键导出：`formatTaskStatus`
+  - 公共变量/状态：Status label mapping
+  - Prompt 触点：consume
+  - 上下游：上游 `src/tools/background-task/modules/background-task.ts`；下游 `src/cli/run/event-handlers.ts`
+  - 协同标签：support
+- 路径：`src/tools/background-task/modules/background-task.ts`
+  - 职责：处理后台任务启动流程。
+  - 关键导出：`runBackgroundTaskModule`
+  - 公共变量/状态：Background task module context
+  - Prompt 触点：dispatch/consume
+  - 上下游：上游 `src/tools/background-task/create-background-task.ts`；下游 `src/features/background-agent/manager.ts`
+  - 协同标签：worker
+- 路径：`src/tools/background-task/modules/background-output.ts`
+  - 职责：处理后台任务输出读取。
+  - 关键导出：`runBackgroundOutputModule`
+  - 公共变量/状态：Output reader config
+  - Prompt 触点：consume
+  - 上下游：上游 `src/tools/background-task/session-messages.ts`；下游 `src/tools/background-task/task-result-format.ts`
+  - 协同标签：transport
+- 路径：`src/tools/background-task/modules/background-cancel.ts`
+  - 职责：执行后台任务取消。
+  - 关键导出：`runBackgroundCancelModule`
+  - 公共变量/状态：Cancellation options
+  - Prompt 触点：dispatch/consume
+  - 上下游：上游 `src/tools/background-task/create-background-cancel.ts`；下游 `src/features/background-agent/manager.ts`
+  - 协同标签：worker
+
 ### src/hooks
 ### src/plugin*
 ### src/shared
