@@ -37,7 +37,15 @@ export function useCanvasLifecycle() {
   const switchTab = useCallback((tabId: string) => canvasLifecycle.switchTab(tabId), [])
 
   const setOpen = useCallback((open: boolean) => canvasLifecycle.setOpen(open), [])
-
+  const updateTabContent = useCallback(
+    (tabId: string, content: string) => canvasLifecycle.updateTabContent(tabId, content),
+    []
+  )
+  const markTabSaved = useCallback(
+    (tabId: string, content?: string, mtimeMs?: number) =>
+      canvasLifecycle.markTabSaved(tabId, content, mtimeMs),
+    []
+  )
   return {
     tabs,
     activeTabId,
@@ -46,7 +54,9 @@ export function useCanvasLifecycle() {
     openUrl,
     closeTab,
     switchTab,
-    setOpen
+    setOpen,
+    updateTabContent,
+    markTabSaved
   }
 }
 

@@ -13,7 +13,17 @@
 
 export { WorkforceEngine } from './workforce-engine'
 export { workflowEvents, WorkflowEventEmitter } from './events'
-export type { SubTask, WorkflowResult, WorkflowOptions } from './workforce-engine'
+export type {
+  SubTask,
+  WorkflowResult,
+  WorkflowOptions,
+  SharedContextEntry,
+  SharedContextQuery,
+  SharedContextStore,
+  WorkflowObservabilitySnapshot
+} from './workforce-engine'
+export { WorkforceWorkerDispatcher } from './worker-dispatcher'
+export type { WorkerDispatchInput } from './worker-dispatcher'
 export type { WorkflowEvent } from './events'
 
 // Retry mechanism exports

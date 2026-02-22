@@ -1,12 +1,29 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+export interface OperationLogAudit {
+  viewId?: string
+  opId?: string
+  errorCode?: string
+  durationMs?: number
+  toolName?: string
+  toolArgs?: Record<string, unknown>
+  outcome?: 'running' | 'completed' | 'error'
+}
+
+export interface BrowserHandoffState {
+  isManualControl: boolean
+  viewId: string | null
+  lastHandoffAt: number | null
+}
+
 export interface OperationLogEntry {
   id: string
   timestamp: number
   action: string
   target?: string
   status: 'running' | 'completed' | 'failed'
+  audit?: OperationLogAudit
 }
 
 interface UIState {
@@ -43,6 +60,11 @@ interface UIState {
   // Operation History
   browserOperationHistory: OperationLogEntry[]
   upsertBrowserOperation: (entry: OperationLogEntry) => void
+
+  // Handoff State
+  browserHandoff: BrowserHandoffState
+  setBrowserManualControl: (manual: boolean, viewId?: string | null) => void
+  clearBrowserHandoff: () => void
 
   toggleSidebar: () => void
   toggleArtifactRail: () => void
@@ -110,6 +132,11 @@ export const useUIStore = create<UIState>()(
       browserTabs: [],
       activeBrowserTabId: null,
       browserOperationHistory: [],
+      browserHandoff: {
+        isManualControl: false,
+        viewId: null,
+        lastHandoffAt: null
+      },
 
       toggleSidebar: () => set(state => ({ showSidebar: !state.showSidebar })),
       toggleArtifactRail: () => set(state => ({ showArtifactRail: !state.showArtifactRail })),
@@ -187,6 +214,22 @@ export const useUIStore = create<UIState>()(
           const next = [...state.browserOperationHistory]
           next[idx] = { ...next[idx], ...entry }
           return { browserOperationHistory: next }
+        }),
+      setBrowserManualControl: (manual, viewId = null) =>
+        set(state => ({
+          browserHandoff: {
+            isManualControl: manual,
+            viewId: viewId ?? state.browserHandoff.viewId,
+            lastHandoffAt: Date.now()
+          }
+        })),
+      clearBrowserHandoff: () =>
+        set({
+          browserHandoff: {
+            isManualControl: false,
+            viewId: null,
+            lastHandoffAt: null
+          }
         }),
 
       // Theme Actions

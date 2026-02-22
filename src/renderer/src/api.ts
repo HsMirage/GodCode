@@ -40,6 +40,27 @@ export interface ApiResult<T = unknown> {
   error?: string
 }
 
+export interface FileReadResult extends ApiResult {
+  content?: string
+  mtimeMs?: number
+}
+
+export interface FileWriteInput {
+  filePath: string
+  sessionId: string
+  content: string
+  expectedMtimeMs?: number
+}
+
+export interface FileWriteResult extends ApiResult {
+  mtimeMs?: number
+  changeType?: 'created' | 'modified'
+  conflict?: {
+    currentContent: string
+    currentMtimeMs: number
+  }
+}
+
 export interface Artifact {
   id: string
   sessionId: string
@@ -128,7 +149,9 @@ export const api = {
   getArtifact: (artifactId: string) => invoke('artifact:get', artifactId) as Promise<Artifact>,
   openArtifact: (path: string) => invoke('shell:open-path', path) as Promise<ApiResult>,
   readArtifactContent: (path: string, sessionId: string) =>
-    invoke('file:read', path, sessionId) as Promise<ApiResult>,
+    invoke('file:read', path, sessionId) as Promise<FileReadResult>,
+  writeArtifactContent: (input: FileWriteInput) =>
+    invoke('file:write', input) as Promise<FileWriteResult>,
   onBrowserStateChange: (callback: (data: BrowserStateChange) => void) =>
     onEvent('browser:state-changed', callback as (...args: unknown[]) => void),
   onBrowserZoomChanged: (callback: (data: BrowserZoomChanged) => void) =>

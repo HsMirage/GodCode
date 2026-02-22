@@ -63,8 +63,15 @@ describe('SmartRouter', () => {
       expect(router.analyzeTask('实现完整的支付流程')).toBe('workforce')
     })
 
-    it('should route general tasks to delegate by default', () => {
-      // Default rule is `direct` (use user-configured model) for unmatched inputs.
+    it('should route explicit workforce requests to workforce', () => {
+      expect(router.analyzeTask('请使用workforce来编排这个任务')).toBe('workforce')
+    })
+
+    it('should route high complexity requests to workforce by score', () => {
+      expect(router.analyzeTask('请分步重构这个系统，涉及跨模块和多模型协同治理')).toBe('workforce')
+    })
+
+    it('should route general tasks to direct by default', () => {
       expect(router.analyzeTask('What is the weather?')).toBe('direct')
     })
   })
@@ -93,7 +100,14 @@ describe('SmartRouter', () => {
           description: input,
           prompt: context.prompt,
           category: 'visual-engineering',
-          parentTaskId: 'parent-1'
+          parentTaskId: 'parent-1',
+          metadata: expect.objectContaining({
+            routing: expect.objectContaining({
+              strategy: 'delegate',
+              complexityScore: expect.any(Number),
+              rationale: expect.any(Array)
+            })
+          })
         })
       )
     })
@@ -103,7 +117,17 @@ describe('SmartRouter', () => {
 
       await router.route(input)
 
-      expect(mockWorkforceEngine.executeWorkflow).toHaveBeenCalledWith(input, { category: 'unspecified-high' })
+      expect(mockWorkforceEngine.executeWorkflow).toHaveBeenCalledWith(
+        input,
+        expect.objectContaining({
+          category: 'unspecified-high',
+          routingContext: expect.objectContaining({
+            strategy: 'workforce',
+            complexityScore: expect.any(Number),
+            rationale: expect.any(Array)
+          })
+        })
+      )
     })
 
     it('should propagate abort signal to workforce strategy', async () => {
@@ -120,14 +144,11 @@ describe('SmartRouter', () => {
     })
 
     it('should execute direct strategy correctly', async () => {
-      // Create router with custom rule that forces direct strategy
-      const customRouter = new SmartRouter([{ pattern: /test/, strategy: 'direct' }])
-
-      const result = await customRouter.route('test input')
+      const result = await router.route('unmatched input')
 
       expect(result).toEqual({
         success: true,
-        output: 'test input',
+        output: 'unmatched input',
         strategy: 'direct'
       })
 
@@ -149,6 +170,22 @@ describe('SmartRouter', () => {
       const customRouter = new SmartRouter(customRules)
 
       expect(customRouter.analyzeTask('custom task')).toBe('workforce')
+    })
+
+    it('should force workforce when context requires it', async () => {
+      await router.route('any input', { forceWorkforce: true, sessionId: 'session-1' })
+
+      expect(mockWorkforceEngine.executeWorkflow).toHaveBeenCalledWith(
+        'any input',
+        'session-1',
+        expect.objectContaining({
+          category: 'unspecified-high',
+          routingContext: expect.objectContaining({
+            strategy: 'workforce',
+            complexityScore: 1
+          })
+        })
+      )
     })
   })
 })

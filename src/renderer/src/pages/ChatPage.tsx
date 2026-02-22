@@ -15,6 +15,7 @@ import { useUIStore } from '../store/ui.store'
 import { AGENT_DEFINITIONS, type AgentRoutingStrategy } from '@shared/agent-definitions'
 import { FileCode2, Globe, ListTodo } from 'lucide-react'
 import { useDataStore } from '../store/data.store'
+import { useTraceNavigationStore } from '../store/trace-navigation.store'
 
 type ViewMode = 'chat' | 'workflow' | 'agent'
 
@@ -27,7 +28,7 @@ export function ChatPage() {
   const [streamingContent, setStreamingContent] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
   const { isOpen: canvasIsOpen } = useCanvasLifecycle()
-  const { selectedAgentId, fetchAgents } = useAgentStore()
+  const { selectedAgentId, fetchAgents, selectAgent } = useAgentStore()
   const {
     isTaskPanelOpen,
     isBrowserPanelOpen,
@@ -41,6 +42,8 @@ export function ChatPage() {
   const messageScrollRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const [isNarrow, setIsNarrow] = useState(false)
+  const navigationTarget = useTraceNavigationStore(state => state.target)
+  const clearNavigate = useTraceNavigationStore(state => state.clearNavigate)
 
   // Helper to determine agent strategy
   const getAgentStrategy = (agentCode?: string): AgentRoutingStrategy | undefined => {
@@ -71,6 +74,31 @@ export function ChatPage() {
     if (viewMode !== 'agent') return
     void fetchAgents(currentSessionId)
   }, [viewMode, currentSessionId, fetchAgents])
+
+  useEffect(() => {
+    if (!navigationTarget) {
+      return
+    }
+
+    if (navigationTarget.preferredView === 'agent') {
+      setViewMode('agent')
+      if (navigationTarget.agentId) {
+        selectAgent(navigationTarget.agentId)
+      }
+      return
+    }
+
+    if (navigationTarget.preferredView === 'workflow') {
+      setViewMode('workflow')
+      return
+    }
+
+    const timer = setTimeout(() => {
+      clearNavigate()
+    }, 2400)
+
+    return () => clearTimeout(timer)
+  }, [navigationTarget, selectAgent, clearNavigate])
 
   // Ensure base data exists (spaces -> currentSpace).
   useEffect(() => {

@@ -1,12 +1,5 @@
 import { DelegateEngine, type DelegateTaskResult } from '../delegate'
 import { WorkforceEngine, type WorkflowResult } from '../workforce'
-import {
-  resolveModelWithFallback,
-  DEFAULT_FALLBACK_CHAINS,
-  type ModelResolutionResult,
-  type FallbackEntry
-} from '../llm/model-resolver'
-import { providerCacheService } from '../provider-cache.service'
 
 export interface RouteContext {
   sessionId?: string
@@ -14,6 +7,8 @@ export interface RouteContext {
   parentTaskId?: string
   /** Selected dialog agent code (e.g. "haotian") */
   agentCode?: string
+  /** Force workforce route from caller */
+  forceWorkforce?: boolean
   /** Abort signal propagated from current UI request */
   abortSignal?: AbortSignal
 }
@@ -24,46 +19,52 @@ export interface DirectRouteResult {
   strategy: 'direct'
 }
 
+export type RouteStrategy = 'delegate' | 'workforce' | 'direct'
 export type RouteResult = DelegateTaskResult | WorkflowResult | DirectRouteResult
 
 export interface RoutingRule {
   pattern: RegExp
-  strategy: 'delegate' | 'workforce' | 'direct'
+  strategy: RouteStrategy
   category?: string
   subagent?: string
-  model?: string
-  baseURL?: string
-  apiKey?: string
+}
+
+interface RouteDecision {
+  strategy: RouteStrategy
+  category?: string
+  subagent?: string
+  complexityScore: number
+  rationale: string[]
 }
 
 const DEFAULT_RULES: RoutingRule[] = [
   {
     pattern: /前端|UI|页面|组件/i,
     strategy: 'delegate',
-    category: 'visual-engineering',
-    model: 'gpt-4o'
+    category: 'visual-engineering'
   },
   {
     pattern: /后端|API|数据库/i,
-    strategy: 'delegate',
-    model: 'gpt-4o'
+    strategy: 'delegate'
   },
   {
     pattern: /架构|设计/i,
     strategy: 'delegate',
-    subagent: 'oracle',
-    model: 'claude-3-opus-20240229'
+    subagent: 'oracle'
   },
   {
     pattern: /创建|开发|实现/i,
     strategy: 'workforce'
-  },
-  {
-    // 默认使用 direct 策略，直接使用用户配置的模型
-    pattern: /.*/i,
-    strategy: 'direct'
   }
 ]
+
+const EXPLICIT_WORKFORCE_PATTERN = /(请使用?\s*workforce|走\s*workforce|多agent|多\s*agent|workflow|工作流|编排|orchestrate)/i
+const EXPLICIT_DELEGATE_PATTERN = /(请使用?\s*delegate|走\s*delegate|子代理|subagent|delegate)/i
+const COMPLEXITY_HINTS = [
+  /重构|架构|系统设计|端到端|e2e|复杂|全链路|并行|协同|调度|恢复|一致性|治理/i,
+  /分解|拆分|规划|plan|分步|阶段|跨模块|跨文件|跨服务|多模型|fallback|strict binding/i
+]
+const LOW_COMPLEXITY_HINTS = [/解释|是什么|示例|语法|翻译|润色|weather|hello/i]
 
 export class SmartRouter {
   private delegateEngine = new DelegateEngine()
@@ -74,11 +75,11 @@ export class SmartRouter {
     this.rules = rules
   }
 
-  analyzeTask(input: string): string {
-    return this.findRule(input).strategy
+  analyzeTask(input: string, context?: RouteContext): RouteStrategy {
+    return this.resolveDecision(input, context).strategy
   }
 
-  selectStrategy(taskType: string): 'delegate' | 'workforce' | 'direct' {
+  selectStrategy(taskType: string): RouteStrategy {
     if (taskType === 'delegate' || taskType === 'workforce' || taskType === 'direct') {
       return taskType
     }
@@ -87,33 +88,38 @@ export class SmartRouter {
   }
 
   async route(input: string, context?: RouteContext): Promise<RouteResult> {
-    const rule = this.findRule(input)
-    const strategy = rule.strategy
+    const decision = this.resolveDecision(input, context)
 
-    if (strategy === 'delegate') {
-      const resolved = this.resolveModel(rule.category, rule.model)
-      // If the rule doesn't pin a subagent, respect the user's selected dialog agent.
-      const selectedSubagent = rule.subagent ?? context?.agentCode
-      const modelOverride = rule.subagent ? (resolved?.model ?? rule.model) : undefined
+    if (decision.strategy === 'delegate') {
+      const selectedSubagent = decision.subagent ?? context?.agentCode
       return await this.delegateEngine.delegateTask({
         sessionId: context?.sessionId,
         description: input,
         prompt: context?.prompt ?? input,
-        category: rule.category,
+        category: decision.category,
         subagent_type: selectedSubagent,
         parentTaskId: context?.parentTaskId,
         abortSignal: context?.abortSignal,
-        model: modelOverride,
-        baseURL: rule.baseURL,
-        apiKey: rule.apiKey
+        metadata: {
+          routing: {
+            strategy: decision.strategy,
+            complexityScore: decision.complexityScore,
+            rationale: decision.rationale
+          }
+        }
       })
     }
 
-    if (strategy === 'workforce') {
+    if (decision.strategy === 'workforce') {
       const workflowOptions = {
-        category: rule.category ?? 'unspecified-high',
+        category: decision.category ?? 'unspecified-high',
         agentCode: context?.agentCode,
-        abortSignal: context?.abortSignal
+        abortSignal: context?.abortSignal,
+        routingContext: {
+          strategy: decision.strategy,
+          complexityScore: decision.complexityScore,
+          rationale: decision.rationale
+        }
       }
       return context?.sessionId
         ? await this.workforceEngine.executeWorkflow(input, context.sessionId, workflowOptions)
@@ -127,38 +133,119 @@ export class SmartRouter {
     }
   }
 
-  private findRule(input: string): RoutingRule {
-    return (
-      this.rules.find(rule => rule.pattern.test(input)) ?? {
-        pattern: /.*/,
-        strategy: 'direct'
+  private resolveDecision(input: string, context?: RouteContext): RouteDecision {
+    const rationale: string[] = []
+
+    if (context?.forceWorkforce) {
+      rationale.push('forceWorkforce context flag is enabled')
+      return {
+        strategy: 'workforce',
+        category: 'unspecified-high',
+        complexityScore: 1,
+        rationale
       }
-    )
-  }
-
-  private resolveModel(category?: string, userModel?: string): ModelResolutionResult | null {
-    const availableModels = providerCacheService.getAvailableModels()
-
-    const toFallbackChain = (
-      chain: readonly { readonly model: string; readonly providers: readonly string[] }[]
-    ): FallbackEntry[] => chain.map(e => ({ model: e.model, providers: [...e.providers] }))
-
-    let fallbackChain: FallbackEntry[] = toFallbackChain(DEFAULT_FALLBACK_CHAINS.coding)
-
-    if (category === 'visual-engineering') {
-      fallbackChain = toFallbackChain(DEFAULT_FALLBACK_CHAINS.visual)
-    } else if (category === 'quick') {
-      fallbackChain = toFallbackChain(DEFAULT_FALLBACK_CHAINS.quick)
-    } else if (category === 'ultrabrain' || category === 'artistry') {
-      fallbackChain = toFallbackChain(DEFAULT_FALLBACK_CHAINS.orchestrator)
-    } else if (category === 'unspecified-low' || category === 'unspecified-high') {
-      fallbackChain = toFallbackChain(DEFAULT_FALLBACK_CHAINS.coding)
     }
 
-    return resolveModelWithFallback({
-      userModel,
-      fallbackChain,
-      availableModels
-    })
+    if (EXPLICIT_WORKFORCE_PATTERN.test(input)) {
+      rationale.push('explicit instruction requests workforce orchestration')
+      return {
+        strategy: 'workforce',
+        category: 'unspecified-high',
+        complexityScore: 1,
+        rationale
+      }
+    }
+
+    if (EXPLICIT_DELEGATE_PATTERN.test(input)) {
+      rationale.push('explicit instruction requests delegate execution')
+      return {
+        strategy: 'delegate',
+        category: 'unspecified-high',
+        complexityScore: 0.6,
+        rationale
+      }
+    }
+
+    const matchedRule = this.findRule(input)
+
+    if (matchedRule) {
+      rationale.push(`matched routing rule: ${matchedRule.pattern}`)
+      const complexityScore = this.computeComplexityScore(input, matchedRule)
+      return {
+        strategy: matchedRule.strategy,
+        category: matchedRule.category,
+        subagent: matchedRule.subagent,
+        complexityScore,
+        rationale
+      }
+    }
+
+    if (context?.agentCode?.trim()) {
+      rationale.push('agentCode in context requires delegate route')
+      return {
+        strategy: 'delegate',
+        subagent: context.agentCode.trim(),
+        complexityScore: 0.55,
+        rationale
+      }
+    }
+
+    const complexityScore = this.computeComplexityScore(input)
+    if (complexityScore >= 0.55) {
+      rationale.push(`complexity score ${complexityScore.toFixed(2)} exceeds workforce threshold`)
+      return {
+        strategy: 'workforce',
+        category: 'unspecified-high',
+        complexityScore,
+        rationale
+      }
+    }
+
+    rationale.push(`complexity score ${complexityScore.toFixed(2)} below workforce threshold`)
+    return {
+      strategy: 'direct',
+      complexityScore,
+      rationale
+    }
+  }
+
+  private findRule(input: string): RoutingRule | null {
+    return this.rules.find(rule => rule.pattern.test(input)) ?? null
+  }
+
+  private computeComplexityScore(input: string, matchedRule?: RoutingRule): number {
+    const normalized = input.trim()
+    if (!normalized) {
+      return 0
+    }
+
+    let score = 0
+    if (normalized.length >= 80) {
+      score += 0.2
+    }
+    if (normalized.length >= 180) {
+      score += 0.15
+    }
+
+    for (const pattern of COMPLEXITY_HINTS) {
+      if (pattern.test(normalized)) {
+        score += 0.3
+      }
+    }
+
+    if (matchedRule?.strategy === 'workforce') {
+      score += 0.25
+    }
+    if (matchedRule?.subagent) {
+      score += 0.1
+    }
+
+    for (const pattern of LOW_COMPLEXITY_HINTS) {
+      if (pattern.test(normalized)) {
+        score -= 0.25
+      }
+    }
+
+    return Math.max(0, Math.min(score, 1))
   }
 }

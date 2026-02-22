@@ -67,6 +67,10 @@ export interface RetryConfig {
   enableLogging: boolean
 }
 
+export interface RetryExecutionOptions extends Partial<RetryConfig> {
+  onStateChange?: (state: RetryState) => void | Promise<void>
+}
+
 /**
  * State tracking for a single task's retry attempts
  */
@@ -327,14 +331,18 @@ export class TaskRetryService {
   async executeWithRetry<T>(
     taskId: string,
     operation: () => Promise<T>,
-    options: Partial<RetryConfig> = {}
+    options: RetryExecutionOptions = {}
   ): Promise<RetryResult<T>> {
-    const config = { ...this.config, ...options }
+    const { onStateChange, ...retryConfig } = options
+    const config = { ...this.config, ...retryConfig }
     const maxAttempts = config.maxRetries + 1 // maxRetries + initial attempt
     const startTime = Date.now()
 
     const state = createRetryState(taskId, maxAttempts)
     this.retryStates.set(taskId, state)
+    if (onStateChange) {
+      await onStateChange(state)
+    }
 
     if (config.enableLogging) {
       this.logger.info('Starting task with retry support', {
@@ -359,6 +367,9 @@ export class TaskRetryService {
         // Success
         state.status = 'succeeded'
         this.retryStates.set(taskId, state)
+        if (onStateChange) {
+          await onStateChange(state)
+        }
 
         if (config.enableLogging) {
           this.logger.info('Task succeeded', {
@@ -409,6 +420,9 @@ export class TaskRetryService {
 
           state.status = 'exhausted'
           this.retryStates.set(taskId, state)
+          if (onStateChange) {
+            await onStateChange(state)
+          }
 
           return {
             success: false,
@@ -431,6 +445,9 @@ export class TaskRetryService {
 
           state.status = 'exhausted'
           this.retryStates.set(taskId, state)
+          if (onStateChange) {
+            await onStateChange(state)
+          }
 
           return {
             success: false,
@@ -455,6 +472,9 @@ export class TaskRetryService {
         state.status = 'retrying'
         state.attemptNumber++
         this.retryStates.set(taskId, state)
+        if (onStateChange) {
+          await onStateChange(state)
+        }
 
         await this.sleep(delay)
       }
@@ -463,6 +483,9 @@ export class TaskRetryService {
     // Should not reach here, but handle just in case
     state.status = 'exhausted'
     this.retryStates.set(taskId, state)
+    if (onStateChange) {
+      await onStateChange(state)
+    }
 
     return {
       success: false,

@@ -166,7 +166,7 @@ export async function handleMessageSend(
     ? selectedDefinition.defaultStrategy === 'direct-enhanced'
       ? 'direct'
       : selectedDefinition.defaultStrategy
-    : router.analyzeTask(input.content)
+    : router.analyzeTask(input.content, { agentCode })
   let assistantContent = ''
   let assistantMetadata: Record<string, unknown> | undefined = agentCode
     ? { agentCode }
@@ -364,13 +364,10 @@ export async function handleMessageSend(
         agentCode,
         abortSignal: streamAbortController.signal
       }
-      const routeResult =
-        selectedDefinition?.defaultStrategy === 'workforce'
-          ? await new SmartRouter([{ pattern: /.*/i, strategy: 'workforce' }]).route(
-              input.content,
-              routeContext
-            )
-          : await router.route(input.content, routeContext)
+      const routeResult = await router.route(input.content, {
+        ...routeContext,
+        forceWorkforce: selectedDefinition?.defaultStrategy === 'workforce'
+      })
 
       if (streamAbortController.signal.aborted) {
         streamWasAborted = true

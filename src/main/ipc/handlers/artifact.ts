@@ -110,6 +110,7 @@ export function registerArtifactHandlers(): void {
         return { success: false, error: 'File not found' }
       }
       const content = fs.readFileSync(resolvedPath, 'utf-8')
+      const mtimeMs = fs.statSync(resolvedPath).mtimeMs
       logAudit({
         action: 'file:read',
         entityType: 'file',
@@ -118,7 +119,7 @@ export function registerArtifactHandlers(): void {
         metadata: { filePath, sessionId, resolvedPath, workDir: normalizedWorkDir },
         success: true
       })
-      return { success: true, content }
+      return { success: true, content, mtimeMs }
     } catch (error) {
       logAudit({
         action: 'file:read',
@@ -132,6 +133,127 @@ export function registerArtifactHandlers(): void {
       return { success: false, error: (error as Error).message }
     }
   })
+
+  ipcMain.handle(
+    'file:write',
+    async (
+      _,
+      input: {
+        filePath: string
+        sessionId: string
+        content: string
+        expectedMtimeMs?: number
+      }
+    ) => {
+      const { filePath, sessionId, content, expectedMtimeMs } = input
+
+      if (!filePath || typeof filePath !== 'string') {
+        return { success: false, error: 'Invalid file path' }
+      }
+
+      if (!sessionId || typeof sessionId !== 'string') {
+        return { success: false, error: 'Invalid session id' }
+      }
+
+      if (typeof content !== 'string') {
+        return { success: false, error: 'Invalid file content' }
+      }
+
+      try {
+        const db = DatabaseService.getInstance().getClient()
+        const artifactService = ArtifactService.getInstance()
+        const session = await db.session.findUnique({
+          where: { id: sessionId },
+          include: { space: true }
+        })
+
+        if (!session?.space?.workDir) {
+          return { success: false, error: 'Session not found' }
+        }
+
+        const workDir = session.space.workDir
+        const { normalizedWorkDir, resolvedPath, isInsideWorkspace } = resolveWorkspacePath(
+          filePath,
+          workDir
+        )
+
+        if (!isInsideWorkspace) {
+          logAudit({
+            action: 'file:write',
+            entityType: 'file',
+            entityId: filePath,
+            sessionId,
+            metadata: { filePath, resolvedPath, workDir: normalizedWorkDir, sessionId },
+            success: false,
+            errorMsg: 'Path outside workspace'
+          })
+          return { success: false, error: 'Path outside workspace' }
+        }
+
+        const existedBefore = fs.existsSync(resolvedPath)
+        const currentMtimeMs = existedBefore ? fs.statSync(resolvedPath).mtimeMs : undefined
+
+        if (
+          typeof expectedMtimeMs === 'number' &&
+          typeof currentMtimeMs === 'number' &&
+          currentMtimeMs !== expectedMtimeMs
+        ) {
+          const currentContent = fs.readFileSync(resolvedPath, 'utf-8')
+          return {
+            success: false,
+            error: 'File modified externally',
+            conflict: {
+              currentContent,
+              currentMtimeMs
+            }
+          }
+        }
+
+        fs.mkdirSync(path.dirname(resolvedPath), { recursive: true })
+        fs.writeFileSync(resolvedPath, content, 'utf-8')
+
+        const newMtimeMs = fs.statSync(resolvedPath).mtimeMs
+        const relativePath = path.relative(normalizedWorkDir, resolvedPath)
+        const changeType = existedBefore ? 'modified' : 'created'
+
+        await artifactService.createArtifact({
+          sessionId,
+          type: 'code',
+          path: relativePath,
+          content,
+          changeType
+        })
+
+        logAudit({
+          action: 'file:write',
+          entityType: 'file',
+          entityId: filePath,
+          sessionId,
+          metadata: {
+            filePath,
+            resolvedPath,
+            relativePath,
+            workDir: normalizedWorkDir,
+            changeType
+          },
+          success: true
+        })
+
+        return { success: true, mtimeMs: newMtimeMs, changeType }
+      } catch (error) {
+        logAudit({
+          action: 'file:write',
+          entityType: 'file',
+          entityId: filePath,
+          sessionId,
+          metadata: { filePath, sessionId },
+          success: false,
+          errorMsg: (error as Error).message
+        })
+        return { success: false, error: (error as Error).message }
+      }
+    }
+  )
 
   ipcMain.handle('shell:open-path', async (_, filePath: string) => {
     try {

@@ -7,6 +7,10 @@ import { AIIndicator } from './AIIndicator'
 import { Plus, X, List, Clock, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
 import { cn } from '../../utils'
 import { OperationLogEntry } from '../../store/ui.store'
+import {
+  createBrowserPanelLifecycle,
+  type BrowserLifecycleBounds
+} from '../panels/browser-panel-lifecycle'
 
 export function BrowserShell() {
   const browserRef = useRef<HTMLDivElement>(null)
@@ -21,11 +25,36 @@ export function BrowserShell() {
     isBrowserPanelOpen,
     openBrowserPanel,
     browserOperationHistory,
-    upsertBrowserOperation
+    upsertBrowserOperation,
+    browserHandoff,
+    setBrowserManualControl
   } = useUIStore()
 
   const [zoomLevel, setZoomLevel] = useState(1)
   const [showLogs, setShowLogs] = useState(false)
+
+  const browserLifecycleRef = useRef(
+    createBrowserPanelLifecycle({
+      create: async viewId => {
+        await window.codeall?.invoke('browser:create', {
+          viewId,
+          url: undefined
+        })
+      },
+      show: async (viewId, bounds) => {
+        await window.codeall?.invoke('browser:show', {
+          viewId,
+          bounds
+        })
+      },
+      hide: async viewId => {
+        await window.codeall?.invoke('browser:hide', { viewId })
+      },
+      destroy: async viewId => {
+        await window.codeall?.invoke('browser:destroy', { viewId })
+      }
+    })
+  )
 
   // Sync tabs from backend
   const syncTabs = useCallback(async () => {
@@ -75,27 +104,29 @@ export function BrowserShell() {
 
   // Handle active tab view management
   useEffect(() => {
-    if (!activeBrowserTabId || !window.codeall) return
+    if (!window.codeall) return
 
     const setupTab = async () => {
-      // Ensure the view exists or create it if missing (recovery)
-      await window.codeall.invoke('browser:create', {
-        viewId: activeBrowserTabId,
-        url: undefined // Reuse existing URL if alive
+      const bounds: BrowserLifecycleBounds | null = browserRef.current
+        ? (() => {
+            const rect = browserRef.current!.getBoundingClientRect()
+            return {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height
+            }
+          })()
+        : null
+
+      await browserLifecycleRef.current.sync({
+        panelOpen: isBrowserPanelOpen,
+        activeViewId: activeBrowserTabId,
+        bounds
       })
 
-      // Show the active view (only if panel is currently open)
-      if (isBrowserPanelOpen && browserRef.current) {
-        const rect = browserRef.current.getBoundingClientRect()
-        window.codeall.invoke('browser:show', {
-          viewId: activeBrowserTabId,
-          bounds: {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height
-          }
-        })
+      if (!activeBrowserTabId) {
+        return
       }
 
       // Update local state from backend
@@ -129,8 +160,11 @@ export function BrowserShell() {
     const removeAIListener = window.codeall.on('browser:ai-operation', data => {
       setAIOperation(data.toolName, data.status)
 
-      // Always switch to the BrowserView that AI is operating on
-      if (data.viewId && data.viewId !== activeBrowserTabId) {
+      const hasManualControl =
+        browserHandoff.isManualControl && browserHandoff.viewId && browserHandoff.viewId === activeBrowserTabId
+
+      // Always switch to the BrowserView that AI is operating on unless user took manual control on this view
+      if (data.viewId && data.viewId !== activeBrowserTabId && !hasManualControl) {
         setActiveBrowserTab(data.viewId)
       }
 
@@ -147,7 +181,16 @@ export function BrowserShell() {
         timestamp: data.timestamp || Date.now(),
         action: data.toolName,
         target: (data.args && JSON.stringify(data.args)) || undefined,
-        status: data.status === 'error' ? 'failed' : data.status
+        status: data.status === 'error' ? 'failed' : data.status,
+        audit: {
+          viewId: data.viewId,
+          opId: data.opId,
+          errorCode: data.errorCode,
+          durationMs: data.durationMs,
+          toolName: data.toolName,
+          toolArgs: data.args,
+          outcome: data.status
+        }
       })
 
       if (data.status === 'completed' || data.status === 'error') {
@@ -158,8 +201,6 @@ export function BrowserShell() {
     })
 
     return () => {
-      // Ensure BrowserView is detached on unmount / tab switch
-      window.codeall?.invoke('browser:hide', { viewId: activeBrowserTabId })
       removeStateListener()
       removeAIListener()
     }
@@ -172,32 +213,35 @@ export function BrowserShell() {
     upsertBrowserOperation,
     openBrowserPanel,
     setActiveBrowserTab,
-    isBrowserPanelOpen
+    isBrowserPanelOpen,
+    browserHandoff
   ])
 
-  // Hide/show the BrowserView when panel is toggled
+  // Hide/show the BrowserView when panel/tab/bounds change
   useEffect(() => {
-    if (!activeBrowserTabId || !window.codeall) return
+    if (!window.codeall) return
 
-    if (!isBrowserPanelOpen) {
-      window.codeall.invoke('browser:hide', { viewId: activeBrowserTabId })
-      return
+    const sync = async () => {
+      const bounds: BrowserLifecycleBounds | null = browserRef.current
+        ? (() => {
+            const rect = browserRef.current!.getBoundingClientRect()
+            return {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height
+            }
+          })()
+        : null
+
+      await browserLifecycleRef.current.sync({
+        panelOpen: isBrowserPanelOpen,
+        activeViewId: activeBrowserTabId,
+        bounds
+      })
     }
 
-    if (browserRef.current) {
-      const rect = browserRef.current.getBoundingClientRect()
-      if (rect.width > 0 && rect.height > 0) {
-        window.codeall.invoke('browser:show', {
-          viewId: activeBrowserTabId,
-          bounds: {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height
-          }
-        })
-      }
-    }
+    sync()
   }, [activeBrowserTabId, isBrowserPanelOpen])
 
   // Handle visibility changes to hide browser view when overlays are present
@@ -262,6 +306,17 @@ export function BrowserShell() {
           height: rect.height
         }
       })
+
+      void browserLifecycleRef.current.sync({
+        panelOpen: isBrowserPanelOpen,
+        activeViewId: activeBrowserTabId,
+        bounds: {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
+        }
+      })
     }
 
     const observer = new ResizeObserver(updateBounds)
@@ -281,7 +336,7 @@ export function BrowserShell() {
 
   const handleCloseTab = async (e: React.MouseEvent, tabId: string) => {
     e.stopPropagation()
-    await window.codeall?.invoke('browser:destroy', { viewId: tabId })
+    await browserLifecycleRef.current.closeView(tabId)
     await syncTabs()
 
     if (activeBrowserTabId === tabId) {
@@ -334,9 +389,13 @@ export function BrowserShell() {
 
   const handleScreenshot = useCallback(async () => {
     if (!activeBrowserTabId) return
-    const result = await window.codeall?.invoke('browser:capture', { viewId: activeBrowserTabId })
-    console.log('Screenshot taken', result)
+    await window.codeall?.invoke('browser:capture', { viewId: activeBrowserTabId })
   }, [activeBrowserTabId])
+
+  const handleTakeover = useCallback(() => {
+    if (!activeBrowserTabId) return
+    setBrowserManualControl(true, activeBrowserTabId)
+  }, [activeBrowserTabId, setBrowserManualControl])
 
   const handleToggleDevTools = useCallback(
     () =>
@@ -401,10 +460,20 @@ export function BrowserShell() {
 
         <AddressBar onNavigate={handleNavigate} />
 
+        {browserHandoff.isManualControl && browserHandoff.viewId === activeBrowserTabId && (
+          <div className="px-2 py-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs font-medium">
+Manual control active
+          </div>
+        )}
+
         <AIIndicator />
 
         <Toolbar
           onScreenshot={handleScreenshot}
+          onTakeover={handleTakeover}
+          isManualControl={
+            browserHandoff.isManualControl && browserHandoff.viewId === activeBrowserTabId
+          }
           onToggleDevTools={handleToggleDevTools}
           onZoomIn={() => handleZoom(zoomLevel + 0.1)}
           onZoomOut={() => handleZoom(zoomLevel - 0.1)}
@@ -511,6 +580,14 @@ function LogItem({ entry }: { entry: OperationLogEntry }) {
           title={entry.target}
         >
           {entry.target}
+        </div>
+      )}
+
+      {(entry.audit?.errorCode || entry.audit?.durationMs !== undefined || entry.audit?.viewId) && (
+        <div className="text-[10px] text-slate-500 font-mono grid grid-cols-1 gap-0.5">
+          {entry.audit?.viewId && <span>view: {entry.audit.viewId}</span>}
+          {entry.audit?.errorCode && <span>error: {entry.audit.errorCode}</span>}
+          {entry.audit?.durationMs !== undefined && <span>duration: {entry.audit.durationMs}ms</span>}
         </div>
       )}
     </div>

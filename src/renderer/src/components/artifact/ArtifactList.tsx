@@ -13,9 +13,11 @@ import {
   Undo2,
   Eye,
   RefreshCw,
-  Loader2
+  Loader2,
+  Link2
 } from 'lucide-react'
 import type { Artifact } from '@/types/domain'
+import { useTraceNavigationStore } from '../../store/trace-navigation.store'
 
 type IpcActionResult = { success: boolean; error?: string }
 
@@ -61,6 +63,7 @@ export function ArtifactList({ sessionId, onViewDiff }: ArtifactListProps) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const requestNavigate = useTraceNavigationStore(state => state.requestNavigate)
 
   const loadArtifacts = useCallback(async () => {
     if (!window.codeall || !sessionId) {
@@ -177,6 +180,15 @@ export function ArtifactList({ sessionId, onViewDiff }: ArtifactListProps) {
     return `.../${parts.slice(-2).join('/')}`
   }
 
+  const handleArtifactLinkage = (artifact: Artifact) => {
+    requestNavigate({
+      source: 'artifact',
+      artifactId: artifact.id,
+      taskId: artifact.taskId,
+      preferredView: artifact.taskId ? 'workflow' : undefined
+    })
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
@@ -261,6 +273,15 @@ export function ArtifactList({ sessionId, onViewDiff }: ArtifactListProps) {
                       <Undo2 className="w-3.5 h-3.5" />
                     )}
                     撤销
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleArtifactLinkage(artifact)}
+                    disabled={isLoading}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 transition-colors disabled:opacity-50"
+                  >
+                    <Link2 className="w-3.5 h-3.5" />
+                    Link
                   </button>
                   <button
                     type="button"

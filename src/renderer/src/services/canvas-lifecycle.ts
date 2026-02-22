@@ -41,6 +41,7 @@ export interface TabState {
   browserViewId?: string
   browserState?: BrowserState
   isEditMode?: boolean
+  mtimeMs?: number
 }
 
 type TabsChangeCallback = (tabs: TabState[]) => void
@@ -245,6 +246,7 @@ class CanvasLifecycle {
       if (response.success !== false) {
         const content = response.content || ''
         tab.content = content
+        tab.mtimeMs = response.mtimeMs
         tab.isLoading = false
         tab.error = undefined
       } else {
@@ -569,10 +571,11 @@ class CanvasLifecycle {
     }
   }
 
-  markTabSaved(tabId: string, content?: string): void {
+  markTabSaved(tabId: string, content?: string, mtimeMs?: number): void {
     const tab = this.tabs.get(tabId)
     if (tab) {
       if (content !== undefined) tab.content = content
+      if (mtimeMs !== undefined) tab.mtimeMs = mtimeMs
       tab.isDirty = false
       this.notifyTabsChange()
     }

@@ -10,9 +10,11 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
-  Zap
+  Zap,
+  Target
 } from 'lucide-react'
 import { useAgentStore, WorkLogEntry } from '../../store/agent.store'
+import { useTraceNavigationStore } from '../../store/trace-navigation.store'
 import { cn } from '../../utils'
 
 interface AgentWorkViewerProps {
@@ -22,6 +24,7 @@ interface AgentWorkViewerProps {
 
 export function AgentWorkViewer({ agentId, className }: AgentWorkViewerProps) {
   const { agents, workLogs } = useAgentStore()
+  const requestNavigate = useTraceNavigationStore(state => state.requestNavigate)
   const agent = agents.find(a => a.id === agentId)
   const logs = workLogs[agentId] || []
 
@@ -126,7 +129,18 @@ export function AgentWorkViewer({ agentId, className }: AgentWorkViewerProps) {
         className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-sm bg-slate-950"
       >
         {logs.map(log => (
-          <LogEntry key={log.id} entry={log} />
+          <LogEntry
+            key={log.id}
+            entry={log}
+            onJumpToTask={(taskId: string) =>
+              requestNavigate({
+                source: 'agent-log',
+                taskId,
+                agentId,
+                preferredView: 'workflow'
+              })
+            }
+          />
         ))}
 
         {agent.status === 'working' && logs.length > 0 && (
@@ -140,7 +154,18 @@ export function AgentWorkViewer({ agentId, className }: AgentWorkViewerProps) {
   )
 }
 
-function LogEntry({ entry }: { entry: WorkLogEntry }) {
+function LogEntry({
+  entry,
+  onJumpToTask
+}: {
+  entry: WorkLogEntry
+  onJumpToTask: (taskId: string) => void
+}) {
+  const taskIdFromMetadata =
+    entry.metadata && typeof entry.metadata.taskId === 'string' && entry.metadata.taskId.trim().length > 0
+      ? String(entry.metadata.taskId)
+      : null
+
   const getIcon = () => {
     switch (entry.type) {
       case 'thinking':
@@ -205,6 +230,17 @@ function LogEntry({ entry }: { entry: WorkLogEntry }) {
             </span>
           ) : (
             <span>{entry.message}</span>
+          )}
+          {taskIdFromMetadata && (
+            <button
+              type="button"
+              onClick={() => onJumpToTask(taskIdFromMetadata)}
+              className="ml-2 inline-flex items-center gap-1 rounded border border-sky-500/30 bg-sky-500/10 px-1.5 py-0.5 text-[10px] text-sky-300 hover:bg-sky-500/20"
+              aria-label={`Jump to task ${taskIdFromMetadata}`}
+            >
+              <Target className="w-3 h-3" />
+              Jump
+            </button>
           )}
         </div>
       </div>

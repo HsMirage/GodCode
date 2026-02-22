@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { WorkforceEngine } from '@/main/services/workforce/workforce-engine'
-import { DelegateEngine } from '@/main/services/delegate'
+import { calculateBackoffDelay, RetryableErrorType } from '@/main/services/workforce/retry'
 import { DatabaseService } from '@/main/services/database'
 import { LoggerService } from '@/main/services/logger'
 import { createLLMAdapter } from '@/main/services/llm/factory'
+import { BindingService } from '@/main/services/binding.service'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -65,6 +66,17 @@ vi.mock('@/main/services/llm/factory', () => ({
   createLLMAdapter: vi.fn(() => mockAdapter)
 }))
 
+const mockBindingService = {
+  getAgentModelConfig: vi.fn(async () => null),
+  getCategoryModelConfig: vi.fn(async () => null)
+}
+
+vi.mock('@/main/services/binding.service', () => ({
+  BindingService: {
+    getInstance: vi.fn(() => mockBindingService)
+  }
+}))
+
 const mockSecureStorage = {
   decrypt: vi.fn((s: string) => s)
 }
@@ -75,12 +87,12 @@ vi.mock('@/main/services/secure-storage.service', () => ({
   }
 }))
 
-const mockDelegateEngine = {
-  delegateTask: vi.fn()
+const mockWorkerDispatcher = {
+  dispatch: vi.fn()
 }
 
-vi.mock('@/main/services/delegate', () => ({
-  DelegateEngine: vi.fn(() => mockDelegateEngine)
+vi.mock('@/main/services/workforce/worker-dispatcher', () => ({
+  WorkforceWorkerDispatcher: vi.fn(() => mockWorkerDispatcher)
 }))
 
 const mockBoulderService = {
@@ -99,6 +111,7 @@ describe('WorkforceEngine', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    delete process.env.WORKFORCE_STRICT_BINDING
     workforceEngine = new WorkforceEngine()
     vi.spyOn(fs, 'existsSync').mockReturnValue(false)
     vi.spyOn(fs, 'readFileSync').mockImplementation(() => '')
@@ -123,6 +136,8 @@ describe('WorkforceEngine', () => {
     ])
     mockPrisma.agentBinding.findUnique.mockResolvedValue(null)
     mockPrisma.categoryBinding.findUnique.mockResolvedValue(null)
+    mockBindingService.getAgentModelConfig.mockResolvedValue(null)
+    mockBindingService.getCategoryModelConfig.mockResolvedValue(null)
     mockAdapter.sendMessage.mockResolvedValue({
       content: JSON.stringify({
         subtasks: [
@@ -131,10 +146,13 @@ describe('WorkforceEngine', () => {
         ]
       })
     })
-    mockDelegateEngine.delegateTask.mockResolvedValue({
+    mockWorkerDispatcher.dispatch.mockResolvedValue({
       taskId: 'subtask-id',
       output: 'Task output',
-      success: true
+      success: true,
+      runId: 'run-123',
+      model: 'openai-compatible::gpt-4o-mini',
+      modelSource: 'system-default'
     })
   })
 
@@ -143,6 +161,7 @@ describe('WorkforceEngine', () => {
   })
 
   describe('decomposeTask', () => {
+
     it('should decompose task into subtasks', async () => {
       const input = 'Complex task'
       const subtasks = await workforceEngine.decomposeTask(input)
@@ -229,16 +248,21 @@ describe('WorkforceEngine', () => {
       )
 
       // Should execute task 1 first (no deps)
-      expect(mockDelegateEngine.delegateTask).toHaveBeenNthCalledWith(
+      expect(mockWorkerDispatcher.dispatch).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
           description: 'Task 1',
-          parentTaskId: 'workflow-1'
+          parentTaskId: 'workflow-1',
+          metadata: expect.objectContaining({
+            dispatchMode: 'sync',
+            concurrencyKey: expect.any(String),
+            concurrencyLimit: expect.any(Number)
+          })
         })
       )
 
       // Should execute task 2 second (depends on task 1)
-      expect(mockDelegateEngine.delegateTask).toHaveBeenNthCalledWith(
+      expect(mockWorkerDispatcher.dispatch).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
           description: 'Task 2',
@@ -251,13 +275,32 @@ describe('WorkforceEngine', () => {
           where: { id: 'workflow-1' },
           data: expect.objectContaining({
             status: 'completed',
-            output: expect.stringContaining('Task output')
+            output: expect.stringContaining('integration summary')
           })
         })
       )
 
       expect(workflowResult.executions.size).toBe(2)
+      const finalUpdateCall = mockPrisma.task.update.mock.calls.at(-1)?.[0]
+      expect(finalUpdateCall?.data?.metadata?.graph?.workflowId).toBe('workflow-1')
+      expect(finalUpdateCall?.data?.metadata?.correlation?.workflowId).toBe('workflow-1')
+      expect(finalUpdateCall?.data?.metadata?.timeline?.workflow?.length).toBeGreaterThan(0)
+      expect(finalUpdateCall?.data?.metadata?.integration?.summary).toContain('integration summary')
+      expect(finalUpdateCall?.data?.metadata?.sharedContext?.totalEntries).toBeGreaterThan(0)
+      expect(finalUpdateCall?.data?.metadata?.sharedContext?.activeEntries).toBeGreaterThan(0)
+      expect(Array.isArray(finalUpdateCall?.data?.metadata?.sharedContext?.entries)).toBe(true)
+      expect(Array.isArray(finalUpdateCall?.data?.metadata?.sharedContext?.archived)).toBe(true)
+      expect(finalUpdateCall?.data?.metadata?.sharedContextQueries?.byWorkflow).toBeGreaterThan(0)
       expect(workflowResult.executions.get('task-1')?.persistedTaskId).toBe('subtask-id')
+      expect(workflowResult.executions.get('task-1')?.runId).toBe('run-123')
+      expect(workflowResult.executions.get('task-1')?.concurrencyKey).toBeDefined()
+      expect(workflowResult.sharedContextStore.workflowId).toBe('workflow-1')
+      expect(workflowResult.sharedContextStore.entries.length).toBeGreaterThan(0)
+      const artifactEntries = workforceEngine.querySharedContextEntries(workflowResult, {
+        workflowId: workflowResult.workflowId,
+        category: 'artifacts'
+      })
+      expect(artifactEntries.length).toBeGreaterThan(0)
     })
 
     it('should run pre-dispatch/between-waves/final orchestrator checkpoints for dependent waves', async () => {
@@ -282,7 +325,7 @@ describe('WorkforceEngine', () => {
 
       const callTrace: any[] = []
       let seq = 0
-      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
         callTrace.push(delegateInput)
 
         if (delegateInput.metadata?.orchestrationCheckpoint) {
@@ -357,7 +400,7 @@ describe('WorkforceEngine', () => {
 
       const callTrace: any[] = []
       let seq = 0
-      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
         callTrace.push(delegateInput)
         if (delegateInput.metadata?.orchestrationCheckpoint) {
           const readyTaskIds = Array.isArray(delegateInput.metadata?.readyTaskIds)
@@ -409,7 +452,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
         if (delegateInput.metadata?.orchestrationCheckpoint) {
           return {
             taskId: `checkpoint-${delegateInput.metadata.checkpointPhase}`,
@@ -441,12 +484,16 @@ describe('WorkforceEngine', () => {
 
       expect(result.orchestratorParticipation).toBe(true)
       expect(result.orchestratorCheckpoints?.some(item => item.phase === 'final')).toBe(true)
+      expect(result.continuationSnapshot).toBeDefined()
 
       const finalUpdate = mockPrisma.task.update.mock.calls.at(-1)?.[0]
       const metadata = finalUpdate?.data?.metadata || {}
       const checkpoints = metadata.orchestratorCheckpoints || []
       expect(metadata.orchestratorParticipation).toBe(true)
       expect(checkpoints.some((item: any) => item.phase === 'final')).toBe(true)
+      expect(Array.isArray(metadata.timeline?.task)).toBe(true)
+      expect(Array.isArray(metadata.timeline?.run)).toBe(true)
+      expect(Array.isArray(metadata.timeline?.workflow)).toBe(true)
     })
 
     it('should fallback to DAG scheduling when checkpoint output is not parseable JSON', async () => {
@@ -456,7 +503,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
         if (delegateInput.metadata?.orchestrationCheckpoint) {
           return {
             taskId: `checkpoint-${delegateInput.metadata.checkpointPhase}`,
@@ -497,7 +544,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
         if (delegateInput.metadata?.orchestrationCheckpoint) {
           if (delegateInput.metadata.checkpointPhase === 'between-waves') {
             return {
@@ -583,7 +630,7 @@ describe('WorkforceEngine', () => {
       let schemaRunCount = 0
       let betweenWavesCheckpointCount = 0
 
-      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
         if (delegateInput.metadata?.orchestrationCheckpoint) {
           const phase = delegateInput.metadata.checkpointPhase
           if (phase === 'between-waves') {
@@ -680,7 +727,7 @@ describe('WorkforceEngine', () => {
       })
 
       // Add delay to mock execution to verify concurrency
-      mockDelegateEngine.delegateTask.mockImplementation(async () => {
+      mockWorkerDispatcher.dispatch.mockImplementation(async () => {
         await new Promise(resolve => setTimeout(resolve, 10))
         return { taskId: 'id', output: 'done', success: true }
       })
@@ -689,7 +736,11 @@ describe('WorkforceEngine', () => {
 
       // Since we can't easily check realtime concurrency in unit test without complex setup,
       // we verify that all tasks were executed eventually
-      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledTimes(5)
+      expect(mockWorkerDispatcher.dispatch).toHaveBeenCalledTimes(5)
+      for (const [dispatchInput] of mockWorkerDispatcher.dispatch.mock.calls) {
+        expect(dispatchInput.metadata?.concurrencyKey).toBeDefined()
+        expect(typeof dispatchInput.metadata?.concurrencyLimit).toBe('number')
+      }
     })
 
     it('should detect deadlock', async () => {
@@ -719,7 +770,7 @@ describe('WorkforceEngine', () => {
     })
 
     it('should handle subtask failure', async () => {
-      mockDelegateEngine.delegateTask.mockRejectedValueOnce(new Error('Subtask failed'))
+      mockWorkerDispatcher.dispatch.mockRejectedValueOnce(new Error('Subtask failed'))
 
       await expect(
         workforceEngine.executeWorkflow('Failed workflow', 'test-session-123')
@@ -742,7 +793,7 @@ describe('WorkforceEngine', () => {
       ).rejects.toThrow('未找到可执行计划文件')
 
       expect(mockAdapter.sendMessage).not.toHaveBeenCalled()
-      expect(mockDelegateEngine.delegateTask).not.toHaveBeenCalled()
+      expect(mockWorkerDispatcher.dispatch).not.toHaveBeenCalled()
     })
 
     it('should parse plan tasks with dependencies and inject chongming plan review gate', async () => {
@@ -760,7 +811,7 @@ describe('WorkforceEngine', () => {
       )
 
       let counter = 0
-      mockDelegateEngine.delegateTask.mockImplementation(async (input: any) => ({
+      mockWorkerDispatcher.dispatch.mockImplementation(async (input: any) => ({
         taskId: `persisted-${++counter}`,
         output: `done:${input.description}`,
         success: true
@@ -777,7 +828,7 @@ describe('WorkforceEngine', () => {
       expect(planReviewTask).toBeDefined()
 
       const byDescription = new Map(
-        mockDelegateEngine.delegateTask.mock.calls.map(call => [call[0].description, call[0]])
+        mockWorkerDispatcher.dispatch.mock.calls.map(call => [call[0].description, call[0]])
       )
 
       expect(byDescription.get('Task 1: 搜索代码位置 [agent: qianliyan]')?.subagent_type).toBe(
@@ -826,7 +877,7 @@ describe('WorkforceEngine', () => {
       })
 
       let counter = 0
-      mockDelegateEngine.delegateTask.mockImplementation(async (input: any) => ({
+      mockWorkerDispatcher.dispatch.mockImplementation(async (input: any) => ({
         taskId: `persisted-${++counter}`,
         output: `done:${input.description}`,
         success: true
@@ -856,7 +907,7 @@ describe('WorkforceEngine', () => {
       expect(frontendExecutionTask?.dependencies).not.toContain(planReviewTask?.id)
 
       const byDescription = new Map(
-        mockDelegateEngine.delegateTask.mock.calls.map(call => [call[0].description, call[0]])
+        mockWorkerDispatcher.dispatch.mock.calls.map(call => [call[0].description, call[0]])
       )
       expect(byDescription.get(backendExecutionTask!.description)?.category).toBe('dayu')
       expect(byDescription.get(frontendExecutionTask!.description)?.category).toBe('zhinv')
@@ -931,7 +982,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask.mockImplementation(async (delegateInput: any) => {
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
         if (delegateInput.metadata?.orchestrationCheckpoint) {
           const readyTaskIds = Array.isArray(delegateInput.metadata?.readyTaskIds)
             ? delegateInput.metadata.readyTaskIds
@@ -1000,7 +1051,7 @@ describe('WorkforceEngine', () => {
         }
       )
 
-      const delegateCalls = mockDelegateEngine.delegateTask.mock.calls.map(call => call[0])
+      const delegateCalls = mockWorkerDispatcher.dispatch.mock.calls.map(call => call[0])
       const backendExecutionCall = delegateCalls.find(input => input.category === 'dayu')
       expect(backendExecutionCall?.prompt).toContain(
         '当前工作流是只读模式：请输出可执行实现方案与验证方案，不得改代码。'
@@ -1025,7 +1076,7 @@ describe('WorkforceEngine', () => {
       })
 
       const byDescription = new Map(
-        mockDelegateEngine.delegateTask.mock.calls.map(call => [call[0].description, call[0]])
+        mockWorkerDispatcher.dispatch.mock.calls.map(call => [call[0].description, call[0]])
       )
 
       expect(byDescription.get('Task 1: 扫描代码结构')?.subagent_type).toBe('qianliyan')
@@ -1042,7 +1093,7 @@ describe('WorkforceEngine', () => {
         agentCode: 'haotian'
       })
 
-      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+      expect(mockWorkerDispatcher.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
           description: 'Task 1: 修复后端接口超时 [agent: kuafu]',
           subagent_type: 'luban'
@@ -1057,7 +1108,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask.mockResolvedValue({
+      mockWorkerDispatcher.dispatch.mockResolvedValue({
         taskId: 'empty-task',
         output: '',
         success: true
@@ -1075,7 +1126,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask.mockResolvedValue({
+      mockWorkerDispatcher.dispatch.mockResolvedValue({
         taskId: 'impl-task',
         output:
           'I am unable to execute because this environment is read-only and cannot modify files.',
@@ -1107,7 +1158,7 @@ describe('WorkforceEngine', () => {
       )
 
       expect(mockAdapter.sendMessage).not.toHaveBeenCalled()
-      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+      expect(mockWorkerDispatcher.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
           description: 'Task 1: 根据网站规划实现首页'
         })
@@ -1123,7 +1174,7 @@ describe('WorkforceEngine', () => {
 
       await workforceEngine.executeWorkflow('根据项目规划文档完成实现', 'test-session-123')
 
-      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+      expect(mockWorkerDispatcher.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
           description: '分析项目规划文档并提取约束',
           subagent_type: 'qianliyan'
@@ -1139,7 +1190,7 @@ describe('WorkforceEngine', () => {
       ).rejects.toThrow('请求依赖的 Markdown 文件不存在')
 
       expect(mockAdapter.sendMessage).not.toHaveBeenCalled()
-      expect(mockDelegateEngine.delegateTask).not.toHaveBeenCalled()
+      expect(mockWorkerDispatcher.dispatch).not.toHaveBeenCalled()
     })
 
     it('should include referenced markdown content in decomposition prompt when file exists', async () => {
@@ -1194,7 +1245,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask.mockResolvedValue({
+      mockWorkerDispatcher.dispatch.mockResolvedValue({
         taskId: 'status-task',
         output: 'Inspecting repository',
         success: true
@@ -1212,7 +1263,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask.mockResolvedValue({
+      mockWorkerDispatcher.dispatch.mockResolvedValue({
         taskId: 'status-task',
         output: 'Deciding on task organization method',
         success: true
@@ -1230,7 +1281,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask
+      mockWorkerDispatcher.dispatch
         .mockResolvedValueOnce({
           taskId: 'status-task-1',
           output: 'Inspecting repository',
@@ -1248,11 +1299,222 @@ describe('WorkforceEngine', () => {
       })
 
       expect(result.success).toBe(true)
-      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledTimes(2)
-      expect(mockDelegateEngine.delegateTask.mock.calls[1]?.[0]?.prompt).toContain(
+      expect(mockWorkerDispatcher.dispatch).toHaveBeenCalledTimes(2)
+      expect(mockWorkerDispatcher.dispatch.mock.calls[1]?.[0]?.prompt).toContain(
         'ACTIONABILITY RECOVERY DIRECTIVE'
       )
-      expect(mockDelegateEngine.delegateTask.mock.calls[1]?.[0]?.useDynamicPrompt).toBe(false)
+      expect(mockWorkerDispatcher.dispatch.mock.calls[1]?.[0]?.useDynamicPrompt).toBe(false)
+    })
+
+    it('should fail fast with diagnostics when strict binding rejects fallback model', async () => {
+      const previousStrict = process.env.WORKFORCE_STRICT_BINDING
+      process.env.WORKFORCE_STRICT_BINDING = 'true'
+      const strictEngine = new WorkforceEngine()
+      try {
+        mockAdapter.sendMessage.mockResolvedValue({
+          content: JSON.stringify({
+            subtasks: [
+              {
+                id: 'task-strict',
+                description: '实现网站主页',
+                dependencies: [],
+                assignedCategory: 'dayu'
+              }
+            ]
+          })
+        })
+
+        mockPrisma.model.findMany.mockResolvedValue([
+          {
+            id: 'model-2',
+            provider: 'openai-compatible',
+            modelName: 'gpt-4o-mini',
+            apiKey: 'test-key-2',
+            apiKeyRef: null
+          }
+        ])
+
+        mockWorkerDispatcher.dispatch.mockResolvedValue({
+          taskId: 'status-task-1',
+          output: 'Inspecting repository',
+          success: true
+        })
+
+        await expect(
+          strictEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
+        ).rejects.toThrow(/Strict binding rejected fallback model/)
+      } finally {
+        if (previousStrict === undefined) {
+          delete process.env.WORKFORCE_STRICT_BINDING
+        } else {
+          process.env.WORKFORCE_STRICT_BINDING = previousStrict
+        }
+      }
+    })
+
+    it('should validate category binding consistency before dispatch', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            {
+              id: 'task-binding-category',
+              description: '实现网站主页',
+              dependencies: [],
+              assignedCategory: 'zhinv'
+            }
+          ]
+        })
+      })
+
+      mockBindingService.getCategoryModelConfig.mockImplementation(async (categoryCode: string) => {
+        if (categoryCode === 'zhinv') {
+          throw new Error(
+            '任务类别「zhinv」已绑定模型但模型记录不存在。请到“设置 -> Agent 绑定 -> 任务类别”重新选择模型。'
+          )
+        }
+        return null
+      })
+
+      await expect(
+        workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
+      ).rejects.toThrow('任务类别「zhinv」已绑定模型但模型记录不存在')
+
+      expect(mockWorkerDispatcher.dispatch).not.toHaveBeenCalled()
+    })
+
+    it('should validate agent binding consistency before dispatch', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            {
+              id: 'task-binding-agent',
+              description: '实现网站主页',
+              dependencies: [],
+              assignedAgent: 'qianliyan'
+            }
+          ]
+        })
+      })
+
+      mockBindingService.getAgentModelConfig.mockImplementation(async (agentCode: string) => {
+        if (agentCode === 'qianliyan') {
+          throw new Error(
+            'Agent「qianliyan」已绑定模型「gpt-4o-mini」但缺少 API Key。请到“设置 -> API Keys/模型”补全凭据，或到“设置 -> Agent 绑定”切换模型。'
+          )
+        }
+        return null
+      })
+
+      await expect(
+        workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
+      ).rejects.toThrow('Agent「qianliyan」已绑定模型「gpt-4o-mini」但缺少 API Key')
+
+      expect(mockWorkerDispatcher.dispatch).not.toHaveBeenCalled()
+    })
+
+    it('should persist runtime binding snapshot metadata on dispatched subtask', async () => {
+      const workflowResult = await workforceEngine.executeWorkflow('Do workflow', 'test-session-123')
+
+      expect(workflowResult.executions.get('task-1')?.persistedTaskId).toBe('subtask-id')
+
+      const persistedSubtaskUpdateCall = mockPrisma.task.update.mock.calls.find(
+        call => call?.[0]?.where?.id === 'subtask-id'
+      )
+
+      expect(persistedSubtaskUpdateCall?.[0]?.data?.metadata?.runtimeBindingSnapshot).toEqual(
+        expect.objectContaining({
+          assignedCategory: expect.any(String),
+          workflowCategory: expect.any(String),
+          workflowId: 'workflow-1',
+          model: 'openai-compatible::gpt-4o-mini',
+          modelSource: 'system-default',
+          concurrencyKey: expect.any(String),
+          fallbackTrail: expect.any(Array)
+        })
+      )
+    })
+
+    it('should apply deterministic backoff per failure class', () => {
+      const timeoutDelayAttempt1 = calculateBackoffDelay(1, {
+        maxRetries: 3,
+        baseDelayMs: 100,
+        maxDelayMs: 1000,
+        jitterFactor: 0,
+        enableLogging: false
+      })
+      const timeoutDelayAttempt2 = calculateBackoffDelay(2, {
+        maxRetries: 3,
+        baseDelayMs: 100,
+        maxDelayMs: 1000,
+        jitterFactor: 0,
+        enableLogging: false
+      })
+
+      expect(timeoutDelayAttempt1).toBe(100)
+      expect(timeoutDelayAttempt2).toBe(200)
+    })
+
+    it('should persist retry state snapshot for restart recovery', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-retry', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch
+        .mockRejectedValueOnce(new Error('network timeout'))
+        .mockResolvedValueOnce({ taskId: 'retry-task', output: 'done', success: true })
+
+      const result = await workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', {
+        enableRetry: true,
+        retryConfig: { baseDelayMs: 1, maxDelayMs: 2, jitterFactor: 0 }
+      })
+
+      const retryState = result.retryStates?.get('task-retry')
+      expect(retryState?.attemptNumber).toBeGreaterThanOrEqual(2)
+      expect(retryState?.status).toBe('succeeded')
+      expect(retryState?.errors[0]?.errorType).toBe(RetryableErrorType.NETWORK_ERROR)
+
+      const workflowUpdates = mockPrisma.task.update.mock.calls
+        .map(call => call[0])
+        .filter(call => call?.where?.id === 'workflow-1')
+
+      const runningRetrySnapshot = workflowUpdates.find(
+        call =>
+          call?.data?.metadata?.continuationSnapshot?.status === 'running' &&
+          call?.data?.metadata?.retryState?.tasks?.['task-retry']
+      )
+      expect(runningRetrySnapshot).toBeDefined()
+
+      const finalUpdate = workflowUpdates.at(-1)
+      const persistedRetryState = finalUpdate?.data?.metadata?.retryState?.tasks?.['task-retry']
+      expect(persistedRetryState?.attemptNumber).toBeGreaterThanOrEqual(2)
+      expect(persistedRetryState?.errors?.[0]?.errorType).toBe(RetryableErrorType.NETWORK_ERROR)
+      expect(finalUpdate?.data?.metadata?.retryStats?.tasksRetried).toBeGreaterThanOrEqual(1)
+
+    })
+
+    it('should persist failure continuation snapshot for recovery consumers', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-failed', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch.mockRejectedValue(new Error('network timeout'))
+
+      await expect(
+        workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', {
+          enableRetry: false
+        })
+      ).rejects.toThrow('network timeout')
+
+      const finalUpdate = mockPrisma.task.update.mock.calls.at(-1)?.[0]
+      expect(finalUpdate?.data?.metadata?.correlation?.workflowId).toBe('workflow-1')
+      expect(Array.isArray(finalUpdate?.data?.metadata?.timeline?.workflow)).toBe(true)
+      expect(finalUpdate?.data?.metadata?.retryState).toBeDefined()
+      expect(finalUpdate?.data?.metadata?.continuationSnapshot?.status).toBe('failed')
+      expect(finalUpdate?.data?.metadata?.continuationSnapshot?.resumable).toBe(false)
     })
 
     it('should recover once when delegate first returns capability-limited output', async () => {
@@ -1262,7 +1524,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask
+      mockWorkerDispatcher.dispatch
         .mockResolvedValueOnce({
           taskId: 'capability-task-1',
           output: 'I cannot modify files in this environment.',
@@ -1280,11 +1542,11 @@ describe('WorkforceEngine', () => {
       })
 
       expect(result.success).toBe(true)
-      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledTimes(2)
-      expect(mockDelegateEngine.delegateTask.mock.calls[1]?.[0]?.prompt).toContain(
+      expect(mockWorkerDispatcher.dispatch).toHaveBeenCalledTimes(2)
+      expect(mockWorkerDispatcher.dispatch.mock.calls[1]?.[0]?.prompt).toContain(
         'reason: capability-limited-output'
       )
-      expect(mockDelegateEngine.delegateTask.mock.calls[1]?.[0]?.useDynamicPrompt).toBe(false)
+      expect(mockWorkerDispatcher.dispatch.mock.calls[1]?.[0]?.useDynamicPrompt).toBe(false)
     })
 
     it('should fail subtask when delegate returns markdown-wrapped status placeholder', async () => {
@@ -1294,7 +1556,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask.mockResolvedValue({
+      mockWorkerDispatcher.dispatch.mockResolvedValue({
         taskId: 'status-task',
         output: '**Inspecting repository structure**',
         success: true
@@ -1312,7 +1574,7 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockDelegateEngine.delegateTask.mockResolvedValue({
+      mockWorkerDispatcher.dispatch.mockResolvedValue({
         taskId: 'meta-task',
         output:
           "Resolving conflicting instructions for initial actions. I'm wrestling with instructions that say to launch 3+ tools simultaneously in the first action.",
@@ -1334,7 +1596,7 @@ describe('WorkforceEngine', () => {
         })
       ).rejects.toThrow('Workflow cancelled by user')
 
-      expect(mockDelegateEngine.delegateTask).not.toHaveBeenCalled()
+      expect(mockWorkerDispatcher.dispatch).not.toHaveBeenCalled()
       expect(mockPrisma.task.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'workflow-1' },

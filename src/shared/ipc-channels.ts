@@ -51,6 +51,11 @@ export const INVOKE_CHANNELS = {
   TASK_CONTINUATION_ABORT: 'task-continuation:abort',
   TASK_CONTINUATION_SET_TODOS: 'task-continuation:set-todos',
 
+  // Background task center operations
+  BACKGROUND_TASK_LIST: 'background-task:list',
+  BACKGROUND_TASK_GET_OUTPUT: 'background-task:get-output',
+  BACKGROUND_TASK_CANCEL: 'background-task:cancel',
+
   // Artifact Operations
   ARTIFACT_GET: 'artifact:get',
   ARTIFACT_LIST: 'artifact:list',
@@ -59,6 +64,7 @@ export const INVOKE_CHANNELS = {
 
   // File Operations
   FILE_READ: 'file:read',
+  FILE_WRITE: 'file:write',
   FILE_TREE_GET: 'file-tree:get',
   FILE_TREE_WATCH: 'file-tree:watch',
   FILE_TREE_UNWATCH: 'file-tree:unwatch',
@@ -111,6 +117,7 @@ export const INVOKE_CHANNELS = {
   KEYCHAIN_SET_PASSWORD: 'keychain:set-password',
   KEYCHAIN_GET_PASSWORD: 'keychain:get-password',
   KEYCHAIN_DELETE_PASSWORD: 'keychain:delete-password',
+  KEYCHAIN_LIST: 'keychain:list',
   KEYCHAIN_LIST_WITH_MODELS: 'keychain:list-with-models',
   KEYCHAIN_GET_WITH_MODELS: 'keychain:get-with-models',
 
@@ -136,6 +143,9 @@ export const INVOKE_CHANNELS = {
   AGENT_RUN_LIST: 'agent-run:list',
   AGENT_RUN_GET: 'agent-run:get',
   AGENT_RUN_GET_LOGS: 'agent-run:get-logs',
+
+  // Workflow Observability Operations
+  WORKFLOW_OBSERVABILITY_GET: 'workflow-observability:get',
 
   // Enhanced Artifact Operations
   ARTIFACT_GET_DIFF: 'artifact:get-diff',
@@ -170,6 +180,10 @@ export const EVENT_CHANNELS = {
 
   // Task Events
   TASK_STATUS_CHANGED: 'task:status-changed',
+  BACKGROUND_TASK_STARTED: 'background-task:started',
+  BACKGROUND_TASK_OUTPUT: 'background-task:output',
+  BACKGROUND_TASK_COMPLETED: 'background-task:completed',
+  BACKGROUND_TASK_CANCELLED: 'background-task:cancelled',
 
   // Agent Run Events
   AGENT_RUN_UPDATE: 'agent-run:update',

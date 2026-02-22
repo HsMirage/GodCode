@@ -21,6 +21,54 @@ interface ResumeHistoryItem {
   status: 'completed' | 'aborted'
 }
 
+interface SessionRecoveryRecord {
+  sessionId: string
+  status: 'active' | 'interrupted' | 'recovering' | 'recovered'
+  checkpoint: {
+    inProgressTasks?: string[]
+    pendingTasks?: string[]
+    completedTasks?: string[]
+    checkpointAt?: string | Date
+  }
+}
+
+async function loadResumeHistory(sessionId: string): Promise<ResumeHistoryItem[]> {
+  if (!window.codeall || !sessionId) return []
+
+  try {
+    const recoverable = (await window.codeall.invoke(
+      'session-recovery:list'
+    )) as SessionRecoveryRecord[]
+
+    return recoverable
+      .filter(item => item.sessionId === sessionId)
+      .map(item => {
+        const checkpointAt = item.checkpoint?.checkpointAt
+        const timestamp =
+          checkpointAt instanceof Date
+            ? checkpointAt.toISOString()
+            : typeof checkpointAt === 'string'
+              ? checkpointAt
+              : new Date().toISOString()
+
+        const completedCount = Array.isArray(item.checkpoint?.completedTasks)
+          ? item.checkpoint.completedTasks.length
+          : 0
+
+        return {
+          timestamp,
+          taskCount: completedCount,
+          status: item.status === 'active' || item.status === 'recovered' ? 'completed' : 'aborted'
+        }
+      })
+      .sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp))
+      .slice(0, 5)
+  } catch (error) {
+    console.error('Failed to load resume history:', error)
+    return []
+  }
+}
+
 interface SessionResumeIndicatorProps {
   sessionId: string
 }
@@ -30,11 +78,7 @@ export function SessionResumeIndicator({ sessionId }: SessionResumeIndicatorProp
   const [isLoading, setIsLoading] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
 
-  // Mock history data for now as backend service integration is next
-  const [history] = useState<ResumeHistoryItem[]>([
-    { timestamp: new Date(Date.now() - 3600000).toISOString(), taskCount: 3, status: 'completed' },
-    { timestamp: new Date(Date.now() - 86400000).toISOString(), taskCount: 5, status: 'aborted' }
-  ])
+  const [history, setHistory] = useState<ResumeHistoryItem[]>([])
 
   useEffect(() => {
     let mounted = true
@@ -51,8 +95,18 @@ export function SessionResumeIndicator({ sessionId }: SessionResumeIndicatorProp
       }
     }
 
-    checkStatus()
-    const interval = setInterval(checkStatus, 30000)
+    const load = async () => {
+      await checkStatus()
+      const loadedHistory = await loadResumeHistory(sessionId)
+      if (mounted) {
+        setHistory(loadedHistory)
+      }
+    }
+
+    void load()
+    const interval = setInterval(() => {
+      void load()
+    }, 30000)
 
     return () => {
       mounted = false

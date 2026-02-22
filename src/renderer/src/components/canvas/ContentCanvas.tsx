@@ -1,20 +1,11 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { BrowserViewer } from './BrowserViewer'
 import { useCanvasLifecycle } from '../../hooks/useCanvasLifecycle'
 import { useArtifactStore } from '../../store/artifact.store'
 import { useDataStore } from '../../store/data.store'
 import { useUIStore } from '../../store/ui.store'
-import {
-  X,
-  Globe,
-  Copy,
-  Download,
-  Trash2,
-  Maximize2,
-  Loader2,
-  PanelRight,
-  PanelBottom
-} from 'lucide-react'
+import { api } from '../../api'
+import { X, Globe, Copy, Download, Trash2, Maximize2, Loader2, Save } from 'lucide-react'
 import { CodePreview } from '../artifact/previews/CodePreview'
 import { MarkdownPreview } from '../artifact/previews/MarkdownPreview'
 import { ImagePreview } from '../artifact/previews/ImagePreview'
@@ -22,10 +13,18 @@ import { JsonPreview } from '../artifact/previews/JsonPreview'
 import { Artifact } from '../../types/domain'
 
 export function ContentCanvas() {
-  const { tabs, activeTab, isOpen, closeTab, setOpen, switchTab } = useCanvasLifecycle()
-  const { selectedArtifact, downloadArtifact, deleteArtifact } = useArtifactStore()
-  const { currentSpaceId } = useDataStore()
-  const { showContentCanvas, toggleContentCanvas, activeView } = useUIStore()
+  const { tabs, activeTab, closeTab, setOpen, switchTab, updateTabContent, markTabSaved } =
+    useCanvasLifecycle()
+  const { selectedArtifact, downloadArtifact, deleteArtifact, loadArtifacts } = useArtifactStore()
+  const { currentSpaceId, currentSessionId } = useDataStore()
+  const { showContentCanvas, toggleContentCanvas } = useUIStore()
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [conflictState, setConflictState] = useState<{
+    currentContent: string
+    currentMtimeMs: number
+    attemptedContent: string
+  } | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
 
   const handleClose = () => {
     setOpen(false)
@@ -65,6 +64,77 @@ export function ContentCanvas() {
 
   const artifactName = selectedArtifact ? selectedArtifact.path.split('/').pop() : 'Browser Preview'
 
+  const handleSaveTab = async (tabId: string, forceOverwrite = false) => {
+    const tab = tabs.find(item => item.id === tabId)
+    if (!tab?.path || !currentSessionId) return
+
+    const nextContent = tab.content || ''
+    const expectedMtimeMs = forceOverwrite ? undefined : tab.mtimeMs
+
+    setIsSaving(true)
+    setSaveError(null)
+
+    try {
+      const result = await api.writeArtifactContent({
+        filePath: tab.path,
+        sessionId: currentSessionId,
+        content: nextContent,
+        expectedMtimeMs
+      })
+
+      if (result.success === false) {
+        if (result.conflict) {
+          setConflictState({
+            currentContent: result.conflict.currentContent,
+            currentMtimeMs: result.conflict.currentMtimeMs,
+            attemptedContent: nextContent
+          })
+          return
+        }
+        throw new Error(result.error || 'Failed to save file')
+      }
+
+      markTabSaved(tabId, nextContent, result.mtimeMs)
+      setConflictState(null)
+      if (currentSessionId) {
+        await loadArtifacts(currentSessionId)
+      }
+    } catch (error) {
+      setSaveError((error as Error).message)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleSaveActiveTab = async (forceOverwrite = false) => {
+    if (!activeTab?.id) return
+    await handleSaveTab(activeTab.id, forceOverwrite)
+  }
+
+  const handleReloadFromDisk = () => {
+    if (!activeTab?.id || !conflictState) return
+    updateTabContent(activeTab.id, conflictState.currentContent)
+    markTabSaved(activeTab.id, conflictState.currentContent, conflictState.currentMtimeMs)
+    setConflictState(null)
+  }
+
+  const handleMergeAfterConflict = () => {
+    if (!activeTab?.id || !conflictState) return
+
+    const mergedContent = [
+      '<<<<<<< Disk version',
+      conflictState.currentContent,
+      '=======',
+      conflictState.attemptedContent,
+      '>>>>>>> Your edits'
+    ].join('\n')
+
+    markTabSaved(activeTab.id, mergedContent, conflictState.currentMtimeMs)
+    updateTabContent(activeTab.id, mergedContent)
+    setConflictState(null)
+    setSaveError('Conflict merged with markers. Please review and save.')
+  }
+
   if (selectedArtifact) {
     return (
       <div className="h-full flex flex-col ui-bg-panel border-l ui-border">
@@ -103,6 +173,19 @@ export function ContentCanvas() {
             </button>
             <div className="w-px h-4 bg-[var(--border-secondary)] mx-1" />
 
+            <button
+              type="button"
+              onClick={() => {
+                if (activeTab?.id) {
+                  void handleSaveTab(activeTab.id)
+                }
+              }}
+              disabled={!activeTab?.isDirty || isSaving}
+              className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/10 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Save file"
+            >
+              <Save className={`w-4 h-4 ${isSaving ? 'animate-pulse' : ''}`} />
+            </button>
             <button
               type="button"
               onClick={handleClose}
@@ -152,7 +235,10 @@ export function ContentCanvas() {
               }`}
               onClick={() => switchTab(tab.id)}
             >
-              <span className="text-sm truncate max-w-[150px]">{tab.title}</span>
+              <span className="text-sm truncate max-w-[150px]">
+                {tab.title}
+                {tab.isDirty ? ' *' : ''}
+              </span>
               <button
                 type="button"
                 onClick={e => {
@@ -176,8 +262,48 @@ export function ContentCanvas() {
         </button>
       </div>
 
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 flex flex-col">
         {activeTab.type === 'browser' && <BrowserViewer tab={activeTab} />}
+        {activeTab.type !== 'browser' && (
+          <div className="h-full flex flex-col">
+            {(saveError || conflictState) && (
+              <div className="border-b ui-border px-3 py-2 text-xs">
+                {saveError && <p className="text-red-500">{saveError}</p>}
+                {conflictState && (
+                  <div className="flex items-center justify-between gap-2 text-amber-500">
+                    <span>File modified externally.</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleMergeAfterConflict}
+                        className="px-2 py-1 rounded bg-violet-500/10 hover:bg-violet-500/20"
+                      >
+                        Merge
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleReloadFromDisk}
+                        className="px-2 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20"
+                      >
+                        Reload
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            <textarea
+              value={activeTab.content || ''}
+              onChange={e => {
+                updateTabContent(activeTab.id, e.target.value)
+                setConflictState(null)
+                setSaveError(null)
+              }}
+              className="flex-1 w-full resize-none bg-[var(--bg-primary)] text-[var(--text-primary)] p-3 font-mono text-sm outline-none"
+              spellCheck={false}
+            />
+          </div>
+        )}
       </div>
     </div>
   )

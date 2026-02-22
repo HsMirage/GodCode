@@ -1,4 +1,4 @@
-import { Camera, Bug, ZoomIn, ZoomOut, Maximize } from 'lucide-react'
+import { Camera, Bug, ZoomIn, ZoomOut, Hand } from 'lucide-react'
 
 interface ToolbarProps {
   onScreenshot: () => void
@@ -6,6 +6,8 @@ interface ToolbarProps {
   onZoomIn: () => void
   onZoomOut: () => void
   onResetZoom: () => void
+  onTakeover?: () => void
+  isManualControl?: boolean
   zoomLevel: number
 }
 
@@ -15,6 +17,8 @@ export function Toolbar({
   onZoomIn,
   onZoomOut,
   onResetZoom,
+  onTakeover,
+  isManualControl = false,
   zoomLevel
 }: ToolbarProps) {
   return (
@@ -47,6 +51,19 @@ export function Toolbar({
           <ZoomIn className="w-3.5 h-3.5" />
         </button>
       </div>
+
+      <button
+        type="button"
+        onClick={onTakeover}
+        className={`p-1.5 rounded-md transition-colors ${
+          isManualControl
+            ? 'text-emerald-300 bg-emerald-500/10'
+            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+        }`}
+        title="Take Manual Control"
+      >
+        <Hand className="w-4 h-4" />
+      </button>
 
       <button
         type="button"

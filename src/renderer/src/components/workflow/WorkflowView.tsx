@@ -11,6 +11,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { Task } from '@/types/domain'
+import { useTraceNavigationStore } from '../../store/trace-navigation.store'
 import { TaskNode, type TaskNodeData } from './TaskNode'
 import { EdgeWithLabel } from './EdgeWithLabel'
 
@@ -34,11 +35,35 @@ interface CheckpointTimelineItem {
   reason?: string
 }
 
+interface WorkflowRuntimeLookup {
+  byTaskId: Record<string, { runId?: string; agentId?: string }>
+  byRunId: Record<string, { taskId: string; agentId?: string }>
+}
+
 export function WorkflowView({ sessionId }: WorkflowViewProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<TaskNodeData>>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [isLoading, setIsLoading] = useState(true)
   const [checkpoints, setCheckpoints] = useState<CheckpointTimelineItem[]>([])
+  const [runtimeLookup, setRuntimeLookup] = useState<WorkflowRuntimeLookup>({ byTaskId: {}, byRunId: {} })
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const navigationTarget = useTraceNavigationStore(state => state.target)
+  const requestNavigate = useTraceNavigationStore(state => state.requestNavigate)
+
+  const handleTaskSelect = useCallback(
+    (task: Task) => {
+      setSelectedTaskId(task.id)
+      const runtime = runtimeLookup.byTaskId[task.id]
+      requestNavigate({
+        source: 'workflow-node',
+        taskId: task.id,
+        runId: runtime?.runId,
+        agentId: runtime?.agentId || task.assignedAgent || undefined,
+        preferredView: 'agent'
+      })
+    },
+    [requestNavigate, runtimeLookup.byTaskId]
+  )
 
   const convertTasksToFlow = useCallback((tasks: Task[]) => {
     const flowNodes: Node<TaskNodeData>[] = []
@@ -113,7 +138,9 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
         },
         data: {
           task,
-          duration
+          duration,
+          highlighted: (selectedTaskId ? selectedTaskId === task.id : navigationTarget?.taskId === task.id),
+          onSelectTask: handleTaskSelect
         }
       })
 
@@ -137,13 +164,55 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
     })
 
     return { nodes: flowNodes, edges: flowEdges }
-  }, [])
+  }, [handleTaskSelect, navigationTarget?.taskId, selectedTaskId])
 
   const reloadTasks = useCallback(async () => {
     if (!window.codeall) return
     try {
       const tasks = (await window.codeall.invoke('task:list', sessionId)) as Task[]
-      const { nodes: flowNodes, edges: flowEdges } = convertTasksToFlow(tasks)
+
+      const workflowTask = tasks.find(task => task.type === 'workflow')
+      if (workflowTask) {
+        const snapshot = (await window.codeall.invoke(
+          'workflow-observability:get',
+          workflowTask.id
+        )) as {
+          assignments?: Array<{ persistedTaskId?: string; runId?: string; assignedAgent?: string }>
+        } | null
+
+        const byTaskId: Record<string, { runId?: string; agentId?: string }> = {}
+        const byRunId: Record<string, { taskId: string; agentId?: string }> = {}
+
+        const assignments = Array.isArray(snapshot?.assignments) ? snapshot.assignments : []
+        for (const assignment of assignments) {
+          const taskId =
+            typeof assignment?.persistedTaskId === 'string' && assignment.persistedTaskId.trim().length > 0
+              ? assignment.persistedTaskId
+              : null
+          if (!taskId) {
+            continue
+          }
+
+          const runId =
+            typeof assignment.runId === 'string' && assignment.runId.trim().length > 0
+              ? assignment.runId
+              : undefined
+          const agentId =
+            typeof assignment.assignedAgent === 'string' && assignment.assignedAgent.trim().length > 0
+              ? assignment.assignedAgent
+              : undefined
+
+          byTaskId[taskId] = { runId, agentId }
+          if (runId) {
+            byRunId[runId] = { taskId, agentId }
+          }
+        }
+
+        setRuntimeLookup({ byTaskId, byRunId })
+      } else {
+        setRuntimeLookup({ byTaskId: {}, byRunId: {} })
+      }
+
       const checkpointTimeline = tasks
         .filter(task => task.type === 'workflow')
         .flatMap(task => {
@@ -163,13 +232,40 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
         })
         .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime())
 
-      setNodes(flowNodes)
+      const fallbackHighlightedTaskId =
+        selectedTaskId ||
+        navigationTarget?.taskId ||
+        (navigationTarget?.runId ? runtimeLookup.byRunId[navigationTarget.runId]?.taskId : undefined) ||
+        null
+      const { nodes: flowNodes, edges: flowEdges } = convertTasksToFlow(tasks)
+      const patchedNodes = fallbackHighlightedTaskId
+        ? flowNodes.map(node => ({
+            ...node,
+            data: {
+              ...node.data,
+              highlighted: node.id === fallbackHighlightedTaskId,
+              onSelectTask: handleTaskSelect
+            }
+          }))
+        : flowNodes
+
+      setNodes(patchedNodes)
       setEdges(flowEdges)
       setCheckpoints(checkpointTimeline)
     } catch (error) {
       console.error('Failed to reload workflow tasks:', error)
     }
-  }, [sessionId, convertTasksToFlow, setNodes, setEdges])
+  }, [
+    sessionId,
+    convertTasksToFlow,
+    setNodes,
+    setEdges,
+    selectedTaskId,
+    navigationTarget?.taskId,
+    navigationTarget?.runId,
+    runtimeLookup.byRunId,
+    handleTaskSelect
+  ])
 
   useEffect(() => {
     // Skip if not running in Electron environment
@@ -230,7 +326,29 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
     return () => {
       removeListener()
     }
-  }, [setNodes])
+  }, [setNodes, reloadTasks])
+
+  useEffect(() => {
+    const targetTaskId = navigationTarget?.taskId
+    if (!targetTaskId) {
+      return
+    }
+    setSelectedTaskId(targetTaskId)
+  }, [navigationTarget?.taskId])
+
+  useEffect(() => {
+    const targetRunId = navigationTarget?.runId
+    if (!targetRunId) {
+      return
+    }
+
+    const mapped = runtimeLookup.byRunId[targetRunId]
+    if (!mapped?.taskId) {
+      return
+    }
+
+    setSelectedTaskId(mapped.taskId)
+  }, [navigationTarget?.runId, runtimeLookup.byRunId])
 
   if (isLoading) {
     return (

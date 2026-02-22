@@ -55,45 +55,51 @@ import { handleAgentRunList, handleAgentRunGet, handleAgentRunGetLogs } from './
 import { handleSettingGet, handleSettingSet, handleSettingGetAll } from './handlers/setting'
 import { registerFileTreeHandlers } from './handlers/file-tree'
 import { registerSessionContinuityHandlers } from './handlers/session-continuity'
+import { handleWorkflowObservabilityGet } from './handlers/workflow-observability'
+import { registerBackgroundTaskHandlers } from './handlers/background-task'
+import { INVOKE_CHANNELS } from '@/shared/ipc-channels'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
-  ipcMain.handle('model:create', handleModelCreate)
-  ipcMain.handle('model:list', handleModelList)
-  ipcMain.handle('model:update', handleModelUpdate)
-  ipcMain.handle('model:delete', handleModelDelete)
-  ipcMain.handle('ping', handlePing)
+  ipcMain.handle(INVOKE_CHANNELS.MODEL_CREATE, handleModelCreate)
+  ipcMain.handle(INVOKE_CHANNELS.MODEL_LIST, handleModelList)
+  ipcMain.handle(INVOKE_CHANNELS.MODEL_UPDATE, handleModelUpdate)
+  ipcMain.handle(INVOKE_CHANNELS.MODEL_DELETE, handleModelDelete)
+  ipcMain.handle(INVOKE_CHANNELS.PING, handlePing)
 
   registerBrowserHandlers(mainWindow)
 
   // Session handlers
-  ipcMain.handle('session:create', handleSessionCreate)
-  ipcMain.handle('session:get', handleSessionGet)
-  ipcMain.handle('session:get-or-create-default', handleSessionGetOrCreateDefault)
-  ipcMain.handle('session:list', handleSessionList)
-  ipcMain.handle('session:update', handleSessionUpdate)
-  ipcMain.handle('session:delete', handleSessionDelete)
+  ipcMain.handle(INVOKE_CHANNELS.SESSION_CREATE, handleSessionCreate)
+  ipcMain.handle(INVOKE_CHANNELS.SESSION_GET, handleSessionGet)
+  ipcMain.handle(INVOKE_CHANNELS.SESSION_GET_OR_CREATE_DEFAULT, handleSessionGetOrCreateDefault)
+  ipcMain.handle(INVOKE_CHANNELS.SESSION_LIST, handleSessionList)
+  ipcMain.handle(INVOKE_CHANNELS.SESSION_UPDATE, handleSessionUpdate)
+  ipcMain.handle(INVOKE_CHANNELS.SESSION_DELETE, handleSessionDelete)
 
   // Message handlers
-  ipcMain.handle('message:send', handleMessageSend)
-  ipcMain.handle('message:list', handleMessageList)
-  ipcMain.handle('message:abort', handleMessageAbort)
+  ipcMain.handle(INVOKE_CHANNELS.MESSAGE_SEND, handleMessageSend)
+  ipcMain.handle(INVOKE_CHANNELS.MESSAGE_LIST, handleMessageList)
+  ipcMain.handle(INVOKE_CHANNELS.MESSAGE_ABORT, handleMessageAbort)
 
   // Provider cache handlers
-  ipcMain.handle('provider-cache:get-stats', handleProviderCacheGetStats)
-  ipcMain.handle('provider-cache:is-connected', handleProviderCacheIsConnected)
-  ipcMain.handle('provider-cache:get-available-models', handleProviderCacheGetAvailableModels)
-  ipcMain.handle('provider-cache:set-status', handleProviderCacheSetStatus)
+  ipcMain.handle(INVOKE_CHANNELS.PROVIDER_CACHE_GET_STATS, handleProviderCacheGetStats)
+  ipcMain.handle(INVOKE_CHANNELS.PROVIDER_CACHE_IS_CONNECTED, handleProviderCacheIsConnected)
+  ipcMain.handle(
+    INVOKE_CHANNELS.PROVIDER_CACHE_GET_AVAILABLE_MODELS,
+    handleProviderCacheGetAvailableModels
+  )
+  ipcMain.handle(INVOKE_CHANNELS.PROVIDER_CACHE_SET_STATUS, handleProviderCacheSetStatus)
 
   // Task handlers
-  ipcMain.handle('task:create', handleTaskCreate)
-  ipcMain.handle('task:get', handleTaskGet)
-  ipcMain.handle('task:list', handleTaskList)
-  ipcMain.handle('task:update', handleTaskUpdate)
+  ipcMain.handle(INVOKE_CHANNELS.TASK_CREATE, handleTaskCreate)
+  ipcMain.handle(INVOKE_CHANNELS.TASK_GET, handleTaskGet)
+  ipcMain.handle(INVOKE_CHANNELS.TASK_LIST, handleTaskList)
+  ipcMain.handle(INVOKE_CHANNELS.TASK_UPDATE, handleTaskUpdate)
 
   // Task continuation handlers
-  ipcMain.handle('task-continuation:get-status', handleTaskContinuationGetStatus)
-  ipcMain.handle('task-continuation:abort', handleTaskContinuationAbort)
-  ipcMain.handle('task-continuation:set-todos', handleTaskContinuationSetTodos)
+  ipcMain.handle(INVOKE_CHANNELS.TASK_CONTINUATION_GET_STATUS, handleTaskContinuationGetStatus)
+  ipcMain.handle(INVOKE_CHANNELS.TASK_CONTINUATION_ABORT, handleTaskContinuationAbort)
+  ipcMain.handle(INVOKE_CHANNELS.TASK_CONTINUATION_SET_TODOS, handleTaskContinuationSetTodos)
 
   // Space handlers
   registerSpaceHandlers()
@@ -108,34 +114,40 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   registerBackupHandlers()
 
   // Keychain handlers
-  ipcMain.handle('keychain:set-password', handleKeychainSetPassword)
-  ipcMain.handle('keychain:get-password', handleKeychainGetPassword)
-  ipcMain.handle('keychain:delete-password', handleKeychainDeletePassword)
-  ipcMain.handle('keychain:list', handleKeychainList)
-  ipcMain.handle('keychain:list-with-models', handleKeychainListWithModels)
-  ipcMain.handle('keychain:get-with-models', handleKeychainGetWithModels)
+  ipcMain.handle(INVOKE_CHANNELS.KEYCHAIN_SET_PASSWORD, handleKeychainSetPassword)
+  ipcMain.handle(INVOKE_CHANNELS.KEYCHAIN_GET_PASSWORD, handleKeychainGetPassword)
+  ipcMain.handle(INVOKE_CHANNELS.KEYCHAIN_DELETE_PASSWORD, handleKeychainDeletePassword)
+  ipcMain.handle(INVOKE_CHANNELS.KEYCHAIN_LIST, handleKeychainList)
+  ipcMain.handle(INVOKE_CHANNELS.KEYCHAIN_LIST_WITH_MODELS, handleKeychainListWithModels)
+  ipcMain.handle(INVOKE_CHANNELS.KEYCHAIN_GET_WITH_MODELS, handleKeychainGetWithModels)
 
   // Agent Binding handlers
-  ipcMain.handle('agent-binding:list', handleAgentBindingList)
-  ipcMain.handle('agent-binding:get', handleAgentBindingGet)
-  ipcMain.handle('agent-binding:update', handleAgentBindingUpdate)
-  ipcMain.handle('agent-binding:reset', handleAgentBindingReset)
+  ipcMain.handle(INVOKE_CHANNELS.AGENT_BINDING_LIST, handleAgentBindingList)
+  ipcMain.handle(INVOKE_CHANNELS.AGENT_BINDING_GET, handleAgentBindingGet)
+  ipcMain.handle(INVOKE_CHANNELS.AGENT_BINDING_UPDATE, handleAgentBindingUpdate)
+  ipcMain.handle(INVOKE_CHANNELS.AGENT_BINDING_RESET, handleAgentBindingReset)
 
   // Category Binding handlers
-  ipcMain.handle('category-binding:list', handleCategoryBindingList)
-  ipcMain.handle('category-binding:get', handleCategoryBindingGet)
-  ipcMain.handle('category-binding:update', handleCategoryBindingUpdate)
-  ipcMain.handle('category-binding:reset', handleCategoryBindingReset)
+  ipcMain.handle(INVOKE_CHANNELS.CATEGORY_BINDING_LIST, handleCategoryBindingList)
+  ipcMain.handle(INVOKE_CHANNELS.CATEGORY_BINDING_GET, handleCategoryBindingGet)
+  ipcMain.handle(INVOKE_CHANNELS.CATEGORY_BINDING_UPDATE, handleCategoryBindingUpdate)
+  ipcMain.handle(INVOKE_CHANNELS.CATEGORY_BINDING_RESET, handleCategoryBindingReset)
 
   // Agent Run handlers
-  ipcMain.handle('agent-run:list', handleAgentRunList)
-  ipcMain.handle('agent-run:get', handleAgentRunGet)
-  ipcMain.handle('agent-run:get-logs', handleAgentRunGetLogs)
+  ipcMain.handle(INVOKE_CHANNELS.AGENT_RUN_LIST, handleAgentRunList)
+  ipcMain.handle(INVOKE_CHANNELS.AGENT_RUN_GET, handleAgentRunGet)
+  ipcMain.handle(INVOKE_CHANNELS.AGENT_RUN_GET_LOGS, handleAgentRunGetLogs)
+
+  // Workflow Observability handlers
+  ipcMain.handle(INVOKE_CHANNELS.WORKFLOW_OBSERVABILITY_GET, handleWorkflowObservabilityGet)
+
+  // Background task handlers
+  registerBackgroundTaskHandlers()
 
   // System Setting handlers
-  ipcMain.handle('setting:get', handleSettingGet)
-  ipcMain.handle('setting:set', handleSettingSet)
-  ipcMain.handle('setting:get-all', handleSettingGetAll)
+  ipcMain.handle(INVOKE_CHANNELS.SETTING_GET, handleSettingGet)
+  ipcMain.handle(INVOKE_CHANNELS.SETTING_SET, handleSettingSet)
+  ipcMain.handle(INVOKE_CHANNELS.SETTING_GET_ALL, handleSettingGetAll)
 
   // Session Continuity handlers
   registerSessionContinuityHandlers()
