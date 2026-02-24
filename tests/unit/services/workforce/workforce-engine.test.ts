@@ -12,7 +12,8 @@ import path from 'node:path'
 const mockPrisma: any = {
   task: {
     create: vi.fn(),
-    update: vi.fn()
+    update: vi.fn(),
+    findUnique: vi.fn()
   },
   model: {
     findFirst: vi.fn(),
@@ -126,6 +127,7 @@ describe('WorkforceEngine', () => {
     mockPrisma.session.findFirst.mockResolvedValue({ id: 'session-1' })
     mockPrisma.task.create.mockResolvedValue({ id: 'workflow-1', type: 'workflow' })
     mockPrisma.task.update.mockResolvedValue({ id: 'workflow-1' })
+    mockPrisma.task.findUnique.mockResolvedValue(null)
     mockPrisma.model.findMany.mockResolvedValue([
       {
         id: 'model-1',
@@ -158,6 +160,47 @@ describe('WorkforceEngine', () => {
 
   afterEach(() => {
     vi.clearAllMocks()
+  })
+
+  describe('getWorkflowObservability', () => {
+    it('returns fallback continuation snapshot status from workflow task state', async () => {
+      const now = new Date('2026-02-22T07:00:00.000Z')
+      mockPrisma.task.findUnique.mockResolvedValue({
+        id: 'workflow-1',
+        status: 'completed',
+        createdAt: now,
+        startedAt: now,
+        completedAt: now,
+        metadata: {
+          graph: { workflowId: 'workflow-1', nodeOrder: [], nodes: [] },
+          integration: {
+            summary: 'ok',
+            conflicts: [],
+            unresolvedItems: [],
+            taskOutputs: [],
+            rawTaskOutputs: []
+          },
+          sharedContext: {
+            workflowId: 'workflow-1',
+            totalEntries: 0,
+            activeEntries: 0,
+            archivedEntries: 0,
+            entries: [],
+            archived: []
+          },
+          timeline: { workflow: [], task: [], run: [] }
+        }
+      })
+
+      const snapshot = await workforceEngine.getWorkflowObservability('workflow-1')
+
+      expect(snapshot).not.toBeNull()
+      expect(snapshot?.workflowId).toBe('workflow-1')
+      expect(snapshot?.continuationSnapshot.status).toBe('completed')
+      expect(snapshot?.continuationSnapshot.updatedAt).toBe(now.toISOString())
+      expect(snapshot?.recoveryState.phase).toBe('classify')
+      expect(snapshot?.recoveryState.history).toEqual([])
+    })
   })
 
   describe('decomposeTask', () => {
@@ -301,6 +344,46 @@ describe('WorkforceEngine', () => {
         category: 'artifacts'
       })
       expect(artifactEntries.length).toBeGreaterThan(0)
+    })
+
+    it('sanitizes user-facing integration output while preserving raw observability payloads', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-1', description: 'Task 1', dependencies: [] }]
+        })
+      })
+
+      const rawOutput = [
+        'Running validation (typecheck/build)',
+        'assistant to=functions.bash',
+        '{"command":"npm run build","timeout":600000}',
+        'Validation passed.'
+      ].join('\n')
+
+      mockWorkerDispatcher.dispatch.mockResolvedValue({
+        taskId: 'subtask-id',
+        output: rawOutput,
+        success: true,
+        runId: 'run-123',
+        model: 'openai-compatible::gpt-4o-mini',
+        modelSource: 'system-default'
+      })
+
+      await workforceEngine.executeWorkflow('Do workflow', 'test-session-123', { enableRetry: false })
+
+      const finalUpdate = mockPrisma.task.update.mock.calls.at(-1)?.[0]
+      const integration = finalUpdate?.data?.metadata?.integration
+      expect(finalUpdate?.data?.output).toContain('Running validation (typecheck/build)')
+      expect(finalUpdate?.data?.output).toContain('Validation passed.')
+      expect(finalUpdate?.data?.output).not.toContain('assistant to=functions.bash')
+      expect(finalUpdate?.data?.output).not.toContain('"command"')
+
+      expect(integration?.taskOutputs?.[0]?.outputPreview).toContain('Running validation (typecheck/build)')
+      expect(integration?.taskOutputs?.[0]?.outputPreview).toContain('Validation passed.')
+      expect(integration?.taskOutputs?.[0]?.outputPreview).not.toContain('assistant to=functions.bash')
+
+      expect(integration?.rawTaskOutputs?.[0]?.outputPreview).toContain('assistant to=functions.bash')
+      expect(integration?.rawTaskOutputs?.[0]?.outputPreview).toContain('"command"')
     })
 
     it('should run pre-dispatch/between-waves/final orchestrator checkpoints for dependent waves', async () => {
@@ -712,6 +795,196 @@ describe('WorkforceEngine', () => {
       ).toBe(true)
     })
 
+    it('should recover from final checkpoint halt on server-start confirmation gap instead of exiting', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            { id: 'task-1', description: '准备配置文件', dependencies: [] },
+            { id: 'task-4', description: 'run npm run dev', dependencies: ['task-1'] }
+          ]
+        })
+      })
+
+      let task1RunCount = 0
+      let task4RunCount = 0
+      let finalCheckpointCount = 0
+
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          const phase = delegateInput.metadata.checkpointPhase
+          if (phase === 'final') {
+            finalCheckpointCount++
+            if (finalCheckpointCount === 1) {
+              return {
+                taskId: 'checkpoint-final-1',
+                output: JSON.stringify({
+                  status: 'halt',
+                  approved_task_ids: [],
+                  reason:
+                    'Task 4 (run npm run dev) did not confirm successful server startup. The output ends with an intent to start the server, not a success confirmation.'
+                }),
+                success: true
+              }
+            }
+          }
+
+          return {
+            taskId: `checkpoint-${phase}-${finalCheckpointCount}`,
+            output: JSON.stringify({
+              status: 'continue',
+              approved_task_ids: delegateInput.metadata.readyTaskIds || []
+            }),
+            success: true
+          }
+        }
+
+        if (delegateInput.description === '准备配置文件') {
+          task1RunCount++
+          return {
+            taskId: `subtask-config-${task1RunCount}`,
+            output:
+              'Changed files:\n- package.json\n\nVerification command:\n- pnpm -s typecheck\n- pnpm -s vitest run tests/unit/services/workforce/workforce-engine.test.ts --run',
+            success: true
+          }
+        }
+
+        task4RunCount++
+        if (task4RunCount === 1) {
+          return {
+            taskId: 'subtask-dev-1',
+            output: '让我先执行 npm run dev，然后确认服务是否启动成功。',
+            success: true
+          }
+        }
+
+        return {
+          taskId: 'subtask-dev-2',
+          output: [
+            'Server startup confirmation:',
+            '- Command: npm run dev',
+            '- Status: listening on http://127.0.0.1:5173',
+            '',
+            'Verification command:',
+            '- lsof -i :5173',
+            '- curl -I http://127.0.0.1:5173'
+          ].join('\n'),
+          success: true
+        }
+      })
+
+      const result = await workforceEngine.executeWorkflow('运行开发服务并确认可访问', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      expect(result.success).toBe(true)
+      expect(task1RunCount).toBe(1)
+      expect(task4RunCount).toBeGreaterThanOrEqual(2)
+      expect(result.orchestratorCheckpoints?.some(item => item.phase === 'final' && item.status === 'halt')).toBe(
+        true
+      )
+      expect(
+        result.orchestratorCheckpoints?.some(item => item.phase === 'final' && item.status === 'continue')
+      ).toBe(true)
+    })
+
+    it('should recover from chinese evidence-gap halt reason instead of interrupting workflow', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            { id: 'task-1', description: '实现基础结构', dependencies: [] },
+            { id: 'task-2', description: '修复核心功能', dependencies: ['task-1'] },
+            { id: 'task-3', description: '联调并验证', dependencies: ['task-2'] }
+          ]
+        })
+      })
+
+      let task2RunCount = 0
+      let betweenWavesCheckpointCount = 0
+
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          const phase = delegateInput.metadata.checkpointPhase
+          if (phase === 'between-waves') {
+            betweenWavesCheckpointCount++
+            if (betweenWavesCheckpointCount === 2) {
+              return {
+                taskId: 'checkpoint-between-2',
+                output: JSON.stringify({
+                  status: 'halt',
+                  approved_task_ids: [],
+                  reason:
+                    "Task-2 缺乏实现证据，输出仅显示探索与分析（如'让我继续检查这些功能'），未提供代码变更或具体修复内容，导致 Task-3 的依赖不满足。"
+                }),
+                success: true
+              }
+            }
+          }
+
+          return {
+            taskId: `checkpoint-${phase}-${betweenWavesCheckpointCount}`,
+            output: JSON.stringify({
+              status: 'continue',
+              approved_task_ids: delegateInput.metadata.readyTaskIds || []
+            }),
+            success: true
+          }
+        }
+
+        if (delegateInput.description === '实现基础结构') {
+          return {
+            taskId: 'subtask-base',
+            output:
+              'Changed files:\n- src/main/services/workforce/workforce-engine.ts\n\nVerification command:\n- pnpm -s vitest run tests/unit/services/workforce/workforce-engine.test.ts --run',
+            success: true
+          }
+        }
+
+        if (delegateInput.description === '修复核心功能') {
+          task2RunCount++
+          if (task2RunCount === 1) {
+            return {
+              taskId: 'subtask-core-1',
+              output: '让我继续检查这些功能。',
+              success: true
+            }
+          }
+
+          return {
+            taskId: 'subtask-core-2',
+            output:
+              'Changed files:\n- src/main/services/workforce/workforce-engine.ts\n\nVerification command:\n- pnpm -s vitest run tests/unit/services/workforce/workforce-engine.test.ts --run',
+            success: true
+          }
+        }
+
+        return {
+          taskId: 'subtask-verify',
+          output:
+            'Changed files:\n- src/main/services/workforce/workforce-engine.ts\n\nVerification command:\n- pnpm -s vitest run tests/unit/services/workforce/workforce-engine.test.ts --run',
+          success: true
+        }
+      })
+
+      const result = await workforceEngine.executeWorkflow('修复并完成联调', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      expect(result.success).toBe(true)
+      expect(task2RunCount).toBeGreaterThanOrEqual(2)
+      expect(
+        result.orchestratorCheckpoints?.some(
+          item => item.phase === 'between-waves' && item.status === 'halt'
+        )
+      ).toBe(true)
+      expect(
+        result.orchestratorCheckpoints?.some(
+          item => item.phase === 'between-waves' && item.status === 'continue'
+        )
+      ).toBe(true)
+    })
+
     it('should respect MAX_CONCURRENT limit', async () => {
       // Mock decomposition to return 5 independent tasks
       mockAdapter.sendMessage.mockResolvedValue({
@@ -805,7 +1078,7 @@ describe('WorkforceEngine', () => {
           '- [ ] Task 2: 修复后端 API 错误',
           '  depends on: 1',
           '- [ ] Task 3: 更新页面样式',
-          '  category: visual-engineering',
+          '  category: zhinv',
           '  依赖: 1'
         ].join('\n')
       )
@@ -1051,7 +1324,7 @@ describe('WorkforceEngine', () => {
         }
       )
 
-      const delegateCalls = mockWorkerDispatcher.dispatch.mock.calls.map(call => call[0])
+      const delegateCalls = mockWorkerDispatcher.dispatch.mock.calls.map((call: any[]) => call[0])
       const backendExecutionCall = delegateCalls.find(input => input.category === 'dayu')
       expect(backendExecutionCall?.prompt).toContain(
         '当前工作流是只读模式：请输出可执行实现方案与验证方案，不得改代码。'
@@ -1059,15 +1332,15 @@ describe('WorkforceEngine', () => {
       expect(backendExecutionCall?.prompt).not.toContain('EVIDENCE_PATHS / KEY_FINDINGS')
     })
 
-    it('should resolve OMO-style subagent_type and category hints from plan blocks', async () => {
+    it('should resolve canonical subagent_type and category hints from plan blocks', async () => {
       vi.spyOn(fs, 'existsSync').mockImplementation(path => String(path).includes('.sisyphus'))
       vi.spyOn(fs, 'readFileSync').mockReturnValue(
         [
           '# Plan',
           '- [ ] Task 1: 扫描代码结构',
-          '  task(subagent_type="explore")',
+          '  task(subagent_type="qianliyan")',
           '- [ ] Task 2: 快速修复小问题',
-          "  task(category='quick')"
+          "  task(category='tianbing')"
         ].join('\n')
       )
 
@@ -1274,6 +1547,24 @@ describe('WorkforceEngine', () => {
       ).rejects.toThrow('status-only-placeholder')
     })
 
+    it('should fail subtask when delegate returns chinese status-only placeholder output', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-status', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch.mockResolvedValue({
+        taskId: 'status-task',
+        output: '我将先探索代码库并继续分析现状。',
+        success: true
+      })
+
+      await expect(
+        workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
+      ).rejects.toThrow('status-only-placeholder')
+    })
+
     it('should recover once when delegate first returns status-only placeholder', async () => {
       mockAdapter.sendMessage.mockResolvedValue({
         content: JSON.stringify({
@@ -1285,6 +1576,38 @@ describe('WorkforceEngine', () => {
         .mockResolvedValueOnce({
           taskId: 'status-task-1',
           output: 'Inspecting repository',
+          success: true
+        })
+        .mockResolvedValueOnce({
+          taskId: 'status-task-2',
+          output:
+            'Changed files:\n- src/renderer/src/pages/ChatPage.tsx\n\nVerification command:\n- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts',
+          success: true
+        })
+
+      const result = await workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', {
+        enableRetry: false
+      })
+
+      expect(result.success).toBe(true)
+      expect(mockWorkerDispatcher.dispatch).toHaveBeenCalledTimes(2)
+      expect(mockWorkerDispatcher.dispatch.mock.calls[1]?.[0]?.prompt).toContain(
+        'ACTIONABILITY RECOVERY DIRECTIVE'
+      )
+      expect(mockWorkerDispatcher.dispatch.mock.calls[1]?.[0]?.useDynamicPrompt).toBe(false)
+    })
+
+    it('should recover once when delegate first returns chinese status-only placeholder', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-status', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch
+        .mockResolvedValueOnce({
+          taskId: 'status-task-1',
+          output: '让我先检查这些功能并梳理依赖关系。',
           success: true
         })
         .mockResolvedValueOnce({
@@ -1366,7 +1689,8 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockBindingService.getCategoryModelConfig.mockImplementation(async (categoryCode: string) => {
+      mockBindingService.getCategoryModelConfig.mockImplementation(async (...args: any[]) => {
+        const categoryCode = args[0] as string
         if (categoryCode === 'zhinv') {
           throw new Error(
             '任务类别「zhinv」已绑定模型但模型记录不存在。请到“设置 -> Agent 绑定 -> 任务类别”重新选择模型。'
@@ -1396,7 +1720,8 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockBindingService.getAgentModelConfig.mockImplementation(async (agentCode: string) => {
+      mockBindingService.getAgentModelConfig.mockImplementation(async (...args: any[]) => {
+        const agentCode = args[0] as string
         if (agentCode === 'qianliyan') {
           throw new Error(
             'Agent「qianliyan」已绑定模型「gpt-4o-mini」但缺少 API Key。请到“设置 -> API Keys/模型”补全凭据，或到“设置 -> Agent 绑定”切换模型。'
@@ -1418,7 +1743,7 @@ describe('WorkforceEngine', () => {
       expect(workflowResult.executions.get('task-1')?.persistedTaskId).toBe('subtask-id')
 
       const persistedSubtaskUpdateCall = mockPrisma.task.update.mock.calls.find(
-        call => call?.[0]?.where?.id === 'subtask-id'
+        (call: any[]) => call?.[0]?.where?.id === 'subtask-id'
       )
 
       expect(persistedSubtaskUpdateCall?.[0]?.data?.metadata?.runtimeBindingSnapshot).toEqual(
@@ -1432,6 +1757,67 @@ describe('WorkforceEngine', () => {
           fallbackTrail: expect.any(Array)
         })
       )
+    })
+
+    it('should persist role-policy snapshot in runtime binding metadata for explicit primary agent', async () => {
+      await workforceEngine.executeWorkflow('Do workflow', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      const persistedSubtaskUpdateCall = mockPrisma.task.update.mock.calls.find(
+        (call: any[]) => call?.[0]?.where?.id === 'subtask-id'
+      )
+      const runtimeBindingSnapshot =
+        persistedSubtaskUpdateCall?.[0]?.data?.metadata?.runtimeBindingSnapshot
+
+      expect(runtimeBindingSnapshot).toEqual(
+        expect.objectContaining({
+          primaryAgentRolePolicy: expect.objectContaining({
+            alias: 'haotian',
+            canonicalAgent: 'haotian',
+            canonicalRole: 'orchestration'
+          })
+        })
+      )
+    })
+
+    it('should include evidence-gap unresolved items when execution output lacks required evidence fields', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-1', description: '实现网站主页', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch.mockResolvedValue({
+        taskId: 'subtask-id',
+        output: [
+          'Changed files:',
+          '- src/main/services/workforce/workforce-engine.ts',
+          '',
+          'Verification command:',
+          '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+        ].join('\n'),
+        success: true
+      })
+
+      await workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      const finalUpdate = mockPrisma.task.update.mock.calls.at(-1)?.[0]
+      const unresolvedItems = finalUpdate?.data?.metadata?.integration?.unresolvedItems || []
+
+      expect(Array.isArray(unresolvedItems)).toBe(true)
+      expect(
+        unresolvedItems.some((item: string) =>
+          item.includes('evidence-gap') &&
+          item.includes('missing fields') &&
+          item.includes('objective') &&
+          item.includes('residual-risk')
+        )
+      ).toBe(true)
     })
 
     it('should apply deterministic backoff per failure class', () => {
@@ -1452,6 +1838,327 @@ describe('WorkforceEngine', () => {
 
       expect(timeoutDelayAttempt1).toBe(100)
       expect(timeoutDelayAttempt2).toBe(200)
+    })
+
+    it('should keep workflow metadata backward compatible when recovery config is provided', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            {
+              id: 'task-recovery',
+              description: '修复失败任务并验证',
+              dependencies: [],
+              assignedAgent: 'luban'
+            }
+          ]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch.mockImplementation(async () => ({
+        taskId: 'subtask-recovery',
+        output: [
+          'objective: retry failed command with fixed dependency',
+          'changes: src/main/services/workforce/workforce-engine.ts',
+          'validation: pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run',
+          'residual-risk: none'
+        ].join('\n'),
+        success: true,
+        runId: 'run-recovery',
+        model: 'openai-compatible::gpt-4o-mini',
+        modelSource: 'system-default'
+      }))
+
+      await workforceEngine.executeWorkflow('修复失败任务并继续执行', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false,
+        recoveryConfig: {
+          enabled: true,
+          maxAttempts: 2,
+          classBudget: {
+            transient: 2,
+            config: 1,
+            dependency: 1,
+            implementation: 1,
+            permission: 1,
+            unknown: 1
+          },
+          fallbackPolicy: 'category-first'
+        }
+      } as any)
+
+      const workflowUpdates = mockPrisma.task.update.mock.calls
+        .map((call: any[]) => call[0])
+        .filter((call: Record<string, any>) => call?.where?.id === 'workflow-1')
+
+      const finalUpdate = workflowUpdates.at(-1)
+      expect(finalUpdate?.data?.metadata?.retryState).toBeDefined()
+      expect(finalUpdate?.data?.metadata?.continuationSnapshot?.status).toBe('completed')
+      expect(finalUpdate?.data?.metadata?.integration).toBeDefined()
+      expect(finalUpdate?.data?.metadata?.recoveryState).toBeDefined()
+      expect(finalUpdate?.data?.metadata?.recoveryState?.recoveredTasks).toEqual([])
+    })
+
+    it('should recover failed subtask through autonomous recovery flow and continue workflow', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-recovery-flow', description: '修复失败任务', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
+        if (delegateInput.metadata?.recoveryContext) {
+          return {
+            taskId: 'recovery-task-1',
+            output: [
+              'objective: retry task with repaired settings',
+              'changes: src/main/services/workforce/workforce-engine.ts',
+              'validation: pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run',
+              'residual-risk: low'
+            ].join('\n'),
+            success: true,
+            runId: 'run-recovery-1',
+            model: 'openai-compatible::gpt-4o-mini',
+            modelSource: 'system-default'
+          }
+        }
+
+        throw new Error('network timeout while executing task')
+      })
+
+      const result = await workforceEngine.executeWorkflow('修复失败任务并继续执行', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false,
+        recoveryConfig: {
+          enabled: true,
+          maxAttempts: 2,
+          classBudget: {
+            transient: 2,
+            config: 1,
+            dependency: 1,
+            implementation: 1,
+            permission: 1,
+            unknown: 1
+          },
+          fallbackPolicy: 'category-first'
+        }
+      } as any)
+
+      expect(result.success).toBe(true)
+      const recoveryCall = mockWorkerDispatcher.dispatch.mock.calls.find(
+        (call: any[]) => call?.[0]?.metadata?.recoveryContext
+      )?.[0]
+      expect(recoveryCall?.metadata?.recoveryContext).toEqual(
+        expect.objectContaining({
+          failureClass: 'transient',
+          orchestratorOwner: 'haotian'
+        })
+      )
+      expect(recoveryCall?.metadata?.primaryAgentRoleAlias).toBe('haotian')
+      expect(recoveryCall?.metadata?.workflowStage).toBe('dispatch')
+
+      const workflowUpdates = mockPrisma.task.update.mock.calls
+        .map((call: any[]) => call[0])
+        .filter((call: Record<string, any>) => call?.where?.id === 'workflow-1')
+
+      const finalUpdate = workflowUpdates.at(-1)
+      expect(finalUpdate?.data?.metadata?.recoveryState?.recoveredTasks).toContain('task-recovery-flow')
+      expect(
+        finalUpdate?.data?.metadata?.recoveryState?.history?.some(
+          (item: any) =>
+            item.taskId === 'task-recovery-flow' &&
+            item.status === 'succeeded' &&
+            item.phase === 'validate' &&
+            item.validatorResult === 'passed'
+        )
+      ).toBe(true)
+    })
+
+    it('should fail fast and persist terminal diagnostic for non-recoverable permission errors', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-permission', description: '修改受限资源', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch.mockRejectedValue(new Error('403 forbidden for this operation'))
+
+      await expect(
+        workforceEngine.executeWorkflow('修复受限任务', 'test-session-123', {
+          agentCode: 'haotian',
+          enableRetry: false,
+          recoveryConfig: {
+            enabled: true,
+            maxAttempts: 2,
+            classBudget: {
+              transient: 2,
+              config: 1,
+              dependency: 1,
+              implementation: 1,
+              permission: 1,
+              unknown: 1
+            },
+            fallbackPolicy: 'category-first'
+          }
+        } as any)
+      ).rejects.toThrow('403 forbidden')
+
+      const finalUpdate = mockPrisma.task.update.mock.calls.at(-1)?.[0]
+      expect(finalUpdate?.data?.metadata?.recoveryState?.unrecoveredTasks).toContain('task-permission')
+      expect(finalUpdate?.data?.metadata?.recoveryState?.terminalDiagnostics?.[0]).toEqual(
+        expect.objectContaining({
+          taskId: 'task-permission',
+          failureClass: 'permission'
+        })
+      )
+      expect(
+        finalUpdate?.data?.metadata?.recoveryState?.history?.some(
+          (item: any) => item.taskId === 'task-permission' && item.status === 'aborted'
+        )
+      ).toBe(true)
+    })
+
+    it('should disable autonomous recovery and fail fast when recovery mode is off', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-disabled-recovery', description: '关闭恢复后失败', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch.mockRejectedValue(new Error('network timeout while executing task'))
+
+      await expect(
+        workforceEngine.executeWorkflow('禁用恢复并执行', 'test-session-123', {
+          agentCode: 'haotian',
+          enableRetry: false,
+          recoveryConfig: {
+            enabled: false,
+            maxAttempts: 2,
+            classBudget: {
+              transient: 2,
+              config: 1,
+              dependency: 1,
+              implementation: 1,
+              permission: 1,
+              unknown: 1
+            },
+            fallbackPolicy: 'category-first'
+          }
+        } as any)
+      ).rejects.toThrow('network timeout')
+
+      const recoveryCall = mockWorkerDispatcher.dispatch.mock.calls.find(
+        (call: any[]) => call?.[0]?.metadata?.recoveryContext
+      )
+      expect(recoveryCall).toBeUndefined()
+
+      const finalUpdate = mockPrisma.task.update.mock.calls.at(-1)?.[0]
+      expect(finalUpdate?.data?.metadata?.recoveryMode?.enabled).toBe(false)
+      expect(finalUpdate?.data?.metadata?.recoveryState?.unrecoveredTasks).toContain(
+        'task-disabled-recovery'
+      )
+    })
+
+    it('should persist in-progress recovery phase snapshots for restart resume', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-resume', description: '修复并恢复执行', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
+        if (delegateInput.metadata?.recoveryContext) {
+          return {
+            taskId: 'task-resume-recovery',
+            output: [
+              'objective: recover workflow execution',
+              'changes: src/main/services/workforce/workforce-engine.ts',
+              'validation: pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run',
+              'residual-risk: low'
+            ].join('\n'),
+            success: true,
+            runId: 'run-recovery-resume',
+            model: 'openai-compatible::gpt-4o-mini',
+            modelSource: 'system-default'
+          }
+        }
+
+        throw new Error('network timeout while executing task')
+      })
+
+      await workforceEngine.executeWorkflow('恢复执行流程', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false,
+        recoveryConfig: {
+          enabled: true,
+          maxAttempts: 2,
+          classBudget: {
+            transient: 2,
+            config: 1,
+            dependency: 1,
+            implementation: 1,
+            permission: 1,
+            unknown: 1
+          },
+          fallbackPolicy: 'category-first'
+        }
+      } as any)
+
+      const workflowUpdates = mockPrisma.task.update.mock.calls
+        .map((call: any[]) => call[0])
+        .filter((call: Record<string, any>) => call?.where?.id === 'workflow-1')
+
+      const phases = workflowUpdates
+        .map((call: Record<string, any>) => call?.data?.metadata?.recoveryState?.phase)
+        .filter((phase: unknown): phase is string => typeof phase === 'string')
+
+      expect(phases).toContain('plan')
+      expect(phases).toContain('fix')
+      expect(phases).toContain('validate')
+    })
+
+    it('should fail fast when fallback policy has no available recovery route', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-no-route', description: '无可用恢复路由', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch.mockRejectedValue(new Error('network timeout while executing task'))
+
+      await expect(
+        workforceEngine.executeWorkflow('触发无路由恢复', 'test-session-123', {
+          agentCode: 'haotian',
+          enableRetry: false,
+          recoveryConfig: {
+            enabled: true,
+            maxAttempts: 2,
+            classBudget: {
+              transient: 2,
+              config: 1,
+              dependency: 1,
+              implementation: 1,
+              permission: 1,
+              unknown: 1
+            },
+            fallbackPolicy: 'model-first'
+          }
+        } as any)
+      ).rejects.toThrow('network timeout')
+
+      const workflowUpdates = mockPrisma.task.update.mock.calls
+        .map((call: any[]) => call[0])
+        .filter((call: Record<string, any>) => call?.where?.id === 'workflow-1')
+      const finalUpdate = workflowUpdates.at(-1)
+      expect(finalUpdate?.data?.metadata?.recoveryState?.unrecoveredTasks).toContain('task-no-route')
+      expect(
+        finalUpdate?.data?.metadata?.recoveryState?.terminalDiagnostics?.some((item: any) => {
+          const reason = String(item.reason || '')
+          return (
+            reason.includes('No recoverable route available') ||
+            reason.includes('No compatible model token available')
+          )
+        })
+      ).toBe(true)
     })
 
     it('should persist retry state snapshot for restart recovery', async () => {
@@ -1476,11 +2183,11 @@ describe('WorkforceEngine', () => {
       expect(retryState?.errors[0]?.errorType).toBe(RetryableErrorType.NETWORK_ERROR)
 
       const workflowUpdates = mockPrisma.task.update.mock.calls
-        .map(call => call[0])
-        .filter(call => call?.where?.id === 'workflow-1')
+        .map((call: any[]) => call[0])
+        .filter((call: Record<string, any>) => call?.where?.id === 'workflow-1')
 
       const runningRetrySnapshot = workflowUpdates.find(
-        call =>
+        (call: Record<string, any>) =>
           call?.data?.metadata?.continuationSnapshot?.status === 'running' &&
           call?.data?.metadata?.retryState?.tasks?.['task-retry']
       )

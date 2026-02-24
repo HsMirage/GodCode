@@ -4,14 +4,15 @@ import { connectDatabase, disconnectDatabase } from './config/database';
 import { logger } from './utils/logger';
 import { errorHandler } from './middlewares/error.middleware';
 import { corsMiddleware } from './middlewares/cors.middleware';
-import { loggerMiddleware } from './middlewares/logger.middleware';
-import { rateLimiter } from './middlewares/rateLimit.middleware';
+import { requestLogger } from './middlewares/logger.middleware';
+import { apiLimiter } from './middlewares/rateLimit.middleware';
 
-// Import routes (to be created)
-// import { authRoutes } from './routes/auth.routes';
-// import { userRoutes } from './routes/user.routes';
-// import { brandRoutes } from './routes/brand.routes';
-// import { eventRoutes } from './routes/event.routes';
+// Import routes
+import authRoutes from './routes/auth.routes';
+import userRoutes from './routes/user.routes';
+import brandRoutes from './routes/brand.routes';
+import eventRoutes from './routes/event.routes';
+import searchRoutes from './routes/search.routes';
 
 // 创建 Express 应用
 const app: Application = express();
@@ -28,11 +29,11 @@ try {
 app.use(corsMiddleware);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(loggerMiddleware);
-app.use(rateLimiter);
+app.use(requestLogger);
+app.use(apiLimiter);
 
 // 健康检查端点
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -42,7 +43,7 @@ app.get('/health', (req, res) => {
 });
 
 // API 路由
-app.use('/api', (req, res) => {
+app.use('/api', (_req, res) => {
   res.json({
     message: 'Brand Blacklist API',
     version: '1.0.0',
@@ -56,11 +57,12 @@ app.use('/api', (req, res) => {
   });
 });
 
-// 路由挂载（待实现）
-// app.use('/api/auth', authRoutes);
-// app.use('/api/users', userRoutes);
-// app.use('/api/brands', brandRoutes);
-// app.use('/api/events', eventRoutes);
+// 路由挂载
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/brands', brandRoutes);
+app.use('/api/events', eventRoutes);
+app.use('/api/search', searchRoutes);
 
 // 404 处理
 app.use((req, res) => {
@@ -92,7 +94,7 @@ async function startServer() {
     // 优雅关闭
     const gracefulShutdown = async (signal: string) => {
       logger.info(`⚠️  ${signal} received. Starting graceful shutdown...`);
-      
+
       server.close(async () => {
         logger.info('📡 HTTP server closed');
         await disconnectDatabase();

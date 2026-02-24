@@ -32,19 +32,6 @@ export interface AgentConfig {
   promptTemplate?: AgentPromptTemplate
 }
 
-// OMO names → CodeAll pinyin codes (backward compatibility)
-const AGENT_ALIASES: Record<string, string> = {
-  explore: 'qianliyan',
-  oracle: 'baize',
-  librarian: 'diting',
-  metis: 'chongming',
-  momus: 'leigong',
-  prometheus: 'fuxi',
-  sisyphus: 'haotian',
-  atlas: 'kuafu',
-  hephaestus: 'luban'
-}
-
 // All prompt templates - build map automatically from agentCode
 const ALL_PROMPTS: AgentPromptTemplate[] = [
   qianliyanPromptTemplate,
@@ -85,15 +72,8 @@ const agentsRegistry = AGENT_DEFINITIONS.reduce(
   {} as Record<string, AgentConfig>
 )
 
-Object.entries(AGENT_ALIASES).forEach(([alias, targetCode]) => {
-  if (agentsRegistry[targetCode]) {
-    agentsRegistry[alias] = agentsRegistry[targetCode]
-  }
-})
-
 export const agents = agentsRegistry
 
 export function getAgentPromptByCode(code: string): string | undefined {
-  const resolved = AGENT_ALIASES[code] || code
-  return agents[resolved]?.promptTemplate?.systemPrompt
+  return agents[code]?.promptTemplate?.systemPrompt
 }

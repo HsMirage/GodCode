@@ -7,7 +7,14 @@ export default defineConfig({
     environment: 'happy-dom',
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.{test,spec}.{js,ts,tsx}'],
-    exclude: ['node_modules/', 'dist/', 'out/', '参考项目/**', 'tests/e2e/**'],
+    exclude: [
+      'node_modules/',
+      'dist/',
+      'out/',
+      '参考项目/**',
+      'tests/e2e/**',
+      'tests/ceshi/frontend/node_modules/**'
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

@@ -1,4 +1,4 @@
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions } from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { config } from '../config';
 import { logger } from '../utils/logger';
@@ -16,9 +16,10 @@ export class JwtService {
     username: string;
     role: string;
   }): string {
-    return jwt.sign(payload, config.jwt.secret, {
+    const options: SignOptions = {
       expiresIn: config.jwt.expiresIn,
-    });
+    };
+    return jwt.sign(payload, config.jwt.secret, options);
   }
 
   /**

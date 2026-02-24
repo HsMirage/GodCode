@@ -58,7 +58,10 @@ async function loadResumeHistory(sessionId: string): Promise<ResumeHistoryItem[]
         return {
           timestamp,
           taskCount: completedCount,
-          status: item.status === 'active' || item.status === 'recovered' ? 'completed' : 'aborted'
+          status:
+            item.status === 'active' || item.status === 'recovered'
+              ? ('completed' as const)
+              : ('aborted' as const)
         }
       })
       .sort((a, b) => +new Date(b.timestamp) - +new Date(a.timestamp))

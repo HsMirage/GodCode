@@ -1,5 +1,5 @@
 import { DatabaseService } from './database'
-import { SecureStorageService } from './secure-storage.service'
+import { SecureStorageService, maskApiKey } from './secure-storage.service'
 
 export class KeychainService {
   private static instance: KeychainService | null = null
@@ -102,7 +102,7 @@ export class KeychainService {
           label: record.label,
           baseURL: record.baseURL,
           provider: record.provider,
-          apiKey: secureStorage.decrypt(record.encryptedKey)
+          apiKey: maskApiKey(secureStorage.decrypt(record.encryptedKey))
         })
       )
     } catch (error) {

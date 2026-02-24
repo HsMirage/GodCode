@@ -22,14 +22,18 @@ export async function handleAgentBindingGet(_event: IpcMainInvokeEvent, agentCod
 }
 
 export async function handleAgentBindingUpdate(
-  _event: IpcMainInvokeEvent,
+  event: IpcMainInvokeEvent,
   params: { agentCode: string; data: UpdateAgentBindingInput }
 ) {
-  return await bindingService.updateAgentBinding(params.agentCode, params.data)
+  return await bindingService.updateAgentBinding(params.agentCode, params.data, {
+    sessionId: event.sender?.id ? String(event.sender.id) : undefined
+  })
 }
 
-export async function handleAgentBindingReset(_event: IpcMainInvokeEvent, agentCode: string) {
-  return await bindingService.resetAgentBinding(agentCode)
+export async function handleAgentBindingReset(event: IpcMainInvokeEvent, agentCode: string) {
+  return await bindingService.resetAgentBinding(agentCode, {
+    sessionId: event.sender?.id ? String(event.sender.id) : undefined
+  })
 }
 
 // ========== Category Binding Handlers ==========
@@ -43,12 +47,16 @@ export async function handleCategoryBindingGet(_event: IpcMainInvokeEvent, categ
 }
 
 export async function handleCategoryBindingUpdate(
-  _event: IpcMainInvokeEvent,
+  event: IpcMainInvokeEvent,
   params: { categoryCode: string; data: UpdateCategoryBindingInput }
 ) {
-  return await bindingService.updateCategoryBinding(params.categoryCode, params.data)
+  return await bindingService.updateCategoryBinding(params.categoryCode, params.data, {
+    sessionId: event.sender?.id ? String(event.sender.id) : undefined
+  })
 }
 
-export async function handleCategoryBindingReset(_event: IpcMainInvokeEvent, categoryCode: string) {
-  return await bindingService.resetCategoryBinding(categoryCode)
+export async function handleCategoryBindingReset(event: IpcMainInvokeEvent, categoryCode: string) {
+  return await bindingService.resetCategoryBinding(categoryCode, {
+    sessionId: event.sender?.id ? String(event.sender.id) : undefined
+  })
 }

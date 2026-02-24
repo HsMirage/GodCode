@@ -72,10 +72,15 @@ export class SecureStorageService {
 }
 
 export function maskApiKey(key: string): string {
-  if (!key || key.length < 8) {
+  if (!key) {
     return '********'
   }
-  const first3 = key.slice(0, 3)
+
+  if (key.length < 8) {
+    return '********'
+  }
+
+  const first4 = key.slice(0, 4)
   const last4 = key.slice(-4)
-  return `${first3}...${last4}`
+  return `${first4}...${last4}`
 }

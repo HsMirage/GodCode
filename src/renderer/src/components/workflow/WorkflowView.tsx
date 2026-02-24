@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -40,20 +40,28 @@ interface WorkflowRuntimeLookup {
   byRunId: Record<string, { taskId: string; agentId?: string }>
 }
 
+type WorkflowLoadState = 'idle' | 'loading' | 'ready' | 'error'
+
 export function WorkflowView({ sessionId }: WorkflowViewProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<TaskNodeData>>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  const [isLoading, setIsLoading] = useState(true)
+  const [loadState, setLoadState] = useState<WorkflowLoadState>('idle')
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [checkpoints, setCheckpoints] = useState<CheckpointTimelineItem[]>([])
   const [runtimeLookup, setRuntimeLookup] = useState<WorkflowRuntimeLookup>({ byTaskId: {}, byRunId: {} })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const runtimeLookupRef = useRef<WorkflowRuntimeLookup>({ byTaskId: {}, byRunId: {} })
+  const selectedTaskIdRef = useRef<string | null>(null)
+  const latestRequestIdRef = useRef(0)
   const navigationTarget = useTraceNavigationStore(state => state.target)
   const requestNavigate = useTraceNavigationStore(state => state.requestNavigate)
+  const navigationTargetRef = useRef(navigationTarget)
 
   const handleTaskSelect = useCallback(
     (task: Task) => {
       setSelectedTaskId(task.id)
-      const runtime = runtimeLookup.byTaskId[task.id]
+      selectedTaskIdRef.current = task.id
+      const runtime = runtimeLookupRef.current.byTaskId[task.id]
       requestNavigate({
         source: 'workflow-node',
         taskId: task.id,
@@ -62,10 +70,10 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
         preferredView: 'agent'
       })
     },
-    [requestNavigate, runtimeLookup.byTaskId]
+    [requestNavigate]
   )
 
-  const convertTasksToFlow = useCallback((tasks: Task[]) => {
+  const convertTasksToFlow = useCallback((tasks: Task[], highlightedTaskId: string | null) => {
     const flowNodes: Node<TaskNodeData>[] = []
     const flowEdges: Edge[] = []
     const taskMap = new Map<string, Task>()
@@ -139,7 +147,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
         data: {
           task,
           duration,
-          highlighted: (selectedTaskId ? selectedTaskId === task.id : navigationTarget?.taskId === task.id),
+          highlighted: highlightedTaskId === task.id,
           onSelectTask: handleTaskSelect
         }
       })
@@ -164,127 +172,149 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
     })
 
     return { nodes: flowNodes, edges: flowEdges }
-  }, [handleTaskSelect, navigationTarget?.taskId, selectedTaskId])
+  }, [handleTaskSelect])
 
-  const reloadTasks = useCallback(async () => {
-    if (!window.codeall) return
-    try {
-      const tasks = (await window.codeall.invoke('task:list', sessionId)) as Task[]
+  const reloadTasks = useCallback(
+    async (options?: { showLoading?: boolean }) => {
+      if (!window.codeall) return
 
-      const workflowTask = tasks.find(task => task.type === 'workflow')
-      if (workflowTask) {
-        const snapshot = (await window.codeall.invoke(
-          'workflow-observability:get',
-          workflowTask.id
-        )) as {
-          assignments?: Array<{ persistedTaskId?: string; runId?: string; assignedAgent?: string }>
-        } | null
-
-        const byTaskId: Record<string, { runId?: string; agentId?: string }> = {}
-        const byRunId: Record<string, { taskId: string; agentId?: string }> = {}
-
-        const assignments = Array.isArray(snapshot?.assignments) ? snapshot.assignments : []
-        for (const assignment of assignments) {
-          const taskId =
-            typeof assignment?.persistedTaskId === 'string' && assignment.persistedTaskId.trim().length > 0
-              ? assignment.persistedTaskId
-              : null
-          if (!taskId) {
-            continue
-          }
-
-          const runId =
-            typeof assignment.runId === 'string' && assignment.runId.trim().length > 0
-              ? assignment.runId
-              : undefined
-          const agentId =
-            typeof assignment.assignedAgent === 'string' && assignment.assignedAgent.trim().length > 0
-              ? assignment.assignedAgent
-              : undefined
-
-          byTaskId[taskId] = { runId, agentId }
-          if (runId) {
-            byRunId[runId] = { taskId, agentId }
-          }
-        }
-
-        setRuntimeLookup({ byTaskId, byRunId })
-      } else {
-        setRuntimeLookup({ byTaskId: {}, byRunId: {} })
+      const requestId = ++latestRequestIdRef.current
+      if (options?.showLoading) {
+        setLoadState('loading')
+        setLoadError(null)
       }
 
-      const checkpointTimeline = tasks
-        .filter(task => task.type === 'workflow')
-        .flatMap(task => {
-          const raw = task.metadata?.orchestratorCheckpoints
-          if (!Array.isArray(raw)) {
-            return []
+      try {
+        const tasks = (await window.codeall.invoke('task:list', sessionId)) as Task[]
+        if (requestId !== latestRequestIdRef.current) {
+          return
+        }
+
+        let nextRuntimeLookup: WorkflowRuntimeLookup = { byTaskId: {}, byRunId: {} }
+        const workflowTask = tasks.find(task => task.type === 'workflow')
+        if (workflowTask) {
+          const snapshot = (await window.codeall.invoke(
+            'workflow-observability:get',
+            workflowTask.id
+          )) as {
+            workflowId?: string
+            continuationSnapshot?: { status?: string }
+            assignments?: Array<{ persistedTaskId?: string; runId?: string; assignedAgent?: string }>
+          } | null
+
+          const snapshotWorkflowId =
+            typeof snapshot?.workflowId === 'string' && snapshot.workflowId.trim().length > 0
+              ? snapshot.workflowId
+              : undefined
+          const safeSnapshot =
+            snapshotWorkflowId && snapshotWorkflowId !== workflowTask.id
+              ? null
+              : snapshot
+
+          if (requestId !== latestRequestIdRef.current) {
+            return
           }
-          return raw
-            .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-            .map((item, index) => ({
-              key: `${task.id}-${String(item.persistedTaskId || item.timestamp || index)}`,
-              phase: typeof item.phase === 'string' ? item.phase : 'unknown',
-              status: typeof item.status === 'string' ? item.status : 'unknown',
-              timestamp: typeof item.timestamp === 'string' ? item.timestamp : undefined,
-              reason: typeof item.reason === 'string' ? item.reason : undefined
-            }))
-        })
-        .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime())
 
-      const fallbackHighlightedTaskId =
-        selectedTaskId ||
-        navigationTarget?.taskId ||
-        (navigationTarget?.runId ? runtimeLookup.byRunId[navigationTarget.runId]?.taskId : undefined) ||
-        null
-      const { nodes: flowNodes, edges: flowEdges } = convertTasksToFlow(tasks)
-      const patchedNodes = fallbackHighlightedTaskId
-        ? flowNodes.map(node => ({
-            ...node,
-            data: {
-              ...node.data,
-              highlighted: node.id === fallbackHighlightedTaskId,
-              onSelectTask: handleTaskSelect
+          const byTaskId: Record<string, { runId?: string; agentId?: string }> = {}
+          const byRunId: Record<string, { taskId: string; agentId?: string }> = {}
+
+          const assignments = Array.isArray(safeSnapshot?.assignments) ? safeSnapshot.assignments : []
+          for (const assignment of assignments) {
+            const taskId =
+              typeof assignment?.persistedTaskId === 'string' && assignment.persistedTaskId.trim().length > 0
+                ? assignment.persistedTaskId
+                : null
+            if (!taskId) continue
+
+            const runId =
+              typeof assignment.runId === 'string' && assignment.runId.trim().length > 0
+                ? assignment.runId
+                : undefined
+            const agentId =
+              typeof assignment.assignedAgent === 'string' && assignment.assignedAgent.trim().length > 0
+                ? assignment.assignedAgent
+                : undefined
+
+            byTaskId[taskId] = { runId, agentId }
+            if (runId) {
+              byRunId[runId] = { taskId, agentId }
             }
-          }))
-        : flowNodes
+          }
 
-      setNodes(patchedNodes)
-      setEdges(flowEdges)
-      setCheckpoints(checkpointTimeline)
-    } catch (error) {
-      console.error('Failed to reload workflow tasks:', error)
-    }
-  }, [
-    sessionId,
-    convertTasksToFlow,
-    setNodes,
-    setEdges,
-    selectedTaskId,
-    navigationTarget?.taskId,
-    navigationTarget?.runId,
-    runtimeLookup.byRunId,
-    handleTaskSelect
-  ])
+          nextRuntimeLookup = { byTaskId, byRunId }
+        }
+
+        runtimeLookupRef.current = nextRuntimeLookup
+        setRuntimeLookup(nextRuntimeLookup)
+
+        const checkpointTimeline = tasks
+          .filter(task => task.type === 'workflow')
+          .flatMap(task => {
+            const raw = task.metadata?.orchestratorCheckpoints
+            if (!Array.isArray(raw)) {
+              return []
+            }
+            return raw
+              .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+              .map((item, index) => ({
+                key: `${task.id}-${String(item.persistedTaskId || item.timestamp || index)}`,
+                phase: typeof item.phase === 'string' ? item.phase : 'unknown',
+                status: typeof item.status === 'string' ? item.status : 'unknown',
+                timestamp: typeof item.timestamp === 'string' ? item.timestamp : undefined,
+                reason: typeof item.reason === 'string' ? item.reason : undefined
+              }))
+          })
+          .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime())
+
+        const currentNavigationTarget = navigationTargetRef.current
+        const highlightedTaskId =
+          selectedTaskIdRef.current ||
+          currentNavigationTarget?.taskId ||
+          (currentNavigationTarget?.runId
+            ? nextRuntimeLookup.byRunId[currentNavigationTarget.runId]?.taskId
+            : undefined) ||
+          null
+
+        const { nodes: flowNodes, edges: flowEdges } = convertTasksToFlow(tasks, highlightedTaskId)
+
+        if (requestId !== latestRequestIdRef.current) {
+          return
+        }
+
+        setNodes(flowNodes)
+        setEdges(flowEdges)
+        setCheckpoints(checkpointTimeline)
+        setLoadState('ready')
+        setLoadError(null)
+      } catch (error) {
+        if (requestId !== latestRequestIdRef.current) {
+          return
+        }
+        console.error('Failed to reload workflow tasks:', error)
+        setLoadState('error')
+        setLoadError(error instanceof Error ? error.message : '加载工作流失败')
+      }
+    },
+    [sessionId, convertTasksToFlow, setNodes, setEdges]
+  )
 
   useEffect(() => {
-    // Skip if not running in Electron environment
+    selectedTaskIdRef.current = selectedTaskId
+  }, [selectedTaskId])
+
+  useEffect(() => {
+    navigationTargetRef.current = navigationTarget
+  }, [navigationTarget])
+
+  useEffect(() => {
     if (!window.codeall) {
       console.warn('[WorkflowView] window.codeall not available')
-      setIsLoading(false)
+      setLoadState('ready')
+      setLoadError(null)
       return
     }
 
-    const loadTasks = async () => {
-      setIsLoading(true)
-      try {
-        await reloadTasks()
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    loadTasks()
+    void reloadTasks({ showLoading: true })
   }, [reloadTasks])
 
   useEffect(() => {
@@ -299,7 +329,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
 
         if (!nodeExists) {
           // New task detected - re-fetch all tasks to get the complete graph
-          void reloadTasks()
+          void reloadTasks({ showLoading: false })
           return nds
         }
 
@@ -350,10 +380,22 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
     setSelectedTaskId(mapped.taskId)
   }, [navigationTarget?.runId, runtimeLookup.byRunId])
 
-  if (isLoading) {
+  if (loadState === 'error') {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="text-slate-400">加载工作流...</div>
+        <div className="text-center">
+          <p className="text-rose-300">加载工作流失败</p>
+          {loadError && <p className="mt-2 text-xs text-slate-400">{loadError}</p>}
+          <button
+            type="button"
+            onClick={() => {
+              void reloadTasks({ showLoading: true })
+            }}
+            className="mt-3 rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:bg-slate-800"
+          >
+            重试
+          </button>
+        </div>
       </div>
     )
   }
@@ -371,6 +413,11 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
 
   return (
     <div className="relative h-full w-full rounded-2xl border border-slate-800/70 bg-slate-950/70 backdrop-blur">
+      {loadState === 'loading' && (
+        <div className="pointer-events-none absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-sky-500/25 bg-sky-500/10 px-3 py-1 text-xs text-sky-200">
+          正在加载新工作流…
+        </div>
+      )}
       {checkpoints.length > 0 && (
         <div className="pointer-events-none absolute right-4 top-4 z-10 max-w-md rounded-xl border border-slate-700/70 bg-slate-900/90 px-3 py-2 text-xs text-slate-200 shadow-lg backdrop-blur">
           <p className="font-medium text-slate-100">Orchestrator Checkpoints</p>

@@ -11,7 +11,10 @@ import {
   RefreshCw
 } from 'lucide-react'
 import { useDataStore } from '../../store/data.store'
+import { useUIStore } from '../../store/ui.store'
+import { useArtifactStore } from '../../store/artifact.store'
 import { safeInvoke } from '../../api'
+import { canvasLifecycle } from '../../services/canvas-lifecycle'
 import { cn } from '../../utils'
 
 interface FileNode {
@@ -54,8 +57,9 @@ const FileNodeItem: React.FC<{
   node: FileNode
   level: number
   onToggle: (node: FileNode) => void
+  onFileOpen: (node: FileNode) => Promise<void>
   expanded: Set<string>
-}> = ({ node, level, onToggle, expanded }) => {
+}> = ({ node, level, onToggle, onFileOpen, expanded }) => {
   const isOpen = expanded.has(node.path)
   const isFolder = node.type === 'directory'
 
@@ -63,7 +67,10 @@ const FileNodeItem: React.FC<{
     e.stopPropagation()
     if (isFolder) {
       onToggle(node)
+      return
     }
+
+    void onFileOpen(node)
   }
 
   return (
@@ -113,6 +120,7 @@ const FileNodeItem: React.FC<{
               node={child}
               level={level + 1}
               onToggle={onToggle}
+              onFileOpen={onFileOpen}
               expanded={expanded}
             />
           ))}
@@ -123,7 +131,9 @@ const FileNodeItem: React.FC<{
 }
 
 export const LocalFileExplorer: React.FC<LocalFileExplorerProps> = ({ className }) => {
-  const { currentSpaceId, spaces } = useDataStore()
+  const { currentSpaceId, currentSessionId, spaces } = useDataStore()
+  const { setView } = useUIStore()
+  const { clearSelection } = useArtifactStore()
   const [rootNode, setRootNode] = useState<FileNode | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -209,6 +219,13 @@ export const LocalFileExplorer: React.FC<LocalFileExplorerProps> = ({ className 
     }
   }
 
+  const handleFileOpen = async (node: FileNode) => {
+    if (!currentSessionId) return
+    clearSelection()
+    setView('canvas')
+    await canvasLifecycle.openFile(node.path, node.name)
+  }
+
   if (!currentSpaceId) {
     return null
   }
@@ -265,6 +282,7 @@ export const LocalFileExplorer: React.FC<LocalFileExplorerProps> = ({ className 
                   node={child}
                   level={0}
                   onToggle={handleToggle}
+                  onFileOpen={handleFileOpen}
                   expanded={expanded}
                 />
               ))

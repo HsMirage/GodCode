@@ -69,6 +69,54 @@ interface CodeAllAPI {
     cancelledTaskRows: number
   }>
   invoke(channel: 'task:list', sessionId: string): Promise<Task[]>
+  invoke(
+    channel: 'background-task:list',
+    input?: { sessionId?: string }
+  ): Promise<{
+    success: boolean
+    data?: Array<{
+      id: string
+      pid: number | null
+      command: string
+      description?: string
+      cwd: string
+      status: 'pending' | 'running' | 'completed' | 'error' | 'interrupt' | 'cancelled' | 'timeout'
+      exitCode: number | null
+      createdAt: string
+      startedAt: string | null
+      completedAt: string | null
+      metadata: Record<string, unknown> | null
+    }>
+    error?: string
+  }>
+  invoke(
+    channel: 'background-task:get-output',
+    input: { taskId: string; afterIndex?: number }
+  ): Promise<{
+    success: boolean
+    data?: {
+      task: {
+        id: string
+        pid: number | null
+        command: string
+        description?: string
+        cwd: string
+        status: 'pending' | 'running' | 'completed' | 'error' | 'interrupt' | 'cancelled' | 'timeout'
+        exitCode: number | null
+        createdAt: string
+        startedAt: string | null
+        completedAt: string | null
+        metadata: Record<string, unknown> | null
+      }
+      chunks: Array<{ stream: 'stdout' | 'stderr'; data: string; timestamp: string }>
+      nextIndex: number
+    }
+    error?: string
+  }>
+  invoke(
+    channel: 'background-task:cancel',
+    input: { taskId: string }
+  ): Promise<{ success: boolean; data?: { taskId: string; cancelled: boolean }; error?: string }>
   invoke(channel: 'artifact:list', sessionId: string): Promise<Artifact[]>
   invoke(
     channel: 'artifact:list',
@@ -87,7 +135,25 @@ interface CodeAllAPI {
     channel: 'file:read',
     filePath: string,
     sessionId: string
-  ): Promise<{ success: boolean; content?: string; error?: string }>
+  ): Promise<{ success: boolean; content?: string; mtimeMs?: number; error?: string }>
+  invoke(
+    channel: 'file:write',
+    data: {
+      filePath: string
+      sessionId: string
+      content: string
+      expectedMtimeMs?: number
+    }
+  ): Promise<{
+    success: boolean
+    mtimeMs?: number
+    changeType?: 'created' | 'modified'
+    error?: string
+    conflict?: {
+      currentContent: string
+      currentMtimeMs: number
+    }
+  }>
   invoke(
     channel: 'keychain:list'
   ): Promise<
@@ -168,6 +234,7 @@ interface CodeAllAPI {
     channel: 'browser:capture',
     data: { viewId: string }
   ): Promise<{ success: boolean; data?: string; error?: string }>
+  invoke(channel: 'browser:list-tabs'): Promise<{ success: boolean; data?: any[]; error?: string }>
   invoke(
     channel: 'browser:toggle-devtools',
     data: { viewId: string }
@@ -194,26 +261,37 @@ interface CodeAllAPI {
     callback: (data: { taskId: string; status: Task['status'] }) => void
   ): () => void
 
-  // Continuation Channels
-  invoke(channel: 'continuation:get-progress'): Promise<{
-    todoCompleted: number
-    todoTotal: number
-    status: 'idle' | 'running' | 'paused'
-    lastResumeTime?: Date
-  }>
-  invoke(channel: 'continuation:trigger-resume'): Promise<void>
-  invoke(channel: 'continuation:get-history'): Promise<
-    {
-      timestamp: Date
-      trigger: 'auto' | 'manual'
-      result: 'success' | 'failed'
-      tasksCompleted: number
-    }[]
-  >
-  on(
-    channel: 'continuation:status-update',
-    callback: (data: { status: 'idle' | 'running' | 'paused'; progress: number }) => void
-  ): () => void
+  // Task Continuation Channels
+  invoke(channel: 'task-continuation:get-status', sessionId: string): Promise<unknown>
+  invoke(channel: 'task-continuation:abort', sessionId: string): Promise<unknown>
+  invoke(
+    channel: 'task-continuation:set-todos',
+    sessionId: string,
+    todos: string[]
+  ): Promise<unknown>
+
+  // Provider Cache Channels
+  invoke(channel: 'provider-cache:get-stats'): Promise<unknown>
+  invoke(channel: 'provider-cache:is-connected', provider?: string): Promise<unknown>
+  invoke(channel: 'provider-cache:get-available-models', provider?: string): Promise<unknown>
+  invoke(channel: 'provider-cache:set-status', provider: string, status: 'connected' | 'disconnected'): Promise<unknown>
+
+  // Audit Log Channels
+  invoke(channel: 'audit-log:query', filters?: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>
+  invoke(channel: 'audit-log:get-by-entity', entityType: string, entityId: string): Promise<unknown>
+  invoke(channel: 'audit-log:get-by-session', sessionId: string): Promise<unknown>
+  invoke(channel: 'audit-log:get-recent', limit?: number): Promise<unknown>
+  invoke(channel: 'audit-log:count', filters?: Record<string, unknown>): Promise<unknown>
+  invoke(channel: 'audit-log:get-failed', limit?: number): Promise<unknown>
+  invoke(channel: 'audit-log:export', format: 'json' | 'csv', filters?: Record<string, unknown>): Promise<unknown>
+
+  // Session Continuity Channels
+  invoke(channel: 'session-state:get', sessionId: string): Promise<unknown>
+  invoke(channel: 'session-state:checkpoint', sessionId: string): Promise<{ success: boolean; error?: string }>
+  invoke(channel: 'session-recovery:plan', sessionId: string): Promise<unknown>
+  invoke(channel: 'session-recovery:execute', sessionId: string): Promise<{ success: boolean; error?: string }>
+  invoke(channel: 'session-recovery:list'): Promise<unknown>
+  invoke(channel: 'session-recovery:resume-prompt', sessionId: string): Promise<string>
 
   // Updater
   invoke(channel: 'updater:check-for-updates'): Promise<any>
@@ -237,11 +315,81 @@ interface CodeAllAPI {
       opId: string
       args?: Record<string, any>
       timestamp: number
+      errorCode?: string
+      durationMs?: number
     }) => void
   ): () => void
 
   // Task Events
-  on(channel: 'task:status-changed', callback: () => void): () => void
+  on(
+    channel: 'task:status-changed',
+    callback: (data: { taskId: string; status: Task['status'] }) => void
+  ): () => void
+  on(
+    channel: 'background-task:started',
+    callback: (data: {
+      task: {
+        id: string
+        pid: number | null
+        command: string
+        description?: string
+        cwd: string
+        status: 'pending' | 'running' | 'completed' | 'error' | 'interrupt' | 'cancelled' | 'timeout'
+        exitCode: number | null
+        createdAt: string
+        startedAt: string | null
+        completedAt: string | null
+        metadata: Record<string, unknown> | null
+      }
+    }) => void
+  ): () => void
+  on(
+    channel: 'background-task:output',
+    callback: (data: {
+      taskId: string
+      stream: 'stdout' | 'stderr'
+      data: string
+      timestamp: string
+    }) => void
+  ): () => void
+  on(
+    channel: 'background-task:completed',
+    callback: (data: {
+      task: {
+        id: string
+        pid: number | null
+        command: string
+        description?: string
+        cwd: string
+        status: 'pending' | 'running' | 'completed' | 'error' | 'interrupt' | 'cancelled' | 'timeout'
+        exitCode: number | null
+        createdAt: string
+        startedAt: string | null
+        completedAt: string | null
+        metadata: Record<string, unknown> | null
+      }
+      exitCode: number | null
+      signal: string | null
+    }) => void
+  ): () => void
+  on(
+    channel: 'background-task:cancelled',
+    callback: (data: {
+      task: {
+        id: string
+        pid: number | null
+        command: string
+        description?: string
+        cwd: string
+        status: 'pending' | 'running' | 'completed' | 'error' | 'interrupt' | 'cancelled' | 'timeout'
+        exitCode: number | null
+        createdAt: string
+        startedAt: string | null
+        completedAt: string | null
+        metadata: Record<string, unknown> | null
+      }
+    }) => void
+  ): () => void
 
   // Artifact Events
   on(channel: 'artifact:created', callback: () => void): () => void
@@ -284,6 +432,9 @@ interface CodeAllAPI {
   invoke(channel: 'agent-run:list', taskId: string): Promise<any[]>
   invoke(channel: 'agent-run:get', runId: string): Promise<any>
   invoke(channel: 'agent-run:get-logs', runId: string): Promise<any[]>
+
+  // Workflow Observability Channels
+  invoke(channel: 'workflow-observability:get', workflowTaskId: string): Promise<any>
 
   // Enhanced Artifact Channels
   invoke(channel: 'artifact:get-diff', artifactId: string): Promise<string | null>

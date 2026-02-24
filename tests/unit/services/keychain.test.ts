@@ -14,6 +14,11 @@ const mockSecureStorage = {
 vi.mock('@/main/services/secure-storage.service', () => ({
   SecureStorageService: {
     getInstance: vi.fn(() => mockSecureStorage)
+  },
+  maskApiKey: (key: string) => {
+    if (!key) return '********'
+    if (key.length < 8) return '********'
+    return `${key.slice(0, 4)}...${key.slice(-4)}`
   }
 }))
 
@@ -178,8 +183,8 @@ describe('KeychainService', () => {
 
   describe('getAllApiKeys', () => {
     it('should retrieve and decrypt all API keys', async () => {
-      const key1 = 'sk-1'
-      const key2 = 'sk-2'
+      const key1 = 'sk-1111222233334444'
+      const key2 = 'sk-aaaabbbbccccdddd'
 
       mockApiKeyStore.push(
         {
@@ -205,9 +210,30 @@ describe('KeychainService', () => {
       const result = await keychain.getAllApiKeys()
 
       expect(result).toHaveLength(2)
-      expect(result[0].apiKey).toBe(key1)
-      expect(result[1].apiKey).toBe(key2)
+      expect(result[0].apiKey).toBe('sk-1...4444')
+      expect(result[1].apiKey).toBe('sk-a...dddd')
+      expect(result[0].apiKey).not.toContain(key1)
+      expect(result[1].apiKey).not.toContain(key2)
       expect(mockSecureStorage.decrypt).toHaveBeenCalledTimes(2)
+    })
+
+    it('should return masked values in list and not expose full key', async () => {
+      mockApiKeyStore.push({
+        id: 'mask-1',
+        label: 'Mask Key',
+        baseURL: 'https://api.mask.com/v1',
+        provider: 'custom',
+        encryptedKey: 'encrypted_sk-1234567890abcd',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      })
+
+      const result = await keychain.getAllApiKeys()
+
+      expect(result).toHaveLength(1)
+      expect(result[0].apiKey).toBe('sk-1...abcd')
+      expect(result[0].apiKey).not.toContain('sk-1234567890abcd')
+      expect(mockSecureStorage.decrypt).toHaveBeenCalledTimes(1)
     })
   })
 

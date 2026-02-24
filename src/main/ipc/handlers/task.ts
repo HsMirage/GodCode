@@ -2,6 +2,7 @@ import type { IpcMainInvokeEvent } from 'electron'
 import type { Task as PrismaTask } from '@prisma/client'
 import { DatabaseService } from '@/main/services/database'
 import { LoggerService } from '@/main/services/logger'
+import { sanitizeCompletionOutput } from '@/main/services/workforce/output-sanitizer'
 import type { Task } from '@/types/domain'
 
 async function getPrismaClient() {
@@ -31,7 +32,7 @@ export async function handleTaskList(
         type: task.type as Task['type'],
         status: task.status as Task['status'],
         input: task.input,
-        output: task.output || undefined,
+        output: task.output ? sanitizeCompletionOutput(task.output) : undefined,
         assignedModel: task.assignedModel || undefined,
         assignedAgent: task.assignedAgent || undefined,
         createdAt: task.createdAt,

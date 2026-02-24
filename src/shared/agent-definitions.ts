@@ -8,6 +8,12 @@
 
 export type AgentType = 'primary' | 'subagent'
 export type AgentRoutingStrategy = 'direct-enhanced' | 'workforce' | 'direct'
+export type PrimaryAgentCanonicalRole = 'planning' | 'orchestration' | 'execution'
+
+export interface PrimaryAgentRoleMapping {
+  aliases: string[]
+  canonicalRole: PrimaryAgentCanonicalRole
+}
 
 /**
  * Agent 模式：控制模型选择行为
@@ -39,6 +45,7 @@ export interface AgentDefinition {
   fallbackModels: FallbackModelEntry[]
   defaultTemperature: number
   tools: string[]
+  primaryRole?: PrimaryAgentRoleMapping
 }
 
 export interface CategoryDefinition {
@@ -72,7 +79,11 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
       { model: 'gpt-4o', provider: 'openai' }
     ],
     defaultTemperature: 0.3,
-    tools: ['read', 'write', 'edit', 'bash', 'webfetch', 'look_at']
+    tools: ['read', 'write', 'edit', 'bash', 'webfetch', 'look_at'],
+    primaryRole: {
+      aliases: ['fuxi'],
+      canonicalRole: 'planning'
+    }
   },
   {
     code: 'haotian',
@@ -88,7 +99,11 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
       { model: 'gemini-1.5-pro', provider: 'gemini' }
     ],
     defaultTemperature: 0.3,
-    tools: ['read', 'write', 'edit', 'bash', 'glob', 'grep', 'delegate_task', 'look_at']
+    tools: ['read', 'write', 'edit', 'bash', 'glob', 'grep', 'delegate_task', 'look_at'],
+    primaryRole: {
+      aliases: ['haotian'],
+      canonicalRole: 'orchestration'
+    }
   },
   {
     code: 'kuafu',
@@ -103,7 +118,11 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
       { model: 'gpt-4o', provider: 'openai' }
     ],
     defaultTemperature: 0.2,
-    tools: ['read', 'write', 'edit', 'bash', 'glob', 'grep', 'delegate_task', 'look_at']
+    tools: ['read', 'write', 'edit', 'bash', 'glob', 'grep', 'delegate_task', 'look_at'],
+    primaryRole: {
+      aliases: ['kuafu'],
+      canonicalRole: 'execution'
+    }
   },
   {
     code: 'luban',
@@ -379,4 +398,37 @@ export function getPrimaryAgents(): AgentDefinition[] {
  */
 export function getSubagents(): AgentDefinition[] {
   return PRIMARY_AGENTS.filter(a => a.type === 'subagent')
+}
+
+export interface PrimaryAgentRolePolicy {
+  alias: string
+  canonicalAgent: string
+  canonicalRole: PrimaryAgentCanonicalRole
+}
+
+const PRIMARY_ROLE_ALIAS_MAP: Record<string, PrimaryAgentRolePolicy> = PRIMARY_AGENTS
+  .filter(agent => agent.type === 'primary' && agent.primaryRole)
+  .reduce((acc, agent) => {
+    const role = agent.primaryRole!
+    const aliases = Array.from(new Set(role.aliases.map(alias => alias.trim().toLowerCase())))
+    for (const alias of aliases) {
+      acc[alias] = {
+        alias,
+        canonicalAgent: agent.code,
+        canonicalRole: role.canonicalRole
+      }
+    }
+    return acc
+  }, {} as Record<string, PrimaryAgentRolePolicy>)
+
+export function resolvePrimaryAgentRolePolicy(alias: string): PrimaryAgentRolePolicy | null {
+  const normalized = alias.trim().toLowerCase()
+  if (!normalized) {
+    return null
+  }
+  return PRIMARY_ROLE_ALIAS_MAP[normalized] || null
+}
+
+export function listPrimaryAgentRoleAliases(): string[] {
+  return Object.keys(PRIMARY_ROLE_ALIAS_MAP)
 }

@@ -46,7 +46,7 @@ export interface PromptBuilderConfig {
   maxTokens?: number
   tokenCounter?: TokenCounter
   useTaskSystem?: boolean
-  includeOracleSection?: boolean
+  includeBaizeSection?: boolean
   includeCategorySkillsGuide?: boolean
 }
 
@@ -63,7 +63,7 @@ export class DynamicPromptBuilder {
       maxTokens: config.maxTokens ?? 100000,
       tokenCounter: config.tokenCounter ?? simpleTokenCounter,
       useTaskSystem: config.useTaskSystem ?? true,
-      includeOracleSection: config.includeOracleSection ?? true,
+      includeBaizeSection: config.includeBaizeSection ?? true,
       includeCategorySkillsGuide: config.includeCategorySkillsGuide ?? true
     }
     this.categoryResolver = new CategoryResolver()
@@ -115,7 +115,7 @@ ${keyTriggers.join('\n')}
     }
 
     rows.push('')
-    rows.push('**默认流程**: explore/librarian (后台) + 工具 → oracle (如需要)')
+    rows.push('**默认流程**: qianliyan/diting (后台) + 工具 → baize (如需要)')
 
     return rows.join('\n')
   }
@@ -151,35 +151,35 @@ ${keyTriggers.join('\n')}
   }
 
   /**
-   * 构建探索 Agent 节
+   * 构建千里眼 Agent 节
    */
-  buildExploreSection(agents: AvailableAgent[]): string {
-    const exploreAgent = agents.find(a => a.code === 'qianliyan')
-    if (!exploreAgent) return ''
+  buildQianliyanSection(agents: AvailableAgent[]): string {
+    const qianliyanAgent = agents.find(a => a.code === 'qianliyan')
+    if (!qianliyanAgent) return ''
 
-    const useWhen = exploreAgent.metadata.useWhen || []
-    const avoidWhen = exploreAgent.metadata.avoidWhen || []
+    const useWhen = qianliyanAgent.metadata.useWhen || []
+    const avoidWhen = qianliyanAgent.metadata.avoidWhen || []
 
-    return `### 探索 Agent = 上下文 Grep
+    return `### 千里眼 Agent = 上下文 Grep
 
 作为**对等工具**使用，而非后备方案。自由触发。
 
-| 使用直接工具 | 使用探索 Agent |
+| 使用直接工具 | 使用千里眼 Agent |
 |--------------|----------------|
 ${avoidWhen.map(w => `| ${w} |  |`).join('\n')}
 ${useWhen.map(w => `|  | ${w} |`).join('\n')}`
   }
 
   /**
-   * 构建 Librarian Agent 节
+   * 构建谛听 Agent 节
    */
-  buildLibrarianSection(agents: AvailableAgent[]): string {
-    const librarianAgent = agents.find(a => a.code === 'diting')
-    if (!librarianAgent) return ''
+  buildDitingSection(agents: AvailableAgent[]): string {
+    const ditingAgent = agents.find(a => a.code === 'diting')
+    if (!ditingAgent) return ''
 
-    const useWhen = librarianAgent.metadata.useWhen || []
+    const useWhen = ditingAgent.metadata.useWhen || []
 
-    return `### 文档 Agent = 参考 Grep
+    return `### 谛听 Agent = 参考 Grep
 
 搜索**外部参考**（文档、开源、网络）。当涉及不熟悉的库时主动触发。
 
@@ -192,7 +192,7 @@ ${useWhen.map(w => `|  | ${w} |`).join('\n')}`
 | | 库的最佳实践和注意事项 |
 | | 开源实现示例 |
 
-**触发短语**（立即触发 librarian）:
+**触发短语**（立即触发 diting）:
 ${useWhen.map(w => `- "${w}"`).join('\n')}`
   }
 
@@ -344,16 +344,16 @@ ${customRows.join('\n')}
   }
 
   /**
-   * 构建 Oracle 节
+   * 构建白泽节
    */
-  buildOracleSection(agents: AvailableAgent[]): string {
-    const oracleAgent = agents.find(a => a.code === 'baize')
-    if (!oracleAgent) return ''
+  buildBaizeSection(agents: AvailableAgent[]): string {
+    const baizeAgent = agents.find(a => a.code === 'baize')
+    if (!baizeAgent) return ''
 
-    const useWhen = oracleAgent.metadata.useWhen || []
-    const avoidWhen = oracleAgent.metadata.avoidWhen || []
+    const useWhen = baizeAgent.metadata.useWhen || []
+    const avoidWhen = baizeAgent.metadata.avoidWhen || []
 
-    return `<Oracle_Usage>
+    return `<Baize_Usage>
 ## 白泽 — 只读高智商顾问
 
 白泽是只读、高成本、高质量的推理模型，用于调试和架构。仅供咨询。
@@ -372,7 +372,7 @@ ${avoidWhen.map(w => `- ${w}`).join('\n')}
 在调用前简要说明 "正在就 [原因] 咨询白泽"。
 
 **例外**: 这是唯一一个在行动前宣布的情况。对于所有其他工作，立即开始，不需要状态更新。
-</Oracle_Usage>`
+</Baize_Usage>`
   }
 
   /**
@@ -520,7 +520,7 @@ ${patterns.join('\n')}`
   }
 
   /**
-   * 构建主编排器 Prompt (类似 Sisyphus)
+   * 构建主编排器 Prompt
    */
   buildOrchestratorPrompt(
     availableAgents: AvailableAgent[],
@@ -532,14 +532,14 @@ ${patterns.join('\n')}`
 
     const keyTriggers = this.buildKeyTriggersSection(availableAgents, availableSkills)
     const toolSelection = this.buildToolSelectionTable(availableAgents, tools, availableSkills)
-    const exploreSection = this.buildExploreSection(availableAgents)
-    const librarianSection = this.buildLibrarianSection(availableAgents)
+    const qianliyanSection = this.buildQianliyanSection(availableAgents)
+    const ditingSection = this.buildDitingSection(availableAgents)
     const delegationTable = this.buildDelegationTable(availableAgents)
     const categorySkillsGuide = this.config.includeCategorySkillsGuide
       ? this.buildCategorySkillsDelegationGuide(availableCategories, availableSkills)
       : ''
-    const oracleSection = this.config.includeOracleSection
-      ? this.buildOracleSection(availableAgents)
+    const baizeSection = this.config.includeBaizeSection
+      ? this.buildBaizeSection(availableAgents)
       : ''
     const hardBlocks = this.buildHardBlocksSection()
     const antiPatterns = this.buildAntiPatternsSection()
@@ -573,7 +573,7 @@ ${keyTriggers}
 |------|------|------|
 | **琐碎** | 单文件，已知位置，直接回答 | 仅使用直接工具（除非适用关键触发器） |
 | **显式** | 特定文件/行，清晰命令 | 直接执行 |
-| **探索性** | "X 如何工作？"，"找到 Y" | 并行触发 explore (1-3) + 工具 |
+| **探索性** | "X 如何工作？"，"找到 Y" | 并行触发 qianliyan (1-3) + 工具 |
 | **开放式** | "改进"，"重构"，"添加功能" | 先评估代码库 |
 | **模糊** | 不明确范围，多种解释 | 问一个澄清问题 |
 
@@ -593,13 +593,13 @@ ${keyTriggers}
 
 ${toolSelection}
 
-${exploreSection}
+${qianliyanSection}
 
-${librarianSection}
+${ditingSection}
 
 ### 并行执行 (默认行为)
 
-**Explore/Librarian = Grep，不是顾问。**
+**qianliyan/diting = Grep，不是顾问。**
 
 \`\`\`typescript
 // 正确: 始终后台，始终并行
@@ -656,7 +656,7 @@ ${delegationTable}
 - [ ] 用户的原始请求完全解决
 </Behavior_Instructions>
 
-${oracleSection}
+${baizeSection}
 
 ${taskManagementSection}
 

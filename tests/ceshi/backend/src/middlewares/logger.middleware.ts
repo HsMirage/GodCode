@@ -14,11 +14,11 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
   res.on('finish', () => {
     const duration = Date.now() - start;
     const { statusCode } = res;
-    
+
     // 根据状态码选择日志级别
-    const level = statusCode >= 500 ? 'error' : 
+    const level = statusCode >= 500 ? 'error' :
                   statusCode >= 400 ? 'warn' : 'info';
-    
+
     logger.log(level, `${req.method} ${req.url} ${statusCode} - ${duration}ms`, {
       method: req.method,
       url: req.url,
@@ -35,7 +35,7 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
 /**
  * 开发环境详细日志中间件
  */
-export function devLogger(req: Request, res: Response, next: NextFunction) {
+export function devLogger(req: Request, _res: Response, next: NextFunction) {
   if (process.env.NODE_ENV === 'development') {
     logger.debug('Request details:', {
       method: req.method,

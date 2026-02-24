@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
 import { errorResponse } from '../utils/response';
+import { config } from '../config';
 
 /**
  * 全局错误处理中间件
@@ -9,7 +10,7 @@ export function errorHandler(
   err: Error,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ) {
   // 记录错误
   logger.error('Error occurred:', {

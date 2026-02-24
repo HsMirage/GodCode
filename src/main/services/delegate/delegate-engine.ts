@@ -24,7 +24,13 @@ import {
   resolveModelForCategory,
   type ModelSource
 } from '@/main/services/llm/model-resolver'
-import { getAgentByCode, getCategoryByCode } from '@/shared/agent-definitions'
+import {
+  getAgentByCode,
+  getCategoryByCode,
+  listPrimaryAgentRoleAliases,
+  resolvePrimaryAgentRolePolicy,
+  type PrimaryAgentRolePolicy
+} from '@/shared/agent-definitions'
 import {
   toolExecutionService,
   type ToolCall,
@@ -85,11 +91,30 @@ export interface DelegateTaskResult {
   model?: string
   /** 模型来源：用户覆盖 / fallback chain / 系统默认 */
   modelSource?: ModelSource
+  /** 执行记录 ID */
+  runId?: string
   /** 使用的系统提示长度 (tokens 估算) */
   systemPromptTokens?: number
 }
 
 const DEFAULT_SYSTEM_PROMPT = 'You are CodeAll, an AI coding agent.'
+const CATEGORY_EXECUTION_GUARDRAIL_PROMPT = `<Category_Execution_Contract>
+CATEGORY-RUN EXECUTION MODE (NON-NEGOTIABLE):
+
+- Execute the requested task directly. Do not output exploration preambles.
+- Forbidden opening style: "我将先检查/探索/分析..." or "让我先看看..."
+- If exploration is needed, do it silently and continue to implementation in the same run.
+- Do not ask user questions unless there is a hard blocker that tools cannot resolve.
+
+Completion evidence is mandatory:
+1. Concrete implementation evidence (changed files, commands, or produced artifacts)
+2. Verification evidence (tests/build/diagnostics or an explicit reason why unavailable)
+3. Final status: completed / blocked, with blocker details if blocked
+
+Server startup tasks require explicit success proof:
+- If task asks to start a server (e.g. npm run dev), keep running until startup success signal appears.
+- Report the exact success signal from output (port/listening/ready line). Do not stop at "starting..."
+</Category_Execution_Contract>`
 
 /**
  * 旧版本系统提示解析 (兼容性保留)
@@ -111,6 +136,58 @@ function isAbortRequested(error: unknown, signal?: AbortSignal): boolean {
   if (!(error instanceof Error)) return false
   if (error.name === 'AbortError') return true
   return /aborted|abort|cancelled by user|cancelled/i.test(error.message)
+}
+
+function formatPrimaryRoleAliasExamples(): string {
+  return 'fuxi/planning, haotian/orchestration, kuafu/execution'
+}
+
+function isStrictPrimaryRoleModeEnabled(): boolean {
+  return process.env.WORKFORCE_STRICT_ROLE_MODE === '1' || process.env.WORKFORCE_STRICT_ROLE_MODE === 'true'
+}
+
+function resolvePrimaryRolePolicyFromMetadata(
+  metadata?: Record<string, unknown>
+): { policy: PrimaryAgentRolePolicy; workflowStage?: string; override?: Record<string, unknown> } | { error: string } | null {
+  if (!metadata) {
+    return null
+  }
+
+  const alias =
+    (typeof metadata.primaryAgentRoleAlias === 'string' && metadata.primaryAgentRoleAlias.trim()) ||
+    (typeof metadata.primaryAgentRole === 'string' && metadata.primaryAgentRole.trim()) ||
+    undefined
+
+  if (!alias) {
+    return null
+  }
+
+  const resolved = resolvePrimaryAgentRolePolicy(alias)
+  if (!resolved) {
+    const knownAliases = listPrimaryAgentRoleAliases().join(', ')
+    return {
+      error:
+        `Unknown primary role alias "${alias}". ` +
+        `Use one of: ${knownAliases}. ` +
+        `Canonical mappings: ${formatPrimaryRoleAliasExamples()}.`
+    }
+  }
+
+  const workflowStage =
+    typeof metadata.workflowStage === 'string' && metadata.workflowStage.trim()
+      ? metadata.workflowStage.trim()
+      : undefined
+
+  const override =
+    metadata.roleBoundaryOverride && typeof metadata.roleBoundaryOverride === 'object'
+      ? (metadata.roleBoundaryOverride as Record<string, unknown>)
+      : undefined
+
+  return {
+    policy: resolved,
+    workflowStage,
+    override
+  }
 }
 
 export class DelegateEngine {
@@ -166,6 +243,9 @@ export class DelegateEngine {
       baseURL: overrideBaseURL,
       apiKey: overrideApiKey
     } = input
+    const resolvedCategory = typeof category === 'string' ? category.trim() || undefined : undefined
+    const resolvedSubagentType =
+      typeof subagent_type === 'string' ? subagent_type.trim() || undefined : undefined
 
     if (!sessionId) {
       throw new Error('sessionId is required for delegateTask')
@@ -193,9 +273,9 @@ export class DelegateEngine {
         provider: parsed.provider
       }
       modelSource = 'override'
-    } else if (subagent_type) {
+    } else if (resolvedSubagentType) {
       // 优先从数据库获取 Agent 绑定配置
-      const agentConfig = await this.bindingService.getAgentModelConfig(subagent_type)
+      const agentConfig = await this.bindingService.getAgentModelConfig(resolvedSubagentType)
       if (agentConfig) {
         modelConfig = {
           model: agentConfig.model,
@@ -208,7 +288,7 @@ export class DelegateEngine {
         modelFromBinding = true
       } else {
         // 使用 Agent 定义的 fallback chain 解析模型
-        const agentDef = getAgentByCode(subagent_type)
+        const agentDef = getAgentByCode(resolvedSubagentType)
         if (agentDef) {
           const availableModels = await this.getAvailableModelSet()
           const resolved = resolveModelForAgent(agentDef, availableModels)
@@ -220,26 +300,26 @@ export class DelegateEngine {
             }
             modelSource = resolved.source
             this.logger.info('[DelegateEngine] Model resolved via fallback chain for agent', {
-              agent: subagent_type,
+              agent: resolvedSubagentType,
               model: resolved.model,
               source: resolved.source
             })
           } else {
             throw new Error(
-              `Agent「${subagent_type}」无可用模型。` +
+              `Agent「${resolvedSubagentType}」无可用模型。` +
               `fallback chain 中的模型均不可用，请在“设置 -> API Keys/模型”中配置至少一个模型。`
             )
           }
         } else {
           throw new Error(
-            `Agent「${subagent_type}」未配置可用模型。` +
+            `Agent「${resolvedSubagentType}」未配置可用模型。` +
             `请在“设置 -> Agent 绑定”中为该 Agent 绑定模型，或设置系统默认模型。`
           )
         }
       }
-    } else if (category) {
+    } else if (resolvedCategory) {
       // 优先从数据库获取 Category 绑定配置
-      const config = await this.bindingService.getCategoryModelConfig(category)
+      const config = await this.bindingService.getCategoryModelConfig(resolvedCategory)
       if (config) {
         modelConfig = {
           model: config.model,
@@ -252,7 +332,7 @@ export class DelegateEngine {
         modelFromBinding = true
       } else {
         // 使用 Category 定义的 fallback chain 解析模型
-        const categoryDef = getCategoryByCode(category)
+        const categoryDef = getCategoryByCode(resolvedCategory)
         if (categoryDef) {
           const availableModels = await this.getAvailableModelSet()
           const resolved = resolveModelForCategory(categoryDef, availableModels)
@@ -264,25 +344,94 @@ export class DelegateEngine {
             }
             modelSource = resolved.source
             this.logger.info('[DelegateEngine] Model resolved via fallback chain for category', {
-              category,
+              category: resolvedCategory,
               model: resolved.model,
               source: resolved.source
             })
           } else {
             throw new Error(
-              `任务类别「${category}」无可用模型。` +
+              `任务类别「${resolvedCategory}」无可用模型。` +
               `fallback chain 中的模型均不可用，请在“设置 -> API Keys/模型”中配置至少一个模型。`
             )
           }
         } else {
           throw new Error(
-            `任务类别「${category}」未配置可用模型。` +
+            `任务类别「${resolvedCategory}」未配置可用模型。` +
             `请在“设置 -> Agent 绑定 -> 任务类别”中绑定模型，或设置系统默认模型。`
           )
         }
       }
     } else {
       throw new Error('Must provide either category or subagent_type')
+    }
+
+    const metadataInput = metadata || {}
+    const primaryRoleResolution = resolvePrimaryRolePolicyFromMetadata(metadataInput)
+    if (primaryRoleResolution && 'error' in primaryRoleResolution) {
+      return {
+        taskId: '',
+        output: primaryRoleResolution.error,
+        success: false,
+        agentType: resolvedSubagentType || resolvedCategory,
+        model: modelConfig.model,
+        modelSource,
+        systemPromptTokens: 0
+      }
+    }
+
+    const rolePolicySnapshot =
+      primaryRoleResolution && 'policy' in primaryRoleResolution
+        ? {
+            alias: primaryRoleResolution.policy.alias,
+            canonicalAgent: primaryRoleResolution.policy.canonicalAgent,
+            canonicalRole: primaryRoleResolution.policy.canonicalRole,
+            workflowStage: primaryRoleResolution.workflowStage,
+            override: primaryRoleResolution.override,
+            recordedAt: new Date().toISOString()
+          }
+        : undefined
+
+    if (rolePolicySnapshot && resolvedSubagentType && resolvedSubagentType !== rolePolicySnapshot.canonicalAgent) {
+      return {
+        taskId: '',
+        output:
+          `Primary role policy conflict: alias "${rolePolicySnapshot.alias}" resolves to ` +
+          `"${rolePolicySnapshot.canonicalAgent}", but subagent_type is "${resolvedSubagentType}". ` +
+          'Please align explicit primary agent selection with role policy.',
+        success: false,
+        agentType: resolvedSubagentType || resolvedCategory,
+        model: modelConfig.model,
+        modelSource,
+        systemPromptTokens: 0
+      }
+    }
+
+    const STAGE_OWNERS: Record<string, string> = {
+      plan: 'fuxi',
+      dispatch: 'haotian',
+      checkpoint: 'haotian',
+      integration: 'haotian',
+      finalize: 'haotian',
+      execution: 'kuafu'
+    }
+
+    if (isStrictPrimaryRoleModeEnabled() && rolePolicySnapshot?.workflowStage) {
+      const expectedOwner = STAGE_OWNERS[rolePolicySnapshot.workflowStage.toLowerCase()]
+      const selectedOwner = resolvedSubagentType || rolePolicySnapshot.canonicalAgent
+      if (expectedOwner && selectedOwner !== expectedOwner && !rolePolicySnapshot.override) {
+        return {
+          taskId: '',
+          output:
+            `Role boundary violation: stage "${rolePolicySnapshot.workflowStage}" requires owner ` +
+            `"${expectedOwner}", but got "${selectedOwner}". ` +
+            'Use canonical handoff or provide roleBoundaryOverride with audit fields.',
+          success: false,
+          agentType: resolvedSubagentType || resolvedCategory,
+          model: modelConfig.model,
+          modelSource,
+          systemPromptTokens: 0
+        }
+      }
     }
 
     const task = await this.prisma.task.create({
@@ -293,23 +442,24 @@ export class DelegateEngine {
         input: description,
         status: runInBackground ? 'pending' : 'running',
         assignedModel: modelConfig.model,
-        assignedAgent: subagent_type || category,
+        assignedAgent: resolvedSubagentType || resolvedCategory,
         metadata: {
-          category,
-          subagent_type,
+          category: resolvedCategory,
+          subagent_type: resolvedSubagentType,
           parentTaskId,
           model: modelConfig.model,
           modelSource,
           runInBackground: Boolean(runInBackground),
-          ...(metadata || {})
+          ...(rolePolicySnapshot ? { primaryAgentRolePolicy: rolePolicySnapshot } : {}),
+          ...metadataInput
         }
       }
     })
 
     this.logger.info('Delegating task', {
       taskId: task.id,
-      category,
-      subagent_type,
+      category: resolvedCategory,
+      subagent_type: resolvedSubagentType,
       model: modelConfig.model,
       workspaceDir
     })
@@ -332,22 +482,22 @@ export class DelegateEngine {
         taskId: task.id,
         output: `Background task started: ${task.id}`,
         success: true,
-        agentType: subagent_type || category,
+        agentType: resolvedSubagentType || resolvedCategory,
         model: modelConfig.model,
         modelSource,
         systemPromptTokens: 0
       }
     }
 
-    const runId = await this.safeCreateRun(task.id, subagent_type || category)
+    const runId = await this.safeCreateRun(task.id, resolvedSubagentType || resolvedCategory)
     await this.safeAddRunLog(runId, {
       timestamp: new Date().toISOString(),
       level: 'info',
       message: 'Delegate task started',
       data: {
         taskId: task.id,
-        category,
-        subagent_type,
+        category: resolvedCategory,
+        subagent_type: resolvedSubagentType,
         model: modelConfig.model,
         runInBackground: false
       }
@@ -400,8 +550,8 @@ export class DelegateEngine {
           data: {
             assignedModel: runtimeResolvedModel.model,
             metadata: {
-              category,
-              subagent_type,
+              category: resolvedCategory,
+              subagent_type: resolvedSubagentType,
               parentTaskId,
               model: runtimeResolvedModel.model,
               modelSource,
@@ -418,12 +568,12 @@ export class DelegateEngine {
       })
 
       const [agentBinding, categoryBinding] = await Promise.all([
-        subagent_type ? this.bindingService.getAgentBinding(subagent_type) : Promise.resolve(null),
-        category ? this.bindingService.getCategoryBinding(category) : Promise.resolve(null)
+        resolvedSubagentType ? this.bindingService.getAgentBinding(resolvedSubagentType) : Promise.resolve(null),
+        resolvedCategory ? this.bindingService.getCategoryBinding(resolvedCategory) : Promise.resolve(null)
       ])
       const scopedToolNames = resolveScopedRuntimeToolNames({
-        subagentType: subagent_type,
-        category,
+        subagentType: resolvedSubagentType,
+        category: resolvedCategory,
         availableTools: input.availableTools
       })
       const effectiveScopedToolNames =
@@ -440,9 +590,9 @@ export class DelegateEngine {
       let systemPrompt: string
       let systemPromptTokens = 0
 
-      if (useDynamicPrompt && (subagent_type || category)) {
+      if (useDynamicPrompt && (resolvedSubagentType || resolvedCategory)) {
         // 使用动态 Prompt 系统
-        const agentCode = subagent_type || undefined
+        const agentCode = resolvedSubagentType || undefined
         const resolvedAgent = agentCode
           ? this.categoryResolver.resolveAgent(agentCode)
           : null
@@ -450,35 +600,36 @@ export class DelegateEngine {
           resolvedAgent,
           (effectiveScopedToolNames ?? input.availableTools) || [],
           loadSkills,
-          agentBinding?.systemPrompt
+          agentBinding?.systemPrompt || (!resolvedSubagentType ? categoryBinding?.systemPrompt : undefined)
         )
         // 当有 category 时，追加 category 特定上下文
-        if (category) {
-          const categoryContext = getCategoryPromptByCode(category)
-          if (categoryContext) {
-            systemPrompt = `${systemPrompt}\n\n${categoryContext}`
+        if (resolvedCategory) {
+          if (!resolvedSubagentType) {
+            systemPrompt = this.applyCategoryOnlyExecutionContract(systemPrompt, resolvedCategory)
+          } else {
+            const categoryContext = getCategoryPromptByCode(resolvedCategory)
+            if (categoryContext) {
+              systemPrompt = `${systemPrompt}\n\n${categoryContext}`
+            }
           }
         }
         systemPromptTokens = this.promptBuilder.estimateTokens(systemPrompt)
       } else {
         // 回退到静态 Prompt (兼容性)
-        const builtinAgentPrompt = subagent_type ? getAgentPromptByCode(subagent_type) : undefined
+        const builtinAgentPrompt = resolvedSubagentType ? getAgentPromptByCode(resolvedSubagentType) : undefined
         systemPrompt = resolveSystemPrompt(
           agentBinding?.systemPrompt,
           categoryBinding?.systemPrompt,
           builtinAgentPrompt
         )
-        if (category && !subagent_type) {
-          const categoryContext = getCategoryPromptByCode(category)
+        if (resolvedCategory && !resolvedSubagentType) {
           const hasCategoryBindingPrompt = Boolean(categoryBinding?.systemPrompt?.trim())
           // Keep category-only static mode actionable: use LuBan prompt as base
           // when there is no explicit binding prompt, then append category context.
           if (!hasCategoryBindingPrompt && systemPrompt === DEFAULT_SYSTEM_PROMPT) {
             systemPrompt = getAgentPromptByCode('luban') || DEFAULT_SYSTEM_PROMPT
           }
-          if (categoryContext) {
-            systemPrompt = `${systemPrompt}\n\n${categoryContext}`
-          }
+          systemPrompt = this.applyCategoryOnlyExecutionContract(systemPrompt, resolvedCategory)
         }
       }
 
@@ -529,7 +680,7 @@ export class DelegateEngine {
         temperature: modelConfig.temperature,
         workspaceDir,
         sessionId: resolvedSessionId,
-        agentCode: subagent_type,
+        agentCode: resolvedSubagentType,
         tools: scopedToolDefinitions,
         abortSignal
       }
@@ -631,9 +782,10 @@ export class DelegateEngine {
         taskId: task.id,
         output: truncatedOutput,
         success: true,
-        agentType: subagent_type,
+        agentType: resolvedSubagentType || resolvedCategory,
         model: modelConfig.model,
         modelSource,
+        runId: runId || undefined,
         systemPromptTokens
       }
     } catch (error) {
@@ -669,7 +821,8 @@ export class DelegateEngine {
       return {
         taskId: task.id,
         output: cancelled ? 'Cancelled by user' : errorMessage,
-        success: false
+        success: false,
+        runId: runId || undefined
       }
     }
   }
@@ -1004,6 +1157,25 @@ export class DelegateEngine {
     }
 
     return []
+  }
+
+  private applyCategoryOnlyExecutionContract(basePrompt: string, categoryCode: string): string {
+    const segments: string[] = []
+    const trimmedBase = basePrompt.trim()
+    if (trimmedBase) {
+      segments.push(trimmedBase)
+    }
+
+    if (!trimmedBase.includes('<Category_Execution_Contract>')) {
+      segments.push(CATEGORY_EXECUTION_GUARDRAIL_PROMPT)
+    }
+
+    const categoryContext = getCategoryPromptByCode(categoryCode)
+    if (categoryContext && !trimmedBase.includes(categoryContext)) {
+      segments.push(categoryContext)
+    }
+
+    return segments.join('\n\n')
   }
 
   /**

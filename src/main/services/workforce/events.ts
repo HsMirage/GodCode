@@ -17,6 +17,7 @@ export interface WorkflowEvent {
     | 'task:started'
     | 'task:completed'
     | 'task:failed'
+    | 'workflow:stage'
     | 'workflow:checkpoint'
     | 'workflow:completed'
   workflowId: string

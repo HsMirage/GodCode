@@ -31,6 +31,7 @@ import {
   createThrottledOutputFetcher,
   createThrottledTaskReloader
 } from './task-panel-performance'
+import { sanitizeDisplayOutput } from '../../utils/output-sanitizer'
 
 interface BackgroundTaskInfo {
   id: string
@@ -111,6 +112,8 @@ function TaskCard({ task, onLinkClick, bindingSnapshot }: TaskCardProps) {
   const Icon = config.icon
   const isRunning = task.status === 'running'
 
+  const displayOutput = task.output ? sanitizeDisplayOutput(task.output) : ''
+
   return (
     <div className="rounded-lg border border-[var(--border-primary)] bg-[var(--bg-primary)] p-3 hover:border-[var(--border-secondary)] transition-colors">
       <div className="flex items-start gap-3">
@@ -164,14 +167,14 @@ function TaskCard({ task, onLinkClick, bindingSnapshot }: TaskCardProps) {
           <p className="text-[11px] text-[var(--text-muted)] font-mono">Workflow: {bindingSnapshot.workflowId}</p>
         </div>
       )}
-      {task.output && task.status === 'completed' && (
+      {displayOutput && task.status === 'completed' && (
         <div className="mt-2 pt-2 border-t ui-border">
-          <p className="text-xs text-[var(--text-secondary)] line-clamp-3">{task.output}</p>
+          <p className="text-xs text-[var(--text-secondary)] line-clamp-3">{displayOutput}</p>
         </div>
       )}
-      {task.output && task.status === 'failed' && (
+      {displayOutput && task.status === 'failed' && (
         <div className="mt-2 pt-2 border-t border-rose-800/30">
-          <p className="text-xs text-rose-400 line-clamp-2">{task.output}</p>
+          <p className="text-xs text-rose-400 line-clamp-2">{displayOutput}</p>
         </div>
       )}
     </div>

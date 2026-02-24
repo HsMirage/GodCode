@@ -1,28 +1,5 @@
 import { getAgentByCode } from '@/shared/agent-definitions'
 
-const AGENT_CODE_ALIASES: Record<string, string> = {
-  explore: 'qianliyan',
-  oracle: 'baize',
-  librarian: 'diting',
-  metis: 'chongming',
-  momus: 'leigong',
-  prometheus: 'fuxi',
-  sisyphus: 'haotian',
-  atlas: 'kuafu',
-  hephaestus: 'luban'
-}
-
-const CATEGORY_CODE_ALIASES: Record<string, string> = {
-  'visual-engineering': 'zhinv',
-  writing: 'cangjie',
-  quick: 'tianbing',
-  ultrabrain: 'guigu',
-  artistry: 'maliang',
-  deep: 'guixu',
-  'unspecified-low': 'tudi',
-  'unspecified-high': 'dayu'
-}
-
 const TOOL_ALIAS_MAP: Record<string, string[]> = {
   read: ['file_read'],
   write: ['file_write'],
@@ -80,8 +57,7 @@ export function resolveAgentRuntimeToolNames(
   agentCode: string,
   availableToolNames?: Set<string>
 ): string[] | undefined {
-  const resolvedAgentCode = AGENT_CODE_ALIASES[agentCode] || agentCode
-  const agentDefinition = getAgentByCode(resolvedAgentCode)
+  const agentDefinition = getAgentByCode(agentCode)
   if (!agentDefinition) {
     return undefined
   }
@@ -97,7 +73,7 @@ export function resolveCategoryRuntimeToolNames(
   categoryCode: string,
   availableToolNames?: Set<string>
 ): string[] | undefined {
-  const normalizedCategory = (CATEGORY_CODE_ALIASES[categoryCode] || categoryCode).toLowerCase()
+  const normalizedCategory = categoryCode.toLowerCase()
   const profile = CATEGORY_TOOL_PROFILES[normalizedCategory]
   if (!profile) {
     return undefined

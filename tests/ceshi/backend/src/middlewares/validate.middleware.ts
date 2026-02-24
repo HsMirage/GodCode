@@ -75,7 +75,7 @@ export function validate(schema: {
         req.params = value;
       }
 
-      next();
+      return next();
     } catch (error) {
       logger.error('Validation middleware error:', error);
       return errorResponse(res, '验证过程中发生错误', 500);
@@ -99,6 +99,6 @@ export function requireFields(...fields: string[]) {
       );
     }
     
-    next();
+    return next();
   };
 }

@@ -120,12 +120,15 @@ describe('Browser Tools Integration', () => {
   })
 
   describe('ToolExecutor Integration', () => {
-    it('should execute browser_navigate through ToolExecutor', async () => {
+    it('should execute browser_navigate through ToolExecutor and emit audit operation events', async () => {
       mocks.browserViewManager.navigate.mockResolvedValue(undefined)
       // Mock getState to return loading then loaded
       mocks.browserViewManager.getState
         .mockReturnValueOnce({ id: viewId, isLoading: true })
         .mockReturnValue({ id: viewId, isLoading: false })
+
+      const sendMock = vi.fn()
+      ;(BrowserWindow.getAllWindows as any).mockReturnValue([{ webContents: { send: sendMock } }])
 
       const result = await toolExecutor.execute(
         'browser_navigate',
@@ -135,6 +138,32 @@ describe('Browser Tools Integration', () => {
 
       expect(result.success).toBe(true)
       expect(mocks.browserViewManager.navigate).toHaveBeenCalledWith(viewId, 'https://example.com')
+
+      const aiOpCalls = sendMock.mock.calls.filter((call: any[]) => call[0] === 'browser:ai-operation')
+      expect(aiOpCalls.length).toBe(2)
+
+      const runningPayload = aiOpCalls[0][1]
+      const completedPayload = aiOpCalls[1][1]
+
+      expect(runningPayload.status).toBe('running')
+      expect(completedPayload.status).toBe('completed')
+
+      expect(runningPayload.toolName).toBe('browser_navigate')
+      expect(completedPayload.toolName).toBe('browser_navigate')
+
+      expect(runningPayload.viewId).toBe(viewId)
+      expect(completedPayload.viewId).toBe(viewId)
+
+      expect(typeof runningPayload.opId).toBe('string')
+      expect(runningPayload.opId.length).toBeGreaterThan(0)
+      expect(completedPayload.opId).toBe(runningPayload.opId)
+
+      expect(typeof runningPayload.timestamp).toBe('number')
+      expect(typeof completedPayload.timestamp).toBe('number')
+      expect(completedPayload.timestamp).toBeGreaterThanOrEqual(runningPayload.timestamp)
+
+      expect(runningPayload.args).toEqual({ url: 'https://example.com' })
+      expect(completedPayload.args).toEqual({ url: 'https://example.com' })
     })
 
     it('should execute browser_click through ToolExecutor', async () => {
@@ -328,12 +357,56 @@ describe('Browser Tools Integration', () => {
 
   describe('Error Handling', () => {
     it('should fail when missing required parameters', async () => {
+      const sendMock = vi.fn()
+      ;(BrowserWindow.getAllWindows as any).mockReturnValue([{ webContents: { send: sendMock } }])
+
       const result = await toolExecutor.execute('browser_navigate', {}, mockContext)
 
       expect(result.success).toBe(false)
       // Expect specific error message from tool implementation
       expect(result.error).toContain('URL is required for navigation')
+      expect(result.error).toContain('BROWSER_TOOL_VALIDATION')
+      expect(result.error).toContain('tool=browser_navigate')
+      expect(result.error).toContain('field=url')
+      expect((result.metadata as any)?.errorCode).toBe('BROWSER_TOOL_VALIDATION')
+      expect(typeof (result.metadata as any)?.durationMs).toBe('number')
       expect(mocks.browserViewManager.navigate).not.toHaveBeenCalled()
+
+      const aiOpCalls = sendMock.mock.calls.filter((call: any[]) => call[0] === 'browser:ai-operation')
+      expect(aiOpCalls.length).toBe(1)
+      expect(aiOpCalls[0][1]).toMatchObject({
+        toolName: 'browser_navigate',
+        status: 'error',
+        viewId,
+        errorCode: 'BROWSER_TOOL_VALIDATION'
+      })
+      expect(typeof aiOpCalls[0][1].durationMs).toBe('number')
+    })
+
+    it('should fail with structured validation error for wrong parameter type', async () => {
+      const sendMock = vi.fn()
+      ;(BrowserWindow.getAllWindows as any).mockReturnValue([{ webContents: { send: sendMock } }])
+
+      const result = await toolExecutor.execute('browser_click', { uid: 123 as any }, mockContext)
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('BROWSER_TOOL_VALIDATION')
+      expect(result.error).toContain('tool=browser_click')
+      expect(result.error).toContain('field=uid')
+      expect(result.error).toContain('expected string')
+      expect((result.metadata as any)?.errorCode).toBe('BROWSER_TOOL_VALIDATION')
+      expect(typeof (result.metadata as any)?.durationMs).toBe('number')
+      expect(mocks.webContents.executeJavaScript).not.toHaveBeenCalled()
+
+      const aiOpCalls = sendMock.mock.calls.filter((call: any[]) => call[0] === 'browser:ai-operation')
+      expect(aiOpCalls.length).toBe(1)
+      expect(aiOpCalls[0][1]).toMatchObject({
+        toolName: 'browser_click',
+        status: 'error',
+        viewId,
+        errorCode: 'BROWSER_TOOL_VALIDATION'
+      })
+      expect(typeof aiOpCalls[0][1].durationMs).toBe('number')
     })
 
     it('should handle unknown tools', async () => {

@@ -23,9 +23,11 @@ export interface PlanMetadata {
 export class PlanFileService {
   private static instance: PlanFileService | null = null
   private readonly plansDir: string
+  private readonly legacyPlansDir: string
 
   private constructor() {
-    this.plansDir = path.join(process.cwd(), '.sisyphus', 'plans')
+    this.plansDir = path.join(process.cwd(), '.fuxi', 'plans')
+    this.legacyPlansDir = path.join(process.cwd(), '.sisyphus', 'plans')
   }
 
   static getInstance(): PlanFileService {
@@ -36,22 +38,32 @@ export class PlanFileService {
   }
 
   /**
-   * List all available plan files in .sisyphus/plans/
+   * List all available plan files in .fuxi/plans/ with legacy fallback support.
    */
   async listPlans(): Promise<string[]> {
-    if (!fs.existsSync(this.plansDir)) {
-      return []
-    }
+    const primaryPlans = this.listPlanNamesFromDir(this.plansDir)
+    const legacyPlans = this.listPlanNamesFromDir(this.legacyPlansDir)
 
-    const files = fs.readdirSync(this.plansDir)
-    return files.filter(file => file.endsWith('.md')).map(file => file.replace('.md', ''))
+    // Keep .fuxi plans first and include legacy-only entries for compatibility.
+    return [...new Set([...primaryPlans, ...legacyPlans])]
   }
 
   /**
-   * Get the absolute path for a plan file
+   * Get the absolute path for a plan file.
+   * Prefers .fuxi/plans and falls back to legacy .sisyphus/plans if needed.
    */
   async getPlanPath(planName: string): Promise<string> {
-    return path.join(this.plansDir, `${planName}.md`)
+    const primaryPath = path.join(this.plansDir, `${planName}.md`)
+    if (fs.existsSync(primaryPath)) {
+      return primaryPath
+    }
+
+    const legacyPath = path.join(this.legacyPlansDir, `${planName}.md`)
+    if (fs.existsSync(legacyPath)) {
+      return legacyPath
+    }
+
+    return primaryPath
   }
 
   /**
@@ -72,7 +84,7 @@ export class PlanFileService {
     if (!fs.existsSync(this.plansDir)) {
       fs.mkdirSync(this.plansDir, { recursive: true })
     }
-    const filePath = await this.getPlanPath(planName)
+    const filePath = path.join(this.plansDir, `${planName}.md`)
     fs.writeFileSync(filePath, content, 'utf-8')
   }
 
@@ -82,6 +94,15 @@ export class PlanFileService {
   async parsePlan(planName: string): Promise<PlanTask[]> {
     const content = await this.readPlan(planName)
     return this.extractTasks(content)
+  }
+
+  private listPlanNamesFromDir(dir: string): string[] {
+    if (!fs.existsSync(dir)) {
+      return []
+    }
+
+    const files = fs.readdirSync(dir)
+    return files.filter(file => file.endsWith('.md')).map(file => file.replace('.md', ''))
   }
 
   /**

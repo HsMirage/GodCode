@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcMainInvokeEvent } from 'electron'
-import { handleKeychainGetWithModels, handleKeychainListWithModels } from '@/main/ipc/handlers/keychain'
+import {
+  handleKeychainGetPassword,
+  handleKeychainGetWithModels,
+  handleKeychainListWithModels
+} from '@/main/ipc/handlers/keychain'
 
 const prismaMock = {
   apiKey: {
@@ -30,6 +34,11 @@ vi.mock('@/main/services/secure-storage.service', () => ({
     getInstance: vi.fn(() => ({
       decrypt: decryptMock
     }))
+  },
+  maskApiKey: (key: string) => {
+    if (!key) return '********'
+    if (key.length < 8) return '********'
+    return `${key.slice(0, 4)}...${key.slice(-4)}`
   }
 }))
 
@@ -170,5 +179,32 @@ describe('keychain list/get with models', () => {
     expect(result?.id).toBe('k2')
     expect(result?.apiKey).toBe('sk-b-1234567890')
     expect(result?.models.map(m => m.id)).toEqual(['m2'])
+  })
+
+  it('returns full decrypted key via legacy get-password handler', async () => {
+    prismaMock.apiKey.findMany.mockResolvedValue([
+      {
+        id: 'k2',
+        provider: 'custom-b',
+        label: 'Provider B',
+        baseURL: 'https://api.b.com/v1/',
+        encryptedKey: 'enc:sk-b-1234567890'
+      }
+    ])
+    prismaMock.model.findMany.mockResolvedValue([])
+    prismaMock.apiKey.findUnique.mockResolvedValue({
+      id: 'k2',
+      provider: 'custom-b',
+      label: 'Provider B',
+      baseURL: 'https://api.b.com/v1/',
+      encryptedKey: 'enc:sk-b-1234567890'
+    })
+
+    const result = await handleKeychainGetPassword({} as IpcMainInvokeEvent, {
+      service: 'codeall-app',
+      account: 'custom-b-api-key'
+    })
+
+    expect(result).toBe('sk-b-1234567890')
   })
 })

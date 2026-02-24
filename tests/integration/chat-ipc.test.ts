@@ -351,6 +351,9 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     mockStore.artifact = []
     uuidCounter = 0
     lastLLMConfig = null
+    mockBoulderState.getState.mockClear()
+    mockBoulderState.isSessionTracked.mockClear()
+    mockBoulderState.updateState.mockClear()
     mockBoulderState.getState.mockResolvedValue({ session_ids: [] })
     mockBoulderState.isSessionTracked.mockResolvedValue(false)
     mockBoulderState.updateState.mockResolvedValue(undefined)
@@ -568,10 +571,10 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     expect(lastLLMConfig.agentCode).toBe('luban')
   })
 
-  test('fuxi planning output triggers kuafu handoff metadata and boulder update', async () => {
+  test('fuxi handoff should capture .fuxi plan path', async () => {
     const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
     vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) =>
-      String(p).replace(/\\/g, '/').includes('.sisyphus/plans/codeall-repair.md')
+      String(p).replace(/\\/g, '/').includes('.fuxi/plans/codeall-repair.md')
     )
     vi.mocked(createLLMAdapter).mockImplementationOnce(
       () =>
@@ -580,7 +583,7 @@ describe('Chat IPC Integration - handleMessageSend', () => {
           streamMessage: async function* () {
             yield {
               content:
-                'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .sisyphus/plans/codeall-repair.md',
+                'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .fuxi/plans/codeall-repair.md',
               done: true
             }
           }
@@ -595,8 +598,44 @@ describe('Chat IPC Integration - handleMessageSend', () => {
 
     expect(result.content).toContain('建议切换到夸父')
     expect(result.content).toContain('执行计划')
+    expect((result.metadata as any)?.agentCode).toBe('fuxi')
     expect((result.metadata as any)?.handoffToAgent).toBe('kuafu')
-    expect((result.metadata as any)?.planPath).toContain('codeall-repair.md')
+    expect((result.metadata as any)?.planPath).toContain('.fuxi/plans/codeall-repair.md')
     expect(mockBoulderState.updateState).toHaveBeenCalledTimes(1)
+  })
+
+  test('fuxi handoff should keep legacy .sisyphus plan path compatibility', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+    vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) =>
+      String(p).replace(/\\/g, '/').includes('.sisyphus/plans/legacy-repair.md')
+    )
+    vi.mocked(createLLMAdapter).mockImplementationOnce(
+      () =>
+        ({
+          sendMessage: vi.fn(),
+          streamMessage: async function* () {
+            yield {
+              content:
+                'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .sisyphus/plans/legacy-repair.md',
+              done: true
+            }
+          }
+        }) as any
+    )
+
+    const result = await handleMessageSend(mockEvent, {
+      sessionId,
+      content: '请你先规划这个任务',
+      agentCode: 'fuxi'
+    })
+
+    expect(result.content).toContain('建议切换到夸父')
+    expect(result.content).toContain('执行计划')
+    expect((result.metadata as any)?.agentCode).toBe('fuxi')
+    expect((result.metadata as any)?.handoffToAgent).toBe('kuafu')
+    expect((result.metadata as any)?.planPath).toContain('.sisyphus/plans/legacy-repair.md')
+    expect(mockBoulderState.updateState).toHaveBeenCalled()
+    const lastUpdateCall = mockBoulderState.updateState.mock.calls.at(-1)?.[0]
+    expect(String(lastUpdateCall?.active_plan || '')).toContain('.sisyphus/plans/legacy-repair.md')
   })
 })

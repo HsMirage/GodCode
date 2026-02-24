@@ -14,6 +14,8 @@ const mockFs = fs as unknown as {
 
 describe('PlanFileService', () => {
   let service: PlanFileService
+  const fuxiPlansDir = path.join(process.cwd(), '.fuxi', 'plans')
+  const legacyPlansDir = path.join(process.cwd(), '.sisyphus', 'plans')
   const mockPlanContent = `## Phase 8: State System (Week 11)
 
 ### 8.1 状态系统
@@ -32,7 +34,10 @@ describe('PlanFileService', () => {
     // @ts-ignore
     PlanFileService.instance = null
 
-    // Mock FS
+    // Reset mock call history and implementations between tests
+    vi.clearAllMocks()
+
+    // Mock FS defaults
     mockFs.existsSync.mockReturnValue(true)
     mockFs.readdirSync.mockReturnValue(['codeall-unified-plan.md', 'archived', 'backup.txt'])
     mockFs.readFileSync.mockReturnValue(mockPlanContent)
@@ -48,12 +53,17 @@ describe('PlanFileService', () => {
     expect(instance1).toBe(instance2)
   })
 
-  it('should list only .md plan files', async () => {
+  it('should list only .md plan files from .fuxi/plans by default', async () => {
+    mockFs.readdirSync.mockImplementation(dir => {
+      if (dir === fuxiPlansDir) return ['codeall-unified-plan.md', 'backup.txt']
+      if (dir === legacyPlansDir) return ['legacy-plan.md']
+      return []
+    })
+
     const plans = await service.listPlans()
-    expect(plans).toEqual(['codeall-unified-plan'])
-    expect(mockFs.readdirSync).toHaveBeenCalledWith(
-      expect.stringContaining(path.join('.sisyphus', 'plans'))
-    )
+    expect(plans).toEqual(['codeall-unified-plan', 'legacy-plan'])
+    expect(mockFs.readdirSync).toHaveBeenCalledWith(fuxiPlansDir)
+    expect(mockFs.readdirSync).toHaveBeenCalledWith(legacyPlansDir)
   })
 
   it('should handle missing plans directory gracefully', async () => {
@@ -62,20 +72,39 @@ describe('PlanFileService', () => {
     expect(plans).toEqual([])
   })
 
-  it('should get correct plan path', async () => {
+  it('should get correct plan path in .fuxi/plans by default', async () => {
+    mockFs.existsSync.mockImplementation(target => target === path.join(fuxiPlansDir, 'test-plan.md'))
+
     const planPath = await service.getPlanPath('test-plan')
-    expect(planPath).toContain(path.join('.sisyphus', 'plans', 'test-plan.md'))
+    expect(planPath).toBe(path.join(fuxiPlansDir, 'test-plan.md'))
   })
 
-  it('should read plan content', async () => {
+  it('should read plan content from .fuxi/plans when present', async () => {
+    const targetPath = path.join(fuxiPlansDir, 'codeall-unified-plan.md')
+    mockFs.existsSync.mockImplementation(p => p === targetPath)
+
     const content = await service.readPlan('codeall-unified-plan')
     expect(content).toBe(mockPlanContent)
-    expect(mockFs.readFileSync).toHaveBeenCalled()
+    expect(mockFs.readFileSync).toHaveBeenCalledWith(targetPath, 'utf-8')
   })
 
-  it('should throw error if plan file does not exist', async () => {
+  it('should throw error if plan file does not exist in either primary or legacy locations', async () => {
     mockFs.existsSync.mockReturnValue(false)
     await expect(service.readPlan('non-existent')).rejects.toThrow('Plan file not found')
+  })
+
+  it('should fall back to legacy .sisyphus/plans when primary .fuxi file is missing', async () => {
+    const fuxiPath = path.join(fuxiPlansDir, 'legacy-only.md')
+    const legacyPath = path.join(legacyPlansDir, 'legacy-only.md')
+    mockFs.existsSync.mockImplementation(p => p === legacyPath)
+
+    const resolvedPath = await service.getPlanPath('legacy-only')
+    const content = await service.readPlan('legacy-only')
+
+    expect(resolvedPath).toBe(legacyPath)
+    expect(content).toBe(mockPlanContent)
+    expect(mockFs.readFileSync).toHaveBeenCalledWith(legacyPath, 'utf-8')
+    expect(mockFs.existsSync).toHaveBeenCalledWith(fuxiPath)
   })
 
   it('should parse plan tasks correctly', async () => {
@@ -129,10 +158,26 @@ describe('PlanFileService', () => {
 
     expect(mockFs.mkdirSync).toHaveBeenCalled()
     expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-      expect.stringContaining('new-plan.md'),
+      path.join(fuxiPlansDir, 'new-plan.md'),
       '# New Plan',
       'utf-8'
     )
+  })
+
+  it('should always create plan under .fuxi/plans even when legacy plan exists', async () => {
+    const fuxiPath = path.join(fuxiPlansDir, 'legacy-only.md')
+    const legacyPath = path.join(legacyPlansDir, 'legacy-only.md')
+
+    mockFs.existsSync.mockImplementation(target => {
+      if (target === fuxiPlansDir) return true
+      if (target === fuxiPath) return false
+      if (target === legacyPath) return true
+      return false
+    })
+
+    await service.createPlan('legacy-only', '# Updated Plan')
+
+    expect(mockFs.writeFileSync).toHaveBeenCalledWith(fuxiPath, '# Updated Plan', 'utf-8')
   })
 
   it('should handle empty plan file', async () => {

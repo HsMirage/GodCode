@@ -1,5 +1,4 @@
 import rateLimit from 'express-rate-limit';
-import { config } from '../config';
 
 /**
  * 通用API限流

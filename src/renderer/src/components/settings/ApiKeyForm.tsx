@@ -48,12 +48,28 @@ export function ApiKeyForm() {
     setShowForm(false)
   }
 
-  const startEdit = (entry: ApiKeyEntry) => {
-    setEditingId(entry.id)
-    setFormLabel(entry.label || entry.provider || '')
-    setFormBaseURL(entry.baseURL)
-    setFormApiKey(entry.apiKey)
-    setShowForm(true)
+  const startEdit = async (entry: ApiKeyEntry) => {
+    if (!window.codeall) return
+
+    try {
+      const detail = (await window.codeall.invoke('keychain:get-with-models', entry.id)) as
+        | {
+            id: string
+            provider: string
+            label: string | null
+            baseURL: string
+            apiKey: string
+          }
+        | null
+
+      setEditingId(entry.id)
+      setFormLabel(entry.label || entry.provider || '')
+      setFormBaseURL(entry.baseURL)
+      setFormApiKey(detail?.apiKey || '')
+      setShowForm(true)
+    } catch (error) {
+      console.error('Failed to load full API key for edit:', error)
+    }
   }
 
   const handleSave = async () => {
@@ -239,7 +255,7 @@ export function ApiKeyForm() {
                         value={entry.apiKey}
                         readOnly
                         aria-label={`API key value for ${entry.label}`}
-                        className="bg-transparent border-none p-0 text-xs text-slate-400 font-mono w-24 focus:ring-0"
+                        className="bg-transparent border-none p-0 text-xs text-slate-400 font-mono w-32 focus:ring-0"
                       />
                     </div>
                     <button
@@ -260,7 +276,7 @@ export function ApiKeyForm() {
               <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   type="button"
-                  onClick={() => startEdit(entry)}
+                  onClick={() => void startEdit(entry)}
                   disabled={loading[entry.id]}
                   className="p-1.5 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
                 >

@@ -15,19 +15,19 @@ const PRIMARY_AGENTS: AgentOption[] = [
     code: 'fuxi',
     name: '伏羲(FuXi)',
     chineseName: '伏羲',
-    description: '战略规划器，面试模式创建工作计划'
+    description: '战略规划器，负责需求澄清与计划交接'
   },
   {
     code: 'haotian',
     name: '昊天(HaoTian)',
     chineseName: '昊天',
-    description: '主编排器，任务分解、并行委派、TODO工作流'
+    description: '主编排器，负责分解/委派/检查点/集成'
   },
   {
     code: 'kuafu',
     name: '夸父(KuaFu)',
     chineseName: '夸父',
-    description: '工作计划执行器，任务分发与进度跟踪'
+    description: '执行器，按计划执行并输出结构化证据回执'
   },
   {
     code: 'luban',

@@ -93,7 +93,7 @@ describe('maskApiKey', () => {
   it('should mask long keys correctly', () => {
     const key = 'sk-1234567890abcdef'
     const masked = maskApiKey(key)
-    expect(masked).toBe('sk-...cdef')
+    expect(masked).toBe('sk-1...cdef')
   })
 
   it('should return full string for short keys', () => {

@@ -45,7 +45,7 @@ export interface DelegationTrigger {
 
 /**
  * Agent Prompt 元数据
- * 用于动态生成 Sisyphus/HaoTian Prompt 各节
+ * 用于动态生成主编排 Prompt 各节
  */
 export interface AgentPromptMetadata {
   /** 分类用于 Prompt 节分组 */
@@ -63,13 +63,13 @@ export interface AgentPromptMetadata {
   /** 何时不使用此 Agent */
   avoidWhen?: string[]
 
-  /** 可选的专用 Prompt 节（Markdown）- 用于像 Oracle 这样有特殊节的 Agent */
+  /** 可选的专用 Prompt 节（Markdown）- 用于像白泽这样有特殊节的 Agent */
   dedicatedSection?: string
 
   /** Prompt 中使用的昵称/别名 (如 "白泽" 而不是 "baize") */
   promptAlias?: string
 
-  /** 应出现在阶段 0 的关键触发器 (如 "涉及外部库 → 触发 librarian") */
+  /** 应出现在阶段 0 的关键触发器 (如 "涉及外部库 → 触发 diting") */
   keyTrigger?: string
 }
 
@@ -192,19 +192,31 @@ export const DEFAULT_AGENT_METADATA: Record<string, AgentPromptMetadata> = {
     category: 'utility',
     cost: 'EXPENSIVE',
     promptAlias: '伏羲',
-    triggers: []
+    keyTrigger: '计划阶段 owner',
+    triggers: [
+      { domain: '主 Agent 角色治理', trigger: '规划阶段、需求澄清、计划交接' },
+      { domain: '角色映射', trigger: '规划角色 ↔ 伏羲' }
+    ]
   },
   haotian: {
     category: 'utility',
     cost: 'EXPENSIVE',
     promptAlias: '昊天',
-    triggers: []
+    keyTrigger: '编排阶段 owner',
+    triggers: [
+      { domain: '主 Agent 角色治理', trigger: 'dispatch/checkpoint/integration/finalize 编排阶段' },
+      { domain: '角色映射', trigger: '编排角色 ↔ 昊天' }
+    ]
   },
   kuafu: {
     category: 'utility',
     cost: 'EXPENSIVE',
     promptAlias: '夸父',
-    triggers: []
+    keyTrigger: '执行回执 owner',
+    triggers: [
+      { domain: '主 Agent 角色治理', trigger: '执行阶段、结构化证据回执、异常回传' },
+      { domain: '角色映射', trigger: '执行角色 ↔ 夸父' }
+    ]
   },
   luban: {
     category: 'utility',

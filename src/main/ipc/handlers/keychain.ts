@@ -1,7 +1,7 @@
 import { type IpcMainInvokeEvent } from 'electron'
 import { KeychainService } from '../../services/keychain.service'
 import { DatabaseService } from '../../services/database'
-import { SecureStorageService } from '../../services/secure-storage.service'
+import { SecureStorageService, maskApiKey } from '../../services/secure-storage.service'
 
 const keychainService = KeychainService.getInstance()
 
@@ -43,11 +43,6 @@ export type ApiKeyWithModelsDecrypted = {
   baseURL: string
   apiKey: string
   models: ApiKeyModelInfo[]
-}
-
-function maskApiKey(key: string): string {
-  if (key.length <= 8) return '****'
-  return key.slice(0, 4) + '...' + key.slice(-4)
 }
 
 function normalizeBaseURL(baseURL: string | null | undefined): string {
@@ -163,11 +158,16 @@ export const handleKeychainGetPassword = async (
   _: IpcMainInvokeEvent,
   { service: _service, account }: { service: string; account: string }
 ): Promise<string | null> => {
-  // Legacy support for retrieving keys by provider name
+  // Legacy support for retrieving keys by provider name.
+  // Return full decrypted key via get-with-models to avoid leaking plaintext through list endpoints.
   const provider = account.replace('-api-key', '')
-  const keys = await keychainService.getAllApiKeys()
-  const key = keys.find(k => k.provider === provider || k.label === provider)
-  return key ? key.apiKey : null
+  const keys = await handleKeychainListWithModels()
+  const matched = keys.find(k => k.provider === provider || k.label === provider)
+  if (!matched) {
+    return null
+  }
+  const detail = await handleKeychainGetWithModels({} as IpcMainInvokeEvent, matched.id)
+  return detail?.apiKey ?? null
 }
 
 export const handleKeychainDeletePassword = async (

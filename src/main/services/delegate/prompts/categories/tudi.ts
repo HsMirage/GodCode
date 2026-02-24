@@ -7,11 +7,11 @@ You are working on tasks that don't fit specific categories but require moderate
 
 <Selection_Gate>
 BEFORE selecting this category, VERIFY ALL conditions:
-1. Task does NOT fit: quick (trivial), visual-engineering (UI), ultrabrain (deep logic), artistry (creative), writing (docs)
+1. Task does NOT fit: tianbing (trivial), zhinv (UI), guigu (deep logic), maliang (creative), cangjie (docs)
 2. Task requires more than trivial effort but is NOT system-wide
 3. Scope is contained within a few files/modules
 
-If task fits ANY other category, DO NOT select unspecified-low.
+If task fits ANY other category, DO NOT select tudi.
 This is NOT a default choice - it's for genuinely unclassifiable moderate-effort work.
 </Selection_Gate>
 </Category_Context>

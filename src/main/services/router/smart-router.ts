@@ -41,7 +41,7 @@ const DEFAULT_RULES: RoutingRule[] = [
   {
     pattern: /前端|UI|页面|组件/i,
     strategy: 'delegate',
-    category: 'visual-engineering'
+    category: 'zhinv'
   },
   {
     pattern: /后端|API|数据库/i,
@@ -50,7 +50,7 @@ const DEFAULT_RULES: RoutingRule[] = [
   {
     pattern: /架构|设计/i,
     strategy: 'delegate',
-    subagent: 'oracle'
+    subagent: 'baize'
   },
   {
     pattern: /创建|开发|实现/i,
@@ -112,7 +112,7 @@ export class SmartRouter {
 
     if (decision.strategy === 'workforce') {
       const workflowOptions = {
-        category: decision.category ?? 'unspecified-high',
+        category: decision.category ?? 'dayu',
         agentCode: context?.agentCode,
         abortSignal: context?.abortSignal,
         routingContext: {
@@ -140,7 +140,7 @@ export class SmartRouter {
       rationale.push('forceWorkforce context flag is enabled')
       return {
         strategy: 'workforce',
-        category: 'unspecified-high',
+        category: 'dayu',
         complexityScore: 1,
         rationale
       }
@@ -150,7 +150,7 @@ export class SmartRouter {
       rationale.push('explicit instruction requests workforce orchestration')
       return {
         strategy: 'workforce',
-        category: 'unspecified-high',
+        category: 'dayu',
         complexityScore: 1,
         rationale
       }
@@ -160,8 +160,18 @@ export class SmartRouter {
       rationale.push('explicit instruction requests delegate execution')
       return {
         strategy: 'delegate',
-        category: 'unspecified-high',
+        category: 'dayu',
         complexityScore: 0.6,
+        rationale
+      }
+    }
+
+    if (context?.agentCode?.trim()) {
+      rationale.push('agentCode in context requires delegate route')
+      return {
+        strategy: 'delegate',
+        subagent: context.agentCode.trim(),
+        complexityScore: 0.55,
         rationale
       }
     }
@@ -180,22 +190,12 @@ export class SmartRouter {
       }
     }
 
-    if (context?.agentCode?.trim()) {
-      rationale.push('agentCode in context requires delegate route')
-      return {
-        strategy: 'delegate',
-        subagent: context.agentCode.trim(),
-        complexityScore: 0.55,
-        rationale
-      }
-    }
-
     const complexityScore = this.computeComplexityScore(input)
     if (complexityScore >= 0.55) {
       rationale.push(`complexity score ${complexityScore.toFixed(2)} exceeds workforce threshold`)
       return {
         strategy: 'workforce',
-        category: 'unspecified-high',
+        category: 'dayu',
         complexityScore,
         rationale
       }

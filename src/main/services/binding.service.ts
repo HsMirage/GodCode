@@ -7,6 +7,7 @@ import { DatabaseService } from './database'
 import { LoggerService } from './logger'
 import { SecureStorageService } from './secure-storage.service'
 import { SchemaVersionService } from './schema-version.service'
+import { AuditLogService } from './audit-log.service'
 import { Prisma } from '@prisma/client'
 import {
   AGENT_DEFINITIONS,
@@ -61,10 +62,16 @@ export interface UpdateCategoryBindingInput {
   enabled?: boolean
 }
 
+interface BindingAuditLogContext {
+  sessionId?: string
+  userId?: string
+}
+
 export class BindingService {
   private static instance: BindingService
   private _prisma: ReturnType<typeof DatabaseService.prototype.getClient> | null = null
   private logger = LoggerService.getInstance().getLogger()
+  private auditLogService = AuditLogService.getInstance()
   private initialized = false
 
   private get prisma() {
@@ -289,8 +296,14 @@ export class BindingService {
 
   async updateAgentBinding(
     agentCode: string,
-    data: UpdateAgentBindingInput
+    data: UpdateAgentBindingInput,
+    context: BindingAuditLogContext = {}
   ): Promise<AgentBindingData> {
+    const previous = await this.prisma.agentBinding.findUnique({
+      where: { agentCode },
+      include: { model: true }
+    })
+
     const updated = await this.prisma.agentBinding.update({
       where: { agentCode },
       data: {
@@ -304,6 +317,34 @@ export class BindingService {
     })
 
     this.logger.info(`Updated agent binding: ${agentCode}`, { data })
+
+    await this.auditLogService.log({
+      action: 'binding.agent.update',
+      entityType: 'agentBinding',
+      entityId: updated.id,
+      sessionId: context.sessionId,
+      userId: context.userId,
+      metadata: {
+        agentCode,
+        previous: previous
+          ? {
+              modelId: previous.modelId,
+              temperature: previous.temperature,
+              tools: previous.tools,
+              systemPrompt: previous.systemPrompt,
+              enabled: previous.enabled
+            }
+          : null,
+        next: {
+          modelId: updated.modelId,
+          temperature: updated.temperature,
+          tools: updated.tools,
+          systemPrompt: updated.systemPrompt,
+          enabled: updated.enabled
+        }
+      },
+      success: true
+    })
 
     return {
       id: updated.id,
@@ -320,11 +361,19 @@ export class BindingService {
     }
   }
 
-  async resetAgentBinding(agentCode: string): Promise<AgentBindingData> {
+  async resetAgentBinding(
+    agentCode: string,
+    context: BindingAuditLogContext = {}
+  ): Promise<AgentBindingData> {
     const definition = AGENT_DEFINITIONS.find(a => a.code === agentCode)
     if (!definition) {
       throw new Error(`Unknown agent code: ${agentCode}`)
     }
+
+    const previous = await this.prisma.agentBinding.findUnique({
+      where: { agentCode },
+      include: { model: true }
+    })
 
     const updated = await this.prisma.agentBinding.update({
       where: { agentCode },
@@ -339,6 +388,34 @@ export class BindingService {
     })
 
     this.logger.info(`Reset agent binding to defaults: ${agentCode}`)
+
+    await this.auditLogService.log({
+      action: 'binding.agent.reset',
+      entityType: 'agentBinding',
+      entityId: updated.id,
+      sessionId: context.sessionId,
+      userId: context.userId,
+      metadata: {
+        agentCode,
+        previous: previous
+          ? {
+              modelId: previous.modelId,
+              temperature: previous.temperature,
+              tools: previous.tools,
+              systemPrompt: previous.systemPrompt,
+              enabled: previous.enabled
+            }
+          : null,
+        next: {
+          modelId: updated.modelId,
+          temperature: updated.temperature,
+          tools: updated.tools,
+          systemPrompt: updated.systemPrompt,
+          enabled: updated.enabled
+        }
+      },
+      success: true
+    })
 
     return {
       id: updated.id,
@@ -399,8 +476,14 @@ export class BindingService {
 
   async updateCategoryBinding(
     categoryCode: string,
-    data: UpdateCategoryBindingInput
+    data: UpdateCategoryBindingInput,
+    context: BindingAuditLogContext = {}
   ): Promise<CategoryBindingData> {
+    const previous = await this.prisma.categoryBinding.findUnique({
+      where: { categoryCode },
+      include: { model: true }
+    })
+
     const updated = (await this.prisma.categoryBinding.update({
       where: { categoryCode },
       data: {
@@ -413,6 +496,32 @@ export class BindingService {
     })) as CategoryBindingWithModel
 
     this.logger.info(`Updated category binding: ${categoryCode}`, { data })
+
+    await this.auditLogService.log({
+      action: 'binding.category.update',
+      entityType: 'categoryBinding',
+      entityId: updated.id,
+      sessionId: context.sessionId,
+      userId: context.userId,
+      metadata: {
+        categoryCode,
+        previous: previous
+          ? {
+              modelId: previous.modelId,
+              temperature: previous.temperature,
+              systemPrompt: previous.systemPrompt,
+              enabled: previous.enabled
+            }
+          : null,
+        next: {
+          modelId: updated.modelId,
+          temperature: updated.temperature,
+          systemPrompt: updated.systemPrompt,
+          enabled: updated.enabled
+        }
+      },
+      success: true
+    })
 
     return {
       id: updated.id,
@@ -427,11 +536,19 @@ export class BindingService {
     }
   }
 
-  async resetCategoryBinding(categoryCode: string): Promise<CategoryBindingData> {
+  async resetCategoryBinding(
+    categoryCode: string,
+    context: BindingAuditLogContext = {}
+  ): Promise<CategoryBindingData> {
     const definition = CATEGORY_DEFINITIONS.find(c => c.code === categoryCode)
     if (!definition) {
       throw new Error(`Unknown category code: ${categoryCode}`)
     }
+
+    const previous = await this.prisma.categoryBinding.findUnique({
+      where: { categoryCode },
+      include: { model: true }
+    })
 
     const updated = (await this.prisma.categoryBinding.update({
       where: { categoryCode },
@@ -445,6 +562,32 @@ export class BindingService {
     })) as CategoryBindingWithModel
 
     this.logger.info(`Reset category binding to defaults: ${categoryCode}`)
+
+    await this.auditLogService.log({
+      action: 'binding.category.reset',
+      entityType: 'categoryBinding',
+      entityId: updated.id,
+      sessionId: context.sessionId,
+      userId: context.userId,
+      metadata: {
+        categoryCode,
+        previous: previous
+          ? {
+              modelId: previous.modelId,
+              temperature: previous.temperature,
+              systemPrompt: previous.systemPrompt,
+              enabled: previous.enabled
+            }
+          : null,
+        next: {
+          modelId: updated.modelId,
+          temperature: updated.temperature,
+          systemPrompt: updated.systemPrompt,
+          enabled: updated.enabled
+        }
+      },
+      success: true
+    })
 
     return {
       id: updated.id,

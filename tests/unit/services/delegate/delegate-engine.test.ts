@@ -62,8 +62,8 @@ const bindingMocks = vi.hoisted(() => ({
     }
     return null
   }),
-  getCategoryBinding: vi.fn(async () => null),
-  getAgentBinding: vi.fn(async () => null)
+  getCategoryBinding: vi.fn(async (..._args: any[]) => null as any),
+  getAgentBinding: vi.fn(async (..._args: any[]) => null as any)
 }))
 
 vi.mock('@/main/services/database', () => ({
@@ -100,6 +100,33 @@ describe('DelegateEngine', () => {
     mocks.mockAdapter.sendMessage.mockReset()
     delegateEngine = new DelegateEngine()
 
+    bindingMocks.getCategoryModelConfig.mockImplementation(async (categoryCode: string) => {
+      if (categoryCode === 'quick') {
+        return {
+          model: 'claude-3-haiku-20240307',
+          provider: 'openai-compatible',
+          temperature: 0.3,
+          apiKey: 'test-key',
+          baseURL: 'https://api.openai.com/v1'
+        }
+      }
+      return null
+    })
+    bindingMocks.getAgentModelConfig.mockImplementation(async (agentCode: string) => {
+      if (agentCode === 'explore') {
+        return {
+          model: 'claude-3-5-sonnet-20240620',
+          provider: 'openai-compatible',
+          temperature: 0.2,
+          apiKey: 'test-key',
+          baseURL: 'https://api.openai.com/v1'
+        }
+      }
+      return null
+    })
+    bindingMocks.getCategoryBinding.mockImplementation(async () => null)
+    bindingMocks.getAgentBinding.mockImplementation(async () => null)
+
     // Default mocks setup
     mocks.mockPrisma.session.findUnique.mockResolvedValue({
       id: 'test-session-123',
@@ -130,7 +157,7 @@ describe('DelegateEngine', () => {
       const input = {
         description: 'Test task',
         prompt: 'Do this task',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       }
 
@@ -141,7 +168,7 @@ describe('DelegateEngine', () => {
           data: expect.objectContaining({
             input: input.description,
             metadata: expect.objectContaining({
-              category: 'quick',
+              category: 'tianbing',
               model: 'claude-3-haiku-20240307'
             })
           })
@@ -181,7 +208,7 @@ describe('DelegateEngine', () => {
       const input = {
         description: 'Build UI task',
         prompt: 'Create UI components',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123',
         useDynamicPrompt: false as const
       }
@@ -194,15 +221,89 @@ describe('DelegateEngine', () => {
       }>
       const systemMessage = sentMessages.find(message => message.role === 'system')
 
+      expect(systemMessage?.content).toContain('<Category_Execution_Contract>')
+      expect(systemMessage?.content).toContain('CATEGORY-RUN EXECUTION MODE')
       expect(systemMessage?.content).toContain('<Category_Context>')
       expect(systemMessage?.content).toContain('SMALL / QUICK tasks')
+    })
+
+    it('should append category execution contract in dynamic category-only mode', async () => {
+      await delegateEngine.delegateTask({
+        description: 'Category-only dynamic mode task',
+        prompt: 'Implement a quick backend fix and verify output',
+        category: 'tianbing',
+        sessionId: 'test-session-123'
+      })
+
+      const sentMessages = mocks.mockAdapter.sendMessage.mock.calls.at(-1)?.[0] as Array<{
+        role: string
+        content: string
+      }>
+      const systemMessage = sentMessages.find(message => message.role === 'system')
+
+      expect(systemMessage?.content).toContain('<Category_Execution_Contract>')
+      expect(systemMessage?.content).toContain('CATEGORY-RUN EXECUTION MODE')
+      expect(systemMessage?.content).toContain('<Category_Context>')
+    })
+
+    it('should apply category binding system prompt in dynamic mode and still append category context', async () => {
+      bindingMocks.getCategoryBinding.mockImplementation(async () => {
+        return {
+          id: 'cat-1',
+          categoryCode: 'quick',
+          categoryName: '天兵',
+          description: 'quick tasks',
+          modelId: null,
+          modelName: null,
+          temperature: 0.3,
+          systemPrompt: 'CUSTOM CATEGORY SYSTEM PROMPT',
+          enabled: true
+        }
+      })
+
+      await delegateEngine.delegateTask({
+        description: 'Category prompt override task',
+        prompt: 'Implement quick fix with strict output',
+        category: 'tianbing',
+        sessionId: 'test-session-123'
+      })
+
+      const sentMessages = mocks.mockAdapter.sendMessage.mock.calls.at(-1)?.[0] as Array<{
+        role: string
+        content: string
+      }>
+      const systemMessage = sentMessages.find(message => message.role === 'system')
+
+      expect(systemMessage?.content).toContain('CUSTOM CATEGORY SYSTEM PROMPT')
+      expect(systemMessage?.content).toContain('<Category_Execution_Contract>')
+      expect(systemMessage?.content).toContain('<Category_Context>')
+      expect(systemMessage?.content).toContain('SMALL / QUICK tasks')
+    })
+
+    it('should not append category execution contract when subagent_type is explicit', async () => {
+      await delegateEngine.delegateTask({
+        description: 'Explicit subagent task',
+        prompt: 'Research and propose optimization',
+        category: 'tianbing',
+        subagent_type: 'qianliyan',
+        sessionId: 'test-session-123'
+      })
+
+      const sentMessages = mocks.mockAdapter.sendMessage.mock.calls.at(-1)?.[0] as Array<{
+        role: string
+        content: string
+      }>
+      const systemMessage = sentMessages.find(message => message.role === 'system')
+
+      expect(systemMessage?.content).not.toContain('<Category_Execution_Contract>')
+      expect(systemMessage?.content).toContain('<Category_Context>')
     })
 
     it('should delegate task successfully with subagent_type', async () => {
       const input = {
         description: 'Research task',
         prompt: 'Research this',
-        subagent_type: 'explore',
+        subagent_type: 'qianliyan',
         sessionId: 'test-session-123'
       }
 
@@ -212,8 +313,8 @@ describe('DelegateEngine', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             metadata: expect.objectContaining({
-              subagent_type: 'explore',
-              model: 'claude-3-5-sonnet-20240620'
+              subagent_type: 'qianliyan',
+              model: 'claude-3-haiku-20240307'
             })
           })
         })
@@ -226,7 +327,7 @@ describe('DelegateEngine', () => {
       const input = {
         description: 'Test task',
         prompt: 'Do this task',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       }
 
@@ -268,6 +369,170 @@ describe('DelegateEngine', () => {
       )
     })
 
+    it('should reject unknown primary role alias in metadata payload', async () => {
+      const result = await delegateEngine.delegateTask({
+        description: 'Test task',
+        prompt: 'Do this task',
+        category: 'tianbing',
+        sessionId: 'test-session-123',
+        metadata: {
+          primaryAgentRoleAlias: 'unknown-role'
+        }
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.output).toContain('Unknown primary role alias')
+      expect(result.output).toContain('fuxi/planning')
+      expect(result.output).toContain('haotian/orchestration')
+      expect(result.output).toContain('kuafu/execution')
+      expect(mocks.mockAdapter.sendMessage).not.toHaveBeenCalled()
+    })
+
+    it('should include primary role policy snapshot metadata when alias is valid', async () => {
+      const result = await delegateEngine.delegateTask({
+        description: 'Test task',
+        prompt: 'Do this task',
+        category: 'tianbing',
+        sessionId: 'test-session-123',
+        metadata: {
+          primaryAgentRoleAlias: 'fuxi',
+          workflowStage: 'plan'
+        }
+      })
+
+      expect(result.success).toBe(true)
+      const createCall = mocks.mockPrisma.task.create.mock.calls.at(-1)?.[0]
+      expect(createCall?.data?.metadata).toEqual(
+        expect.objectContaining({
+          primaryAgentRolePolicy: expect.objectContaining({
+            alias: 'fuxi',
+            canonicalAgent: 'fuxi',
+            canonicalRole: 'planning',
+            workflowStage: 'plan'
+          })
+        })
+      )
+    })
+
+    it('should persist recovery request context in task metadata when provided', async () => {
+      const result = await delegateEngine.delegateTask({
+        description: 'Recover failed task',
+        prompt: 'Attempt repair and validate output',
+        category: 'tianbing',
+        sessionId: 'test-session-123',
+        metadata: {
+          recoveryContext: {
+            sourceError: 'network timeout while validating migration',
+            failureClass: 'transient',
+            attemptId: 'workflow-1:task-2:1',
+            repairObjective: 'retry migration and confirm success',
+            orchestratorOwner: 'haotian'
+          }
+        }
+      })
+
+      expect(result.success).toBe(true)
+      const createCall = mocks.mockPrisma.task.create.mock.calls.at(-1)?.[0]
+      expect(createCall?.data?.metadata?.recoveryContext).toEqual(
+        expect.objectContaining({
+          sourceError: 'network timeout while validating migration',
+          failureClass: 'transient',
+          attemptId: 'workflow-1:task-2:1',
+          repairObjective: 'retry migration and confirm success',
+          orchestratorOwner: 'haotian'
+        })
+      )
+    })
+
+    it('should fail fast when explicit subagent conflicts with primary role alias', async () => {
+      const result = await delegateEngine.delegateTask({
+        description: 'Conflict task',
+        prompt: 'Do this task',
+        subagent_type: 'haotian',
+        sessionId: 'test-session-123',
+        metadata: {
+          primaryAgentRoleAlias: 'fuxi',
+          workflowStage: 'plan'
+        }
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.output).toContain('Primary role policy conflict')
+      expect(result.output).toContain('fuxi')
+      expect(result.output).toContain('haotian')
+      expect(mocks.mockAdapter.sendMessage).not.toHaveBeenCalled()
+    })
+
+    it('should enforce stage ownership in strict role mode', async () => {
+      const previous = process.env.WORKFORCE_STRICT_ROLE_MODE
+      process.env.WORKFORCE_STRICT_ROLE_MODE = 'true'
+
+      try {
+        const result = await delegateEngine.delegateTask({
+          description: 'Invalid stage owner',
+          prompt: 'Do this task',
+          subagent_type: 'fuxi',
+          sessionId: 'test-session-123',
+          metadata: {
+            primaryAgentRoleAlias: 'fuxi',
+            workflowStage: 'dispatch'
+          }
+        })
+
+        expect(result.success).toBe(false)
+        expect(result.output).toContain('Role boundary violation')
+        expect(result.output).toContain('dispatch')
+        expect(result.output).toContain('haotian')
+      } finally {
+        if (previous === undefined) {
+          delete process.env.WORKFORCE_STRICT_ROLE_MODE
+        } else {
+          process.env.WORKFORCE_STRICT_ROLE_MODE = previous
+        }
+      }
+    })
+
+    it('should allow strict boundary override and audit override metadata', async () => {
+      const previous = process.env.WORKFORCE_STRICT_ROLE_MODE
+      process.env.WORKFORCE_STRICT_ROLE_MODE = 'true'
+
+      try {
+        const result = await delegateEngine.delegateTask({
+          description: 'Override stage owner',
+          prompt: 'Do this task',
+          subagent_type: 'fuxi',
+          sessionId: 'test-session-123',
+          metadata: {
+            primaryAgentRoleAlias: 'fuxi',
+            workflowStage: 'dispatch',
+            roleBoundaryOverride: {
+              actor: 'integration-test',
+              reason: 'temporary controlled override',
+              scope: 'dispatch',
+              expiry: '2026-12-31T00:00:00Z'
+            }
+          }
+        })
+
+        expect(result.success).toBe(true)
+        const createCall = mocks.mockPrisma.task.create.mock.calls.at(-1)?.[0]
+        expect(createCall?.data?.metadata?.primaryAgentRolePolicy?.override).toEqual(
+          expect.objectContaining({
+            actor: 'integration-test',
+            reason: 'temporary controlled override',
+            scope: 'dispatch',
+            expiry: '2026-12-31T00:00:00Z'
+          })
+        )
+      } finally {
+        if (previous === undefined) {
+          delete process.env.WORKFORCE_STRICT_ROLE_MODE
+        } else {
+          process.env.WORKFORCE_STRICT_ROLE_MODE = previous
+        }
+      }
+    })
+
     it('should throw error if neither category nor subagent_type provided', async () => {
       const input = {
         description: 'Test task',
@@ -284,7 +549,7 @@ describe('DelegateEngine', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Background task',
         prompt: 'Run in background',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123',
         runInBackground: true
       })
@@ -319,7 +584,7 @@ describe('DelegateEngine', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Implement feature X',
         prompt: 'Implement feature X in codebase',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       })
 
@@ -351,7 +616,7 @@ describe('DelegateEngine', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Implement feature Y',
         prompt: 'Implement feature Y in codebase',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       })
 
@@ -391,7 +656,7 @@ describe('DelegateEngine', () => {
       const input = {
         description: 'Test task',
         prompt: 'Do this task',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       }
 
@@ -416,7 +681,7 @@ describe('DelegateEngine', () => {
       const input = {
         description: 'Cancelable task',
         prompt: 'Run this',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123',
         abortSignal: controller.signal
       }

@@ -18,12 +18,32 @@ import { LoggerService } from '../logger'
 import { createLLMAdapter } from '../llm/factory'
 import { DEFAULT_FALLBACK_CHAINS, type ModelSource } from '../llm/model-resolver'
 import type { Message } from '@/types/domain'
-import { AGENT_DEFINITIONS, CATEGORY_DEFINITIONS } from '@/shared/agent-definitions'
+import {
+  AGENT_DEFINITIONS,
+  CATEGORY_DEFINITIONS,
+  resolvePrimaryAgentRolePolicy
+} from '@/shared/agent-definitions'
 import { workflowEvents } from './events'
-import { getTaskRetryService, type RetryConfig, type RetryState } from './retry'
+import {
+  classifyError,
+  getTaskRetryService,
+  isRetryable,
+  NonRetryableErrorType,
+  type RetryConfig,
+  type RetryState
+} from './retry'
+import {
+  DEFAULT_RECOVERY_CLASS_BUDGET,
+  DEFAULT_RECOVERY_CONFIG,
+  type RecoveryConfig,
+  type RecoveryFailureClass,
+  type RecoveryRouteSelection,
+  type WorkflowRecoveryState
+} from './recovery-types'
 import { SecureStorageService } from '../secure-storage.service'
 import { BoulderStateService } from '../boulder-state.service'
 import { BindingService } from '../binding.service'
+import { sanitizeCompletionOutput } from './output-sanitizer'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -63,6 +83,8 @@ export interface WorkflowOptions {
   retryConfig?: Partial<RetryConfig>
   /** Whether to enable retries (default: true) */
   enableRetry?: boolean
+  /** Optional recovery configuration override */
+  recoveryConfig?: Partial<RecoveryConfig>
   /** Optional explicit plan path for plan-driven execution */
   planPath?: string
   /** Abort signal propagated from session stop action */
@@ -127,6 +149,7 @@ interface WorkflowIntegratorResult {
   conflicts: string[]
   unresolvedItems: string[]
   taskOutputs: Array<{ taskId: string; outputPreview: string }>
+  rawTaskOutputs: Array<{ taskId: string; outputPreview: string }>
 }
 
 export interface WorkflowObservabilitySnapshot {
@@ -171,6 +194,7 @@ export interface WorkflowObservabilitySnapshot {
     >
     totalRetried: number
   }
+  recoveryState: WorkflowRecoveryState
   continuationSnapshot: {
     workflowId: string
     sessionId?: string
@@ -223,6 +247,10 @@ export interface WorkflowTaskExecution {
   modelSource?: ModelSource
   concurrencyKey?: string
   fallbackTrail?: string[]
+  evidenceSummary?: {
+    missingFields: string[]
+    isComplete: boolean
+  }
 }
 
 interface ReferencedMarkdownFile {
@@ -297,6 +325,9 @@ const CONCURRENCY_LIMITS: Record<string, number> = {
 }
 const isStrictBindingEnabled = (): boolean =>
   String(process.env.WORKFORCE_STRICT_BINDING || 'false').toLowerCase() === 'true'
+
+const isStrictRoleModeEnabled = (): boolean =>
+  String(process.env.WORKFORCE_STRICT_ROLE_MODE || 'false').toLowerCase() === 'true'
 const PRIMARY_ORCHESTRATORS = new Set(['fuxi', 'haotian', 'kuafu'])
 const SPECIALIST_WORKERS = new Set(['qianliyan', 'diting', 'baize', 'chongming', 'leigong'])
 const KNOWN_SUBAGENT_CODES = new Set([
@@ -311,17 +342,6 @@ const KNOWN_SUBAGENT_CODES = new Set([
   'qianliyan',
   'multimodal-looker'
 ])
-const SUBAGENT_ALIASES: Record<string, string> = {
-  explore: 'qianliyan',
-  oracle: 'baize',
-  librarian: 'diting',
-  metis: 'chongming',
-  momus: 'leigong',
-  prometheus: 'fuxi',
-  sisyphus: 'haotian',
-  atlas: 'kuafu',
-  hephaestus: 'luban'
-}
 const KNOWN_CATEGORY_CODES = new Set([
   'zhinv',
   'cangjie',
@@ -332,17 +352,6 @@ const KNOWN_CATEGORY_CODES = new Set([
   'tudi',
   'dayu'
 ])
-const CATEGORY_ALIASES: Record<string, string> = {
-  'visual-engineering': 'zhinv',
-  writing: 'cangjie',
-  quick: 'tianbing',
-  ultrabrain: 'guigu',
-  artistry: 'maliang',
-  deep: 'guixu',
-  'unspecified-low': 'tudi',
-  'unspecified-high': 'dayu',
-  general: 'dayu'
-}
 const CATEGORY_TO_FALLBACK_SUBAGENT: Record<string, string> = {
   zhinv: 'luban',
   cangjie: 'luban',
@@ -369,7 +378,7 @@ const ORCHESTRATOR_CHECKPOINT_PREVIEW_TAIL = 180
 const ORCHESTRATOR_NO_EVIDENCE_REASON_PATTERN =
   /(no evidence|without evidence|missing evidence|output_preview|only shows intent|only shows plan|no schema content|no prisma validation|无证据|没有证据|仅.*计划|仅.*意图|无法验证|未见证据)/i
 const ORCHESTRATOR_RECOVERABLE_HALT_REASON_PATTERN =
-  /(evidence_detected=no|output_preview|needs?\s+verify|verification failed|cannot verify|未完成|部分完成|需验证|无法验证|证据不足|missing|required|缺失|incomplete|未创建|未安装)/i
+  /(evidence_detected=no|output_preview|needs?\s+verify|verification failed|cannot verify|did not confirm|not a success confirmation|intent to start|server startup|启动成功|服务启动|未完成|部分完成|需验证|无法验证|证据不足|缺乏实现证据|仅显示探索|探索与分析|输出仅显示|依赖不满足|未提供代码变更|具体修复内容|missing|required|缺失|incomplete|未创建|未安装|no evidence|show no evidence|in-progress work|in-progress|rather than finalized|not finalized|without verified|cannot proceed|planning .* rather than)/i
 const CHECKPOINT_HALT_RECOVERY_MAX_ATTEMPTS = 3
 const ALLOWED_WORKER_MODEL_SPECS = new Set<string>([
   ...AGENT_DEFINITIONS.flatMap(def =>
@@ -411,9 +420,8 @@ export class WorkforceEngine {
   private resolveCanonicalSubagent(raw?: string): string | undefined {
     if (!raw) return undefined
     const normalized = this.normalizeToken(raw)
-    const canonical = SUBAGENT_ALIASES[normalized] || normalized
-    if (KNOWN_SUBAGENT_CODES.has(canonical)) {
-      return canonical
+    if (KNOWN_SUBAGENT_CODES.has(normalized)) {
+      return normalized
     }
     return undefined
   }
@@ -421,15 +429,275 @@ export class WorkforceEngine {
   private resolveCanonicalCategory(raw?: string): string | undefined {
     if (!raw) return undefined
     const normalized = this.normalizeToken(raw)
-    const canonical = CATEGORY_ALIASES[normalized] || normalized
-    if (KNOWN_CATEGORY_CODES.has(canonical)) {
-      return canonical
+    if (KNOWN_CATEGORY_CODES.has(normalized)) {
+      return normalized
     }
     return undefined
   }
 
   private normalizeWorkflowCategory(category?: string): string {
     return this.resolveCanonicalCategory(category) || 'dayu'
+  }
+
+  private normalizeRecoveryConfig(override?: Partial<RecoveryConfig>): RecoveryConfig {
+    const envEnabled = process.env.WORKFORCE_AUTONOMOUS_RECOVERY_MODE
+    const enabledFromEnv =
+      envEnabled === undefined ? undefined : ['1', 'true', 'on', 'yes'].includes(envEnabled.toLowerCase())
+
+    const envMaxAttemptsRaw = process.env.WORKFORCE_RECOVERY_MAX_ATTEMPTS
+    const envMaxAttempts = envMaxAttemptsRaw ? Number.parseInt(envMaxAttemptsRaw, 10) : undefined
+
+    const envFallbackPolicy = process.env.WORKFORCE_RECOVERY_FALLBACK_POLICY
+    const fallbackPolicy =
+      override?.fallbackPolicy ||
+      (envFallbackPolicy === 'category-first' ||
+        envFallbackPolicy === 'subagent-first' ||
+        envFallbackPolicy === 'model-first'
+        ? envFallbackPolicy
+        : undefined) ||
+      DEFAULT_RECOVERY_CONFIG.fallbackPolicy
+
+    const parseBudget = (envName: string, fallback: number): number => {
+      const raw = process.env[envName]
+      if (!raw) return fallback
+      const parsed = Number.parseInt(raw, 10)
+      if (!Number.isFinite(parsed) || parsed < 0) return fallback
+      return parsed
+    }
+
+    const mergedClassBudget = {
+      transient: parseBudget(
+        'WORKFORCE_RECOVERY_BUDGET_TRANSIENT',
+        override?.classBudget?.transient ?? DEFAULT_RECOVERY_CLASS_BUDGET.transient
+      ),
+      config: parseBudget(
+        'WORKFORCE_RECOVERY_BUDGET_CONFIG',
+        override?.classBudget?.config ?? DEFAULT_RECOVERY_CLASS_BUDGET.config
+      ),
+      dependency: parseBudget(
+        'WORKFORCE_RECOVERY_BUDGET_DEPENDENCY',
+        override?.classBudget?.dependency ?? DEFAULT_RECOVERY_CLASS_BUDGET.dependency
+      ),
+      implementation: parseBudget(
+        'WORKFORCE_RECOVERY_BUDGET_IMPLEMENTATION',
+        override?.classBudget?.implementation ?? DEFAULT_RECOVERY_CLASS_BUDGET.implementation
+      ),
+      permission: parseBudget(
+        'WORKFORCE_RECOVERY_BUDGET_PERMISSION',
+        override?.classBudget?.permission ?? DEFAULT_RECOVERY_CLASS_BUDGET.permission
+      ),
+      unknown: parseBudget(
+        'WORKFORCE_RECOVERY_BUDGET_UNKNOWN',
+        override?.classBudget?.unknown ?? DEFAULT_RECOVERY_CLASS_BUDGET.unknown
+      )
+    }
+
+    return {
+      enabled: override?.enabled ?? enabledFromEnv ?? DEFAULT_RECOVERY_CONFIG.enabled,
+      maxAttempts:
+        override?.maxAttempts ??
+        (Number.isFinite(envMaxAttempts) && envMaxAttempts !== undefined ? envMaxAttempts : undefined) ??
+        DEFAULT_RECOVERY_CONFIG.maxAttempts,
+      classBudget: mergedClassBudget,
+      fallbackPolicy
+    }
+  }
+
+  private createInitialRecoveryState(config: RecoveryConfig): WorkflowRecoveryState {
+    return {
+      phase: 'classify',
+      config,
+      history: [],
+      terminalDiagnostics: [],
+      recoveredTasks: [],
+      unrecoveredTasks: []
+    }
+  }
+
+  private cloneRecoveryState(state: WorkflowRecoveryState): WorkflowRecoveryState {
+    return JSON.parse(JSON.stringify(state)) as WorkflowRecoveryState
+  }
+
+  private normalizePersistedRecoveryState(
+    input: unknown,
+    fallbackConfig: RecoveryConfig = DEFAULT_RECOVERY_CONFIG
+  ): WorkflowRecoveryState {
+    if (!input || typeof input !== 'object') {
+      return this.createInitialRecoveryState(fallbackConfig)
+    }
+
+    const payload = input as Partial<WorkflowRecoveryState>
+    const phase =
+      payload.phase === 'classify' ||
+        payload.phase === 'plan' ||
+        payload.phase === 'fix' ||
+        payload.phase === 'validate' ||
+        payload.phase === 'escalate' ||
+        payload.phase === 'abort'
+        ? payload.phase
+        : 'classify'
+
+    const config = this.normalizeRecoveryConfig(payload.config || fallbackConfig)
+
+    return {
+      phase,
+      config,
+      history: Array.isArray(payload.history) ? payload.history : [],
+      terminalDiagnostics: Array.isArray(payload.terminalDiagnostics) ? payload.terminalDiagnostics : [],
+      recoveredTasks: Array.isArray(payload.recoveredTasks) ? payload.recoveredTasks : [],
+      unrecoveredTasks: Array.isArray(payload.unrecoveredTasks) ? payload.unrecoveredTasks : []
+    }
+  }
+
+  private classifyRecoveryFailure(error: unknown): RecoveryFailureClass {
+    const classification = classifyError(error)
+    const message = error instanceof Error ? error.message.toLowerCase() : String(error || '').toLowerCase()
+
+    if (classification === NonRetryableErrorType.FORBIDDEN || /permission|forbidden|403|denied/.test(message)) {
+      return 'permission'
+    }
+
+    if (classification === NonRetryableErrorType.AUTH_ERROR || /api key|auth|unauthorized|401|config/.test(message)) {
+      return 'config'
+    }
+
+    if (/dependency|module not found|cannot find module|missing package|install/.test(message)) {
+      return 'dependency'
+    }
+
+    if (/assert|typecheck|compile|syntax|validation failed|test failed/.test(message)) {
+      return 'implementation'
+    }
+
+    if (isRetryable(classification)) {
+      return 'transient'
+    }
+
+    return 'unknown'
+  }
+
+  private isRecoveryClassRecoverable(failureClass: RecoveryFailureClass): boolean {
+    return failureClass !== 'permission' && failureClass !== 'unknown'
+  }
+
+  private buildRecoveryRouteSelection(input: {
+    failureClass: RecoveryFailureClass
+    fallbackPolicy: RecoveryConfig['fallbackPolicy']
+    assignedAgent?: string
+    assignedCategory?: string
+    lastModel?: string
+  }): RecoveryRouteSelection {
+    const attemptedRoutes: string[] = []
+    const blockedReasons: string[] = []
+    const alternatives: string[] = []
+
+    if (!this.isRecoveryClassRecoverable(input.failureClass)) {
+      blockedReasons.push(`Failure class ${input.failureClass} is non-recoverable`)
+      if (input.failureClass === 'permission') {
+        alternatives.push('Check credentials and workspace permissions')
+      } else {
+        alternatives.push('Inspect terminal diagnostics and recover manually')
+      }
+      return {
+        strategy: 'fail-fast',
+        diagnostics: { attemptedRoutes, blockedReasons, alternatives }
+      }
+    }
+
+    let strategy = 'category-repair'
+    let category: string | undefined = input.assignedCategory || 'dayu'
+    let subagent: string | undefined = input.assignedAgent
+    let model: string | undefined
+
+    switch (input.failureClass) {
+      case 'transient':
+        strategy = 'transient-retry-via-category'
+        category = input.assignedCategory || 'tianbing'
+        break
+      case 'config':
+        strategy = 'config-repair-via-subagent'
+        subagent = 'luban'
+        category = undefined
+        break
+      case 'dependency':
+        strategy = 'dependency-repair-via-category'
+        category = input.assignedCategory || 'dayu'
+        break
+      case 'implementation':
+        strategy = 'implementation-repair-via-category'
+        category = input.assignedCategory || 'dayu'
+        break
+      default:
+        break
+    }
+
+    if (input.fallbackPolicy === 'subagent-first') {
+      strategy = `${strategy}:subagent-first`
+      subagent = subagent || (category ? CATEGORY_TO_FALLBACK_SUBAGENT[category] || 'luban' : 'luban')
+      category = undefined
+    } else if (input.fallbackPolicy === 'model-first') {
+      strategy = `${strategy}:model-first`
+      category = undefined
+      subagent = undefined
+      const normalizedModel =
+        typeof input.lastModel === 'string' && input.lastModel.includes('::')
+          ? input.lastModel.replace('::', '/')
+          : input.lastModel
+      if (normalizedModel && normalizedModel.includes('/')) {
+        model = normalizedModel
+      } else {
+        blockedReasons.push('No compatible model token available for model-first recovery')
+        alternatives.push('Switch fallback policy to category-first or subagent-first')
+      }
+    }
+
+    if (!category && !subagent && !model) {
+      blockedReasons.push('No route target available for recovery')
+      alternatives.push('Configure category/agent bindings for recovery tasks')
+      return {
+        strategy,
+        diagnostics: { attemptedRoutes, blockedReasons, alternatives }
+      }
+    }
+
+    attemptedRoutes.push(
+      [category ? `category:${category}` : null, subagent ? `subagent:${subagent}` : null, model ? `model:${model}` : null]
+        .filter(Boolean)
+        .join('|')
+    )
+
+    return {
+      strategy,
+      category,
+      subagent_type: subagent,
+      model,
+      diagnostics: {
+        attemptedRoutes,
+        blockedReasons,
+        alternatives
+      }
+    }
+  }
+
+  private buildRecoveryRepairPrompt(input: {
+    task: SubTask
+    sourceError: string
+    failureClass: RecoveryFailureClass
+    attempt: number
+    objective: string
+  }): string {
+    return [
+      `任务执行失败，进入自动恢复流程（第 ${input.attempt} 轮）。`,
+      `失败任务: ${input.task.id} - ${input.task.description}`,
+      `失败分类: ${input.failureClass}`,
+      `源错误: ${input.sourceError}`,
+      `修复目标: ${input.objective}`,
+      '请执行最小必要修复并输出结构化证据，必须包含以下字段：',
+      '- objective: ...',
+      '- changes: ...',
+      '- validation: ...',
+      '- residual-risk: ...'
+    ].join('\n')
   }
 
   private normalizeDecomposedSubtasks(input: unknown): SubTask[] {
@@ -489,14 +757,14 @@ export class WorkforceEngine {
     )
   }
 
-  private shouldRequestLibrarian(text: string): boolean {
+  private shouldRequestDiting(text: string): boolean {
     return /(?:官方文档|api reference|best practice|第三方|开源|oss|community|sdk|benchmark|外部文档|第三方库|外部库|依赖包|npm|pypi|maven|pip|crate)/i.test(
       text
     )
   }
 
   private shouldRequestDeepReview(input: string): boolean {
-    return /(雷公|momus|deep review|深度审查|深审|严格审查|quality gate|quality review)/i.test(
+    return /(雷公|deep review|深度审查|深审|严格审查|quality gate|quality review)/i.test(
       input
     )
   }
@@ -504,11 +772,11 @@ export class WorkforceEngine {
   private isAgentExplicitlyRequested(input: string, agentCode: string): boolean {
     const normalized = input.toLowerCase()
     const aliases: Record<string, string[]> = {
-      qianliyan: ['qianliyan', 'explore', '千里眼'],
-      diting: ['diting', 'librarian', '谛听'],
-      baize: ['baize', 'oracle', '白泽'],
-      chongming: ['chongming', 'metis', '重明'],
-      leigong: ['leigong', 'momus', '雷公']
+      qianliyan: ['qianliyan', '千里眼'],
+      diting: ['diting', '谛听'],
+      baize: ['baize', '白泽'],
+      chongming: ['chongming', '重明'],
+      leigong: ['leigong', '雷公']
     }
     const candidates = aliases[agentCode] || [agentCode]
     return candidates.some(candidate => normalized.includes(candidate.toLowerCase()))
@@ -530,7 +798,7 @@ export class WorkforceEngine {
           text
         )
       case 'diting':
-        return this.shouldRequestLibrarian(text)
+        return this.shouldRequestDiting(text)
       case 'baize':
         return /(架构|评审|review|审查|debug|诊断|risk|风险|trade-off)/i.test(text)
       case 'chongming':
@@ -608,7 +876,7 @@ export class WorkforceEngine {
   }
 
   private inferTaskIntent(task: SubTask, _workflowReadOnly: boolean): TaskIntent {
-    
+
     if (task.workflowPhase && task.workflowPhase !== 'execution') {
       return 'analysis'
     }
@@ -816,13 +1084,13 @@ export class WorkforceEngine {
       })
     }
 
-    const shouldInjectLibrarianTask =
+    const shouldInjectDitingTask =
       !hasReferencedMarkdownInputs &&
-      (this.shouldRequestLibrarian(combinedTaskText) ||
+      (this.shouldRequestDiting(combinedTaskText) ||
         this.isAgentExplicitlyRequested(context.input, 'diting'))
     if (
       shouldInjectDiscovery &&
-      shouldInjectLibrarianTask &&
+      shouldInjectDitingTask &&
       !preservedDiscoveryTasks.some(task => task.assignedAgent === 'diting')
     ) {
       injectedDiscoveryTasks.push({
@@ -1117,10 +1385,19 @@ export class WorkforceEngine {
 ADDITIONAL ORCHESTRATION RULES (PRIMARY AGENT):
 - Focus subtasks on execution deliverables. Avoid meta/status tasks.
 - Prefer "category" for implementation tasks.
-- Use "subagent_type" only for true specialist work (explore/docs/risk review), not for generic implementation.
+- Use "subagent_type" only for true specialist work (qianliyan/diting/baize/chongming/leigong), not for generic implementation.
 - For implementation requests, output at least one execution subtask with "category". If both backend and frontend are requested, output both.
 - Specialist subtasks should be discovery/review only and must not replace execution subtasks.
-- Every subtask description must be outcome-oriented (what is delivered), never process-oriented (what to think).`
+- Every subtask description must be outcome-oriented (what is delivered), never process-oriented (what to think).
+- IMPORTANT: Use diverse categories based on task nature. Do NOT assign all tasks to "dayu":
+  * zhinv: 前端/UI/UX/样式/动画
+  * cangjie: 文档/技术写作
+  * tianbing: 琐碎任务/单文件修改/简单测试
+  * guigu: 复杂推理/算法设计
+  * maliang: 创意任务
+  * guixu: 深度任务/复杂重构/性能优化
+  * tudi: 通用低复杂度任务
+  * dayu: 通用高复杂度任务/后端/API/数据库`
       : ''
 
     const prompt = `Decompose the following task into 3-5 subtasks. For each subtask, identify dependencies and choose an execution profile.
@@ -1427,11 +1704,19 @@ Only return the JSON, no other text.`
     tasks: SubTask[],
     results: Map<string, string>
   ): WorkflowIntegratorResult {
-    const taskOutputs = tasks.map(task => {
-      const output = (results.get(task.id) || '').trim()
+    const rawTaskOutputs = tasks.map(task => {
+      const rawOutput = (results.get(task.id) || '').trim()
       return {
         taskId: task.id,
-        outputPreview: output.length > 360 ? `${output.slice(0, 360)}\n[...截断...]` : output
+        outputPreview: rawOutput.length > 360 ? `${rawOutput.slice(0, 360)}\n[...截断...]` : rawOutput
+      }
+    })
+
+    const taskOutputs = rawTaskOutputs.map(item => {
+      const sanitized = sanitizeCompletionOutput(item.outputPreview).trim()
+      return {
+        taskId: item.taskId,
+        outputPreview: sanitized
       }
     })
 
@@ -1449,6 +1734,13 @@ Only return the JSON, no other text.`
       if (/(todo|待办|未完成|pending)/i.test(text)) {
         unresolvedItems.push(`${item.taskId}: 输出包含未完成事项`)
       }
+
+      const missingEvidenceFields = this.collectMissingEvidenceFields(text)
+      if (missingEvidenceFields.length > 0) {
+        unresolvedItems.push(
+          `${item.taskId}: evidence-gap missing fields: ${missingEvidenceFields.join(', ')}`
+        )
+      }
     }
 
     const summary = [
@@ -1462,7 +1754,8 @@ Only return the JSON, no other text.`
       summary,
       conflicts,
       unresolvedItems,
-      taskOutputs
+      taskOutputs,
+      rawTaskOutputs
     }
   }
 
@@ -1485,6 +1778,7 @@ Only return the JSON, no other text.`
     taskTimeline: Array<Record<string, unknown>>
     runTimeline: Array<Record<string, unknown>>
     retryStates: Map<string, RetryState>
+    recoveryState: WorkflowRecoveryState
     status: 'completed' | 'failed' | 'cancelled' | 'running'
   }): WorkflowObservabilitySnapshot {
     const assignments = params.tasks.map(task => ({
@@ -1573,6 +1867,7 @@ Only return the JSON, no other text.`
         tasks: retryTasks,
         totalRetried: Object.values(retryTasks).filter(item => item.attemptNumber > 1).length
       },
+      recoveryState: this.cloneRecoveryState(params.recoveryState),
       continuationSnapshot: {
         workflowId: params.workflowId,
         sessionId: params.sessionId,
@@ -1924,18 +2219,13 @@ ${clippedContent}`)
     let assignedAgent: string | undefined
     let assignedCategory: string | undefined
 
-    const subagentCandidates = Array.from(
-      new Set([...KNOWN_SUBAGENT_CODES, ...Object.keys(SUBAGENT_ALIASES)])
-    )
-    const categoryCandidates = Array.from(
-      new Set([...KNOWN_CATEGORY_CODES, ...Object.keys(CATEGORY_ALIASES)])
-    )
+    const subagentCandidates = Array.from(KNOWN_SUBAGENT_CODES)
+    const categoryCandidates = Array.from(KNOWN_CATEGORY_CODES)
 
     for (const line of normalized) {
       const explicitAssignee =
         line.match(/subagent_type\s*[:：=]\s*["']?([a-zA-Z0-9_-]+)["']?/i)?.[1] ||
         line.match(/task\s*\(\s*subagent_type\s*=\s*["']([a-zA-Z0-9_-]+)["']/i)?.[1] ||
-        line.match(/call_omo_agent\s*\(\s*subagent_type\s*=\s*["']([a-zA-Z0-9_-]+)["']/i)?.[1] ||
         line.match(/(?:agent|代理|执行者|assignee)\s*[:：=]\s*([a-zA-Z0-9_-]+)/i)?.[1] ||
         line.match(/\[agent\s*[:：=]\s*([a-zA-Z0-9_-]+)\]/i)?.[1]
       if (explicitAssignee) {
@@ -2011,11 +2301,11 @@ ${clippedContent}`)
   private selectCategoryForTask(task: SubTask, workflowCategory?: string): string {
     const text = task.description.toLowerCase()
 
-    if (/(前端|ui|组件|样式|css|layout|页面|动画|交互|响应式)/i.test(text)) {
+    if (/(前端|ui|组件|样式|css|layout|页面|动画|交互|响应式|frontend)/i.test(text)) {
       return 'zhinv'
     }
 
-    if (/(文档撰写|编写文档|changelog|release note|技术写作|说明文档)/i.test(text)) {
+    if (/(文档撰写|编写文档|changelog|release note|技术写作|说明文档|readme|docs)/i.test(text)) {
       return 'cangjie'
     }
 
@@ -2035,11 +2325,34 @@ ${clippedContent}`)
       return 'tianbing'
     }
 
-    if (/(实现|修复|feature|bug|refactor|重构|集成|后端|api|数据库|schema|migration|service|controller|单测|测试|test|ci|pipeline|deploy)/i.test(text)) {
-      return this.normalizeWorkflowCategory(workflowCategory)
+    // Backend/API/DB heavy implementation → dayu (高复杂度通用)
+    if (/(后端|backend|api|接口|数据库|schema|migration|service|controller|server|middleware)/i.test(text)) {
+      return 'dayu'
     }
 
-    return this.normalizeWorkflowCategory(workflowCategory)
+    // Testing/CI/Deploy → tianbing (琐碎) or dayu (复杂) based on complexity signals
+    if (/(单测|测试|test|ci|pipeline|deploy|lint|format)/i.test(text)) {
+      if (/(集成测试|integration test|e2e|端到端|全链路)/i.test(text)) {
+        return 'dayu'
+      }
+      return 'tianbing'
+    }
+
+    // General implementation, bug fixes → use complexity heuristic
+    if (/(实现|修复|开发|feature|bug|fix|refactor|重构|集成)/i.test(text)) {
+      // Multi-file or cross-module work → dayu
+      if (/(多文件|跨模块|全面|完整|整体|综合|multi|cross|full)/i.test(text)) {
+        return 'dayu'
+      }
+      // Low complexity indicator → tudi
+      if (/(简单|单个|one|single|minor|小|低复杂|通用.*低)/i.test(text)) {
+        return 'tudi'
+      }
+      return this.resolveCanonicalCategory(workflowCategory) || 'dayu'
+    }
+
+    // Fallback: use workflowCategory if provided, otherwise dayu
+    return this.resolveCanonicalCategory(workflowCategory) || 'dayu'
   }
 
   private reconcileExplicitCategory(
@@ -2120,12 +2433,19 @@ ${clippedContent}`)
     const singleLine = this.normalizeOutputLineForHeuristics(normalized)
     const statusPrefixPattern =
       /^(planning|considering|listing|reading|searching|extracting|inspecting|clarifying|analyzing|reviewing|checking|preparing|scanning|examining|deciding|confirming|exploring|starting|investigating|understanding|organizing)\b/i
-    if (
-      (firstMeaningfulLine && statusPrefixPattern.test(firstMeaningfulLine)) ||
+    const chineseStatusPrefixPattern =
+      /^(?:我(?:将|会)|让我(?:先|来)?|先(?:来|去)?|接下来|马上|准备(?:先)?|开始(?:先)?|计划|正在)\s*(?:继续)?\s*(?:检查|探索|分析|查看|读取|搜索|调研|定位|确认|执行|梳理|处理|修复|实现)?/i
+    const looksLikeStatusOnlyPlaceholder =
+      (firstMeaningfulLine &&
+        (statusPrefixPattern.test(firstMeaningfulLine) ||
+          chineseStatusPrefixPattern.test(firstMeaningfulLine))) ||
       statusPrefixPattern.test(singleLine) ||
+      chineseStatusPrefixPattern.test(singleLine) ||
       /^(计划|正在|搜索|列出|读取)/.test(singleLine)
+    if (
+      looksLikeStatusOnlyPlaceholder
     ) {
-      if (singleLine.length <= 180 && !hasConcreteEvidence) {
+      if (singleLine.length <= 220 && !hasConcreteEvidence) {
         return 'status-only-placeholder'
       }
     }
@@ -2165,6 +2485,29 @@ ${clippedContent}`)
     }
 
     return false
+  }
+
+  private collectMissingEvidenceFields(output: string): string[] {
+    const normalized = output.toLowerCase()
+    const requiredFields: Array<{ name: string; patterns: RegExp[] }> = [
+      { name: 'objective', patterns: [/\bobjective\b/i, /目标/i] },
+      {
+        name: 'changes',
+        patterns: [/\bchanges\b/i, /changed files/i, /变更文件/i, /修改文件/i]
+      },
+      {
+        name: 'validation',
+        patterns: [/\bvalidation\b/i, /verification/i, /测试命令/i, /验证命令/i, /test command/i]
+      },
+      {
+        name: 'residual-risk',
+        patterns: [/residual[-\s]?risk/i, /remaining risk/i, /剩余风险/i, /遗留风险/i]
+      }
+    ]
+
+    return requiredFields
+      .filter(field => !field.patterns.some(pattern => pattern.test(normalized)))
+      .map(field => field.name)
   }
 
   private resolveTaskExecutionProfile(
@@ -2284,10 +2627,10 @@ ${clippedContent}`)
     const specContextLines =
       normalizedReferencedMarkdownFiles.length > 0
         ? [
-            '- referenced_specs:',
-            ...normalizedReferencedMarkdownFiles.map(file => `  - ${file}`),
-            '- 如果任务涉及上述规格文件，必须先读取并按规格执行。'
-          ]
+          '- referenced_specs:',
+          ...normalizedReferencedMarkdownFiles.map(file => `  - ${file}`),
+          '- 如果任务涉及上述规格文件，必须先读取并按规格执行。'
+        ]
         : ['- referenced_specs: (none)']
 
     if (contract.intent === 'analysis') {
@@ -2325,20 +2668,20 @@ ${clippedContent}`)
 
     const implementationMustDo = contract.readOnly
       ? [
-          '- 当前工作流是只读模式：请输出可执行实现方案与验证方案，不得改代码。',
-          '- 方案中需明确涉及文件路径、拟改动点、验证命令。'
-        ]
+        '- 当前工作流是只读模式：请输出可执行实现方案与验证方案，不得改代码。',
+        '- 方案中需明确涉及文件路径、拟改动点、验证命令。'
+      ]
       : [
-          '- 必须在仓库中落地真实改动，不允许只给建议。',
-          '- 列出实际改动文件路径与关键修改点。',
-          '- 至少提供一条验证命令及关键输出。'
-        ]
+        '- 必须在仓库中落地真实改动，不允许只给建议。',
+        '- 列出实际改动文件路径与关键修改点。',
+        '- 至少提供一条验证命令及关键输出。'
+      ]
     const implementationSpecMustDo =
       normalizedReferencedMarkdownFiles.length > 0
         ? [
-            '- 必须先读取 referenced_specs 中的规划/规格文件，再开始实现。',
-            '- 输出中必须包含 SPEC_COVERAGE 小节：列出已覆盖的规划条目及对应改动文件。'
-          ]
+          '- 必须先读取 referenced_specs 中的规划/规格文件，再开始实现。',
+          '- 输出中必须包含 SPEC_COVERAGE 小节：列出已覆盖的规划条目及对应改动文件。'
+        ]
         : []
 
     return [
@@ -2432,13 +2775,29 @@ ${clippedContent}`)
       return false
     }
 
-    return input.recentlyCompletedTasks.every(task =>
+    // Downgrade if ANY completed task has concrete evidence (not requiring ALL)
+    return input.recentlyCompletedTasks.some(task =>
       this.hasConcreteExecutionEvidence(input.results.get(task.id) || '')
     )
   }
 
   private shouldAttemptCheckpointHaltRecovery(reason?: string): boolean {
-    return ORCHESTRATOR_RECOVERABLE_HALT_REASON_PATTERN.test(reason || '')
+    const normalizedReason = (reason || '').trim()
+    if (!normalizedReason) {
+      return false
+    }
+
+    if (ORCHESTRATOR_RECOVERABLE_HALT_REASON_PATTERN.test(normalizedReason)) {
+      return true
+    }
+
+    const hasTaskReference = /(?:\btask\b[\s#-]*\d+|任务\s*#?\s*\d+)/i.test(normalizedReason)
+    const hasEvidenceOrDependencyIssue =
+      /(evidence|证据|探索|分析|analysis|intent|计划|依赖|dependency|未提供代码|code change|修复内容|不满足|未满足|verify|验证)/i.test(
+        normalizedReason
+      )
+
+    return hasTaskReference && hasEvidenceOrDependencyIssue
   }
 
   private selectCheckpointRecoveryTargets(reason: string | undefined, candidates: SubTask[]): SubTask[] {
@@ -2456,11 +2815,30 @@ ${clippedContent}`)
       )
     )
 
-    if (matchedIds.length === 0) {
+    const taskNumberMatches = Array.from(reason.matchAll(/(?:task|任务)\s*#?\s*(\d+)/gi)).map(
+      match => match[1]
+    )
+    for (const numberToken of taskNumberMatches) {
+      const normalized = numberToken.trim()
+      if (!normalized) continue
+      for (const candidate of candidates) {
+        const candidateId = candidate.id.toLowerCase()
+        if (
+          candidateId === normalized ||
+          candidateId === `task-${normalized}` ||
+          candidateId.endsWith(`-${normalized}`)
+        ) {
+          matchedIds.push(candidate.id)
+        }
+      }
+    }
+
+    const dedupMatchedIds = Array.from(new Set(matchedIds))
+    if (dedupMatchedIds.length === 0) {
       return candidates
     }
 
-    const matchedSet = new Set(matchedIds)
+    const matchedSet = new Set(dedupMatchedIds)
     return candidates.filter(task => matchedSet.has(task.id))
   }
 
@@ -2548,7 +2926,9 @@ ${clippedContent}`)
       'DECISION RULES:',
       '- 仅可从 READY_TASK_CANDIDATES 中选择 approved_task_ids。',
       '- 若发现关键问题（结果不可信/依赖不满足/需要重规划），status 必须为 "halt" 并写 reason。',
-      '- 若 evidence_detected = yes，不得仅因为 output_preview 看起来像摘要/计划而判定“无证据”。',
+      '- 若 evidence_detected = yes，不得仅因为 output_preview 看起来像摘要/计划而判定"无证据"。',
+      '- 若子任务输出中包含文件路径、代码片段或具体实现描述，应视为有效执行证据，status 设为 "continue"。',
+      '- output_preview 仅是截断预览，不能代表完整输出。若 evidence_detected = yes 或 evidence_signals 非空，优先信任引擎检测结果。',
       '- 若允许继续，status 设为 "continue"。',
       '- 当 CHECKPOINT_PHASE = final 且 READY_TASK_CANDIDATES 为空时，approved_task_ids 应为空数组。',
       '- 禁止调用工具，禁止输出解释性长文。',
@@ -2584,7 +2964,7 @@ ${clippedContent}`)
       const explicitHalt = parsed.halt === true
       const status: 'continue' | 'halt' =
         explicitHalt ||
-        /^(halt|stop|blocked|block|cancel|canceled|failed|fail)$/.test(statusText)
+          /^(halt|stop|blocked|block|cancel|canceled|failed|fail)$/.test(statusText)
           ? 'halt'
           : 'continue'
 
@@ -2640,12 +3020,12 @@ ${clippedContent}`)
       return null
     }
 
-      const prompt = this.buildOrchestratorCheckpointPrompt({
-        workflowId: input.workflowId,
-        phase: input.phase,
-        userInput: input.userInput,
-        recentlyCompletedTasks: input.recentlyCompletedTasks,
-        readyTasks: input.readyTasks,
+    const prompt = this.buildOrchestratorCheckpointPrompt({
+      workflowId: input.workflowId,
+      phase: input.phase,
+      userInput: input.userInput,
+      recentlyCompletedTasks: input.recentlyCompletedTasks,
+      readyTasks: input.readyTasks,
       results: input.results,
       executions: input.executions
     })
@@ -2763,14 +3143,14 @@ ${clippedContent}`)
     const evidenceDirective =
       intent === 'analysis'
         ? [
-            '- 必须输出 EVIDENCE_PATHS / KEY_FINDINGS / RISKS_AND_CONCLUSIONS 三段结构。',
-            '- 每段内容必须具备可验证信息，不允许状态描述。'
-          ]
+          '- 必须输出 EVIDENCE_PATHS / KEY_FINDINGS / RISKS_AND_CONCLUSIONS 三段结构。',
+          '- 每段内容必须具备可验证信息，不允许状态描述。'
+        ]
         : [
-            '- 必须直接给出可交付结果，并包含以下证据：',
-            '  1) 真实改动文件路径（或只读模式下的拟改动路径与方案依据）。',
-            '  2) 至少一条验证命令与关键输出。'
-          ]
+          '- 必须直接给出可交付结果，并包含以下证据：',
+          '  1) 真实改动文件路径（或只读模式下的拟改动路径与方案依据）。',
+          '  2) 至少一条验证命令与关键输出。'
+        ]
 
     return [
       basePrompt,
@@ -3013,7 +3393,7 @@ ${clippedContent}`)
     let prompt = input.baseDelegateInput.prompt
     let overrideModelSpec: string | undefined
 
-    for (;;) {
+    for (; ;) {
       const delegateInput: WorkerDispatchInput = {
         ...input.baseDelegateInput,
         prompt,
@@ -3074,13 +3454,13 @@ ${clippedContent}`)
 
       const unactionableReason = outputText
         ? this.getUnactionableOutputReason(
-            {
-              id: input.taskId,
-              description: input.baseDelegateInput.description,
-              dependencies: []
-            } as SubTask,
-            outputText
-          )
+          {
+            id: input.taskId,
+            description: input.baseDelegateInput.description,
+            dependencies: []
+          } as SubTask,
+          outputText
+        )
         : 'empty-output'
 
       if (!unactionableReason) {
@@ -3136,10 +3516,10 @@ ${clippedContent}`)
             : `agent "${input.assignedAgent || 'luban'}"`
           throw new Error(
             strictResolution.diagnostics ||
-              `Strict binding rejected fallback model for ${scope}. ` +
-                `No compatible fallback model is available. ` +
-                `Attempted models: ${attempted.join(', ') || '(none)'}. ` +
-                'Please update binding/fallback configuration in Settings.'
+            `Strict binding rejected fallback model for ${scope}. ` +
+            `No compatible fallback model is available. ` +
+            `Attempted models: ${attempted.join(', ') || '(none)'}. ` +
+            'Please update binding/fallback configuration in Settings.'
           )
         }
 
@@ -3205,10 +3585,20 @@ ${clippedContent}`)
       agentCode,
       retryConfig,
       enableRetry = true,
+      recoveryConfig,
       abortSignal
     } = resolvedOptions
     const category = this.normalizeWorkflowCategory(requestedCategory)
     const orchestratorAgentCode = this.resolveCanonicalSubagent(agentCode) || agentCode
+    const orchestratorPrimaryRolePolicy = orchestratorAgentCode
+      ? resolvePrimaryAgentRolePolicy(orchestratorAgentCode)
+      : null
+
+    if (isStrictRoleModeEnabled() && orchestratorPrimaryRolePolicy?.canonicalAgent !== 'haotian') {
+      throw new Error(
+        `Strict role mode requires orchestration owner "haotian", received "${orchestratorAgentCode || 'unknown'}".`
+      )
+    }
     const checkpointEnabled = this.shouldRequireOrchestratorCheckpoint(orchestratorAgentCode)
     const readOnlyRequested = this.isReadOnlyWorkflowRequest(input)
     const normalizedOptions: WorkflowOptions = {
@@ -3216,7 +3606,12 @@ ${clippedContent}`)
       category
     }
     const retryService = enableRetry ? getTaskRetryService(retryConfig) : null
+    const recoveryMode = this.normalizeRecoveryConfig(recoveryConfig)
     const taskRetryStates = new Map<string, RetryState>()
+    const recoveryState = this.createInitialRecoveryState(recoveryMode)
+    const taskRecoveryAttempts = new Map<string, number>()
+    const taskRecoveryClassAttempts = new Map<string, number>()
+    const taskLastRecoveryStrategy = new Map<string, string>()
     const orchestratorCheckpoints: OrchestratorCheckpointRecord[] = []
     const cancellationMessage = 'Workflow cancelled by user'
     const isAbortRequested = (error?: unknown): boolean => {
@@ -3243,7 +3638,12 @@ ${clippedContent}`)
           type: 'workflow',
           input,
           status: 'running',
-          metadata: { category, enableRetry, readOnlyRequested }
+          metadata: {
+            category,
+            enableRetry,
+            readOnlyRequested,
+            recoveryMode: recoveryMode as unknown as Prisma.InputJsonValue
+          }
         }
       })
     })
@@ -3348,14 +3748,26 @@ ${clippedContent}`)
       }> = []
       const taskTimeline: Array<Record<string, unknown>> = []
       const runTimeline: Array<Record<string, unknown>> = []
+      const STAGE_OWNER: Record<WorkflowLifecycleStage, string> = {
+        plan: 'fuxi',
+        dispatch: 'haotian',
+        checkpoint: 'haotian',
+        integration: 'haotian',
+        finalize: 'haotian'
+      }
 
       const recordStageTransition = (
         stage: WorkflowLifecycleStage,
         metadata: Record<string, unknown> = {}
       ) => {
         const timestamp = new Date().toISOString()
-        lifecycleTimeline.push({ stage, timestamp, details: metadata })
-        this.emitWorkflowStage(workflow.id, stage, metadata)
+        const owner = STAGE_OWNER[stage]
+        const details = {
+          stageOwner: owner,
+          ...metadata
+        }
+        lifecycleTimeline.push({ stage, timestamp, details })
+        this.emitWorkflowStage(workflow.id, stage, details)
       }
 
       recordStageTransition('plan', {
@@ -3453,7 +3865,7 @@ ${clippedContent}`)
           data: { description: task.description, assignedAgent: assignedTarget }
         })
 
-        const taskOperation = async () => {
+        const taskOperation = async (recoveryAttempt = 0) => {
           throwIfAborted()
           const dependencyContext = this.buildDependencyContext(task, results)
           const promptContract = this.buildTaskPromptContract(task, readOnlyRequested)
@@ -3477,17 +3889,24 @@ ${clippedContent}`)
           const recoveryPrompt =
             checkpointRecoveryReason && checkpointRecoveryAttempt > 0
               ? this.buildCheckpointHaltRecoveryPrompt(
-                  promptWithSharedContext,
-                  checkpointRecoveryReason,
-                  checkpointRecoveryAttempt,
-                  checkpointRecoveryPhase || 'between-waves'
-                )
+                promptWithSharedContext,
+                checkpointRecoveryReason,
+                checkpointRecoveryAttempt,
+                checkpointRecoveryPhase || 'between-waves'
+              )
               : promptWithSharedContext
           const runtimeBindingSnapshot = {
             assignedAgent,
             assignedCategory,
             workflowCategory: category,
-            workflowId: workflow.id
+            workflowId: workflow.id,
+            primaryAgentRolePolicy: orchestratorPrimaryRolePolicy
+              ? {
+                alias: orchestratorPrimaryRolePolicy.alias,
+                canonicalAgent: orchestratorPrimaryRolePolicy.canonicalAgent,
+                canonicalRole: orchestratorPrimaryRolePolicy.canonicalRole
+              }
+              : undefined
           }
 
           const baseMetadata: Record<string, unknown> = {
@@ -3508,6 +3927,7 @@ ${clippedContent}`)
             checkpointRecoveryAttempt,
             checkpointRecoveryPhase,
             checkpointRecoveryReason,
+            recoveryAttempt,
             routingContext: resolvedOptions.routingContext || null,
             runtimeBindingSnapshot
           }
@@ -3555,6 +3975,270 @@ ${clippedContent}`)
         }
 
         try {
+          const executeWithRecovery = async () => {
+            recoveryState.phase = 'classify'
+            try {
+              return await taskOperation(0)
+            } catch (primaryError) {
+              if (!recoveryMode.enabled) {
+                throw primaryError
+              }
+
+              const primaryErrorMessage =
+                primaryError instanceof Error ? primaryError.message : String(primaryError)
+              const failureClass = this.classifyRecoveryFailure(primaryError)
+              const nextAttempt = (taskRecoveryAttempts.get(task.id) || 0) + 1
+              const nextClassAttempt = (taskRecoveryClassAttempts.get(task.id) || 0) + 1
+              const classBudget = recoveryMode.classBudget[failureClass] ?? 0
+              const recoverableClass = this.isRecoveryClassRecoverable(failureClass)
+              const attemptId = `${workflow.id}:${task.id}:${nextAttempt}`
+              const selectedRoute = this.buildRecoveryRouteSelection({
+                failureClass,
+                fallbackPolicy: recoveryMode.fallbackPolicy,
+                assignedAgent,
+                assignedCategory
+              })
+
+              if (
+                !recoverableClass ||
+                nextAttempt > recoveryMode.maxAttempts ||
+                nextClassAttempt > classBudget ||
+                (!selectedRoute.category && !selectedRoute.subagent_type && !selectedRoute.model)
+              ) {
+                recoveryState.phase = 'escalate'
+                if (!recoveryState.unrecoveredTasks.includes(task.id)) {
+                  recoveryState.unrecoveredTasks.push(task.id)
+                }
+                recoveryState.terminalDiagnostics.push({
+                  taskId: task.id,
+                  failureClass,
+                  lastStrategy: selectedRoute.strategy,
+                  reason:
+                    !recoverableClass
+                      ? `Failure class ${failureClass} is non-recoverable`
+                      : nextAttempt > recoveryMode.maxAttempts
+                        ? `Recovery attempts exceeded maxAttempts=${recoveryMode.maxAttempts}`
+                        : nextClassAttempt > classBudget
+                          ? `Recovery class budget exhausted for ${failureClass}`
+                          : `No recoverable route available: ${(selectedRoute.diagnostics?.blockedReasons || []).join('; ')}`,
+                  remediation: [
+                    'Inspect task-level terminal diagnostics',
+                    'Adjust recovery route bindings (category/subagent/model)',
+                    'Retry workflow manually after remediation'
+                  ],
+                  timestamp: new Date().toISOString()
+                })
+                recoveryState.history.push({
+                  attemptId,
+                  taskId: task.id,
+                  phase: 'abort',
+                  failureClass,
+                  strategy: selectedRoute.strategy,
+                  sourceError: primaryErrorMessage,
+                  repairObjective: 'repair failed task and provide structured evidence',
+                  selectedCategory: selectedRoute.category,
+                  selectedSubagent: selectedRoute.subagent_type,
+                  selectedModel: selectedRoute.model,
+                  status: 'aborted',
+                  startedAt: new Date().toISOString(),
+                  finishedAt: new Date().toISOString()
+                })
+
+                throw primaryError
+              }
+
+              taskRecoveryAttempts.set(task.id, nextAttempt)
+              taskRecoveryClassAttempts.set(task.id, nextClassAttempt)
+              taskLastRecoveryStrategy.set(task.id, selectedRoute.strategy)
+
+              recoveryState.phase = 'plan'
+              recoveryState.history.push({
+                attemptId,
+                taskId: task.id,
+                phase: 'plan',
+                failureClass,
+                strategy: selectedRoute.strategy,
+                sourceError: primaryErrorMessage,
+                repairObjective: `Repair ${task.id} and validate runnable output`,
+                selectedCategory: selectedRoute.category,
+                selectedSubagent: selectedRoute.subagent_type,
+                selectedModel: selectedRoute.model,
+                status: 'planned',
+                startedAt: new Date().toISOString()
+              })
+              await this.prisma.task.update({
+                where: { id: workflow.id },
+                data: {
+                  metadata: {
+                    category,
+                    enableRetry,
+                    readOnlyRequested,
+                    recoveryMode,
+                    recoveryState: this.cloneRecoveryState(recoveryState),
+                    taskSource: taskResolution.source,
+                    planPath: taskResolution.planPath,
+                    planName: taskResolution.planName,
+                    referencedMarkdownFiles: taskResolution.referencedMarkdownFiles || [],
+                    orchestratorAgent: orchestratorAgentCode,
+                    orchestratorCheckpointEnabled: checkpointEnabled,
+                    orchestratorCheckpoints,
+                    orchestratorParticipation: orchestratorCheckpoints.length > 0,
+                    routingContext: resolvedOptions.routingContext || null,
+                    scheduling: {
+                      maxConcurrent: MAX_CONCURRENT,
+                      concurrencyLimits: CONCURRENCY_LIMITS,
+                      strictBindingEnabled: isStrictBindingEnabled()
+                    }
+                  }
+                }
+              })
+
+              recoveryState.phase = 'fix'
+              await this.prisma.task.update({
+                where: { id: workflow.id },
+                data: {
+                  metadata: {
+                    category,
+                    enableRetry,
+                    readOnlyRequested,
+                    recoveryMode,
+                    recoveryState: this.cloneRecoveryState(recoveryState),
+                    taskSource: taskResolution.source,
+                    planPath: taskResolution.planPath,
+                    planName: taskResolution.planName,
+                    referencedMarkdownFiles: taskResolution.referencedMarkdownFiles || [],
+                    orchestratorAgent: orchestratorAgentCode,
+                    orchestratorCheckpointEnabled: checkpointEnabled,
+                    orchestratorCheckpoints,
+                    orchestratorParticipation: orchestratorCheckpoints.length > 0,
+                    routingContext: resolvedOptions.routingContext || null,
+                    scheduling: {
+                      maxConcurrent: MAX_CONCURRENT,
+                      concurrencyLimits: CONCURRENCY_LIMITS,
+                      strictBindingEnabled: isStrictBindingEnabled()
+                    }
+                  }
+                }
+              })
+              const recoveryPrompt = this.buildRecoveryRepairPrompt({
+                task,
+                sourceError: primaryErrorMessage,
+                failureClass,
+                attempt: nextAttempt,
+                objective: 'repair failed task and provide structured evidence'
+              })
+
+              const dependencyContext = this.buildDependencyContext(task, results)
+              const promptContract = this.buildTaskPromptContract(task, readOnlyRequested)
+              const sharedContextSnapshot = this.getSharedContextSnapshot(sharedContext, {
+                task,
+                assignedCategory,
+                limit: 12
+              })
+              const sharedContextPrompt = this.buildSharedContextPrompt(sharedContextSnapshot)
+              const basePrompt = this.buildTaskPrompt(
+                task,
+                taskResolution.source,
+                dependencyContext,
+                promptContract,
+                taskResolution.referencedMarkdownFiles || []
+              )
+
+              const retryAttemptResult = await this.dispatchWithFallbackAndQuota({
+                baseDelegateInput: {
+                  description: task.description,
+                  prompt: `${basePrompt}\n\nSHARED COLLABORATION CONTEXT:\n${sharedContextPrompt}\n\n${recoveryPrompt}`,
+                  sessionId: resolvedSessionId,
+                  parentTaskId: workflow.id,
+                  abortSignal,
+                  model: selectedRoute.model,
+                  metadata: {
+                    dependencies: dependencyTaskIds,
+                    logicalTaskId: task.id,
+                    logicalDependencies: task.dependencies,
+                    taskSource: task.source ?? taskResolution.source,
+                    assignedAgent,
+                    assignedCategory,
+                    workflowPhase: task.workflowPhase || 'execution',
+                    taskIntent: promptContract.intent,
+                    readOnlyRequested,
+                    workflowId: workflow.id,
+                    workflowCategory: category,
+                    planPath: taskResolution.planPath,
+                    planName: taskResolution.planName,
+                    referencedMarkdownFiles: taskResolution.referencedMarkdownFiles || [],
+                    routingContext: resolvedOptions.routingContext || null,
+                    recoveryContext: {
+                      sourceError: primaryErrorMessage,
+                      failureClass,
+                      attemptId,
+                      repairObjective: 'repair failed task and provide structured evidence',
+                      orchestratorOwner: orchestratorAgentCode || 'haotian',
+                      selectedStrategy: selectedRoute.strategy,
+                      selectedCategory: selectedRoute.category,
+                      selectedSubagent: selectedRoute.subagent_type,
+                      selectedModel: selectedRoute.model
+                    },
+                    primaryAgentRoleAlias: 'haotian',
+                    workflowStage: 'dispatch'
+                  }
+                },
+                assignedAgent: selectedRoute.subagent_type || assignedAgent,
+                assignedCategory: selectedRoute.category,
+                basePrompt,
+                promptContract,
+                workflowId: workflow.id,
+                taskId: task.id
+              })
+
+              recoveryState.phase = 'validate'
+              const retryOutput = (retryAttemptResult.result.output || '').trim()
+              const missingRecoveryEvidence = this.collectMissingEvidenceFields(retryOutput)
+              const historyRecord = recoveryState.history.find(item => item.attemptId === attemptId)
+              if (!historyRecord) {
+                throw new Error('Recovery history entry missing')
+              }
+
+              historyRecord.phase = 'validate'
+              historyRecord.validatorResult = missingRecoveryEvidence.length === 0 ? 'passed' : 'failed'
+              historyRecord.status = missingRecoveryEvidence.length === 0 ? 'succeeded' : 'failed'
+              historyRecord.finishedAt = new Date().toISOString()
+
+              if (missingRecoveryEvidence.length > 0) {
+                if (!recoveryState.unrecoveredTasks.includes(task.id)) {
+                  recoveryState.unrecoveredTasks.push(task.id)
+                }
+                recoveryState.phase = 'escalate'
+                recoveryState.terminalDiagnostics.push({
+                  taskId: task.id,
+                  failureClass,
+                  lastStrategy: selectedRoute.strategy,
+                  reason: `Recovery output missing evidence fields: ${missingRecoveryEvidence.join(', ')}`,
+                  remediation: [
+                    'Ensure recovery output includes objective/changes/validation/residual-risk',
+                    'Re-run recovery with explicit structured format enforcement'
+                  ],
+                  timestamp: new Date().toISOString()
+                })
+                throw primaryError
+              }
+
+              if (!recoveryState.recoveredTasks.includes(task.id)) {
+                recoveryState.recoveredTasks.push(task.id)
+              }
+              recoveryState.phase = 'validate'
+              return {
+                output: retryAttemptResult.result.output,
+                taskId: retryAttemptResult.result.taskId,
+                runId: retryAttemptResult.result.runId,
+                model: retryAttemptResult.result.model,
+                modelSource: retryAttemptResult.result.modelSource,
+                concurrencyKey: retryAttemptResult.concurrencyKey,
+                fallbackTrail: retryAttemptResult.fallbackTrail
+              }
+            }
+          }
+
           let result: {
             output: string
             taskId: string
@@ -3569,7 +4253,7 @@ ${clippedContent}`)
             // Execute with retry logic
             const retryResult = await retryService.executeWithRetry(
               taskFullId,
-              taskOperation,
+              executeWithRecovery,
               {
                 ...(retryConfig || {}),
                 onStateChange: async state => {
@@ -3581,6 +4265,8 @@ ${clippedContent}`)
                         category,
                         enableRetry,
                         readOnlyRequested,
+                        recoveryMode,
+                        recoveryState: this.cloneRecoveryState(recoveryState),
                         taskSource: taskResolution.source,
                         planPath: taskResolution.planPath,
                         planName: taskResolution.planName,
@@ -3647,11 +4333,12 @@ ${clippedContent}`)
             result = retryResult.value!
           } else {
             // Execute without retry
-            result = await taskOperation()
+            result = await executeWithRecovery()
           }
 
           logicalToPersistedTaskId.set(task.id, result.taskId)
           results.set(task.id, result.output)
+          const missingEvidenceFields = this.collectMissingEvidenceFields(result.output || '')
           executions.set(task.id, {
             logicalTaskId: task.id,
             persistedTaskId: result.taskId,
@@ -3661,12 +4348,18 @@ ${clippedContent}`)
             model: result.model,
             modelSource: result.modelSource,
             concurrencyKey: result.concurrencyKey,
-            fallbackTrail: result.fallbackTrail
+            fallbackTrail: result.fallbackTrail,
+            evidenceSummary: {
+              missingFields: missingEvidenceFields,
+              isComplete: missingEvidenceFields.length === 0
+            }
           })
           completed.add(task.id)
           inProgress.delete(task.id)
           checkpointRecoveryReasons.delete(task.id)
           checkpointRecoveryPhases.delete(task.id)
+          taskRecoveryAttempts.delete(task.id)
+          taskRecoveryClassAttempts.delete(task.id)
 
           const normalizedOutput = result.output.trim()
           if (normalizedOutput) {
@@ -3724,6 +4417,7 @@ ${clippedContent}`)
             concurrencyKey: result.concurrencyKey || null
           })
 
+          const sanitizedTaskOutput = sanitizeCompletionOutput(result.output || '')
           workflowEvents.emit({
             type: 'task:completed',
             workflowId: workflow.id,
@@ -3733,7 +4427,7 @@ ${clippedContent}`)
               description: task.description,
               assignedAgent: assignedTarget,
               persistedTaskId: result.taskId,
-              output: result.output,
+              output: sanitizedTaskOutput,
               model: result.model,
               modelSource: result.modelSource,
               retryState: taskRetryStates.get(task.id)
@@ -3745,6 +4439,24 @@ ${clippedContent}`)
 
           const errorMessage = error instanceof Error ? error.message : String(error)
           const retryState = taskRetryStates.get(task.id)
+          const failureClass = this.classifyRecoveryFailure(error)
+          if (!recoveryState.unrecoveredTasks.includes(task.id)) {
+            recoveryState.unrecoveredTasks.push(task.id)
+          }
+          if (!recoveryState.terminalDiagnostics.some(item => item.taskId === task.id)) {
+            recoveryState.phase = 'escalate'
+            recoveryState.terminalDiagnostics.push({
+              taskId: task.id,
+              failureClass,
+              lastStrategy: taskLastRecoveryStrategy.get(task.id) || 'none',
+              reason: errorMessage,
+              remediation: [
+                'Inspect task failure and recovery diagnostics',
+                'Validate bindings and permissions before rerun'
+              ],
+              timestamp: new Date().toISOString()
+            })
+          }
 
           this.logger.error('Subtask failed', {
             workflowId: workflow.id,
@@ -3785,272 +4497,307 @@ ${clippedContent}`)
         strictBindingEnabled: isStrictBindingEnabled()
       })
 
-      workflowLoop: while (completed.size < subtasks.length) {
-        throwIfAborted()
-        const ready = subtasks.filter(
-          task =>
-            !completed.has(task.id) &&
-            !inProgress.has(task.id) &&
-            !failed.has(task.id) &&
-            canExecute(task)
-        )
-
-        if (ready.length === 0 && inProgress.size === 0) {
-          if (failed.size > 0) {
-            throw new Error(`Workflow stopped: ${failed.size} task(s) failed`)
-          }
-          throw new Error('Deadlock detected: no tasks can proceed')
-        }
-
-        let dispatchCandidates = ready
-        const availableSlots = Math.max(MAX_CONCURRENT - inProgress.size, 0)
-        const keyResolver = (candidate: SubTask) => {
-          const execution = executions.get(candidate.id)
-          return (
-            execution?.concurrencyKey ||
-            this.buildConcurrencyKey({
-              category: candidate.assignedCategory || category
-            })
+      workflowLoop: while (true) {
+        while (completed.size < subtasks.length) {
+          throwIfAborted()
+          const ready = subtasks.filter(
+            task =>
+              !completed.has(task.id) &&
+              !inProgress.has(task.id) &&
+              !failed.has(task.id) &&
+              canExecute(task)
           )
-        }
 
-        if (checkpointEnabled && orchestratorAgentCode && availableSlots > 0 && ready.length > 0) {
-          if (!preDispatchCheckpointExecuted) {
-            preDispatchCheckpointExecuted = true
-            const checkpointDecision = await this.runOrchestratorCheckpoint({
-              workflowId: workflow.id,
-              sessionId: resolvedSessionId,
-              orchestratorAgentCode,
-              phase: 'pre-dispatch',
-              userInput: input,
-              recentlyCompletedTasks: [],
-              readyTasks: ready,
-              results,
-              executions,
-              abortSignal
-            })
-
-            if (checkpointDecision) {
-              recordOrchestratorCheckpoint({
-                phase: 'pre-dispatch',
-                status: checkpointDecision.status,
-                reportedTaskIds: [],
-                readyTaskIds: ready.map(task => task.id),
-                approvedTaskIds: checkpointDecision.approvedTaskIds,
-                reason: checkpointDecision.reason,
-                persistedTaskId: checkpointDecision.persistedTaskId
-              })
-
-              if (checkpointDecision.status === 'halt') {
-                const haltReason = checkpointDecision.reason || '主代理未提供原因'
-                throw new Error(`Orchestrator checkpoint halted workflow: ${haltReason}`)
-              }
-
-              if (checkpointDecision.approvedTaskIds.length > 0) {
-                const approvedSet = new Set(checkpointDecision.approvedTaskIds)
-                const approvedTasks = ready.filter(task => approvedSet.has(task.id))
-                if (approvedTasks.length > 0) {
-                  dispatchCandidates = approvedTasks
-                }
-              }
-            } else {
-              recordOrchestratorCheckpoint({
-                phase: 'pre-dispatch',
-                status: 'fallback',
-                reportedTaskIds: [],
-                readyTaskIds: ready.map(task => task.id)
-              })
+          if (ready.length === 0 && inProgress.size === 0) {
+            if (failed.size > 0) {
+              throw new Error(`Workflow stopped: ${failed.size} task(s) failed`)
             }
+            throw new Error('Deadlock detected: no tasks can proceed')
           }
 
-          const newlyCompletedTasks = subtasks.filter(
-            task => completed.has(task.id) && !reportedToOrchestrator.has(task.id)
-          )
+          let dispatchCandidates = ready
+          const availableSlots = Math.max(MAX_CONCURRENT - inProgress.size, 0)
+          const keyResolver = (candidate: SubTask) => {
+            const execution = executions.get(candidate.id)
+            return (
+              execution?.concurrencyKey ||
+              this.buildConcurrencyKey({
+                category: candidate.assignedCategory || category
+              })
+            )
+          }
 
-          if (newlyCompletedTasks.length > 0) {
-            const checkpointDecision = await this.runOrchestratorCheckpoint({
-              workflowId: workflow.id,
-              sessionId: resolvedSessionId,
-              orchestratorAgentCode,
-              phase: 'between-waves',
-              userInput: input,
-              recentlyCompletedTasks: newlyCompletedTasks,
-              readyTasks: ready,
-              results,
-              executions,
-              abortSignal
-            })
-
-            newlyCompletedTasks.forEach(task => reportedToOrchestrator.add(task.id))
-
-            if (checkpointDecision) {
-              recordOrchestratorCheckpoint({
-                phase: 'between-waves',
-                status: checkpointDecision.status,
-                reportedTaskIds: newlyCompletedTasks.map(task => task.id),
-                readyTaskIds: ready.map(task => task.id),
-                approvedTaskIds: checkpointDecision.approvedTaskIds,
-                reason: checkpointDecision.reason,
-                persistedTaskId: checkpointDecision.persistedTaskId
+          if (checkpointEnabled && orchestratorAgentCode && availableSlots > 0 && ready.length > 0) {
+            if (!preDispatchCheckpointExecuted) {
+              preDispatchCheckpointExecuted = true
+              const checkpointDecision = await this.runOrchestratorCheckpoint({
+                workflowId: workflow.id,
+                sessionId: resolvedSessionId,
+                orchestratorAgentCode,
+                phase: 'pre-dispatch',
+                userInput: input,
+                recentlyCompletedTasks: [],
+                readyTasks: ready,
+                results,
+                executions,
+                abortSignal
               })
 
-              if (checkpointDecision.status === 'halt') {
-                const haltReason = checkpointDecision.reason || '主代理未提供原因'
-                if (this.shouldAttemptCheckpointHaltRecovery(haltReason)) {
-                  const recoveryTargets = this.selectCheckpointRecoveryTargets(
-                    haltReason,
-                    newlyCompletedTasks
-                  )
-                  const recoveryOutcome = scheduleCheckpointRecovery({
-                    phase: 'between-waves',
-                    reason: haltReason,
-                    targets: recoveryTargets
-                  })
+              if (checkpointDecision) {
+                recordOrchestratorCheckpoint({
+                  phase: 'pre-dispatch',
+                  status: checkpointDecision.status,
+                  reportedTaskIds: [],
+                  readyTaskIds: ready.map(task => task.id),
+                  approvedTaskIds: checkpointDecision.approvedTaskIds,
+                  reason: checkpointDecision.reason,
+                  persistedTaskId: checkpointDecision.persistedTaskId
+                })
 
-                  if (recoveryOutcome.recoveredTaskIds.length > 0) {
-                    this.logger.warn(
-                      '[workforce] checkpoint halt converted to recovery retry (OMO-style)',
-                      {
-                        workflowId: workflow.id,
-                        phase: 'between-waves',
-                        reason: haltReason,
-                        recoveredTaskIds: recoveryOutcome.recoveredTaskIds,
-                        exhaustedTaskIds: recoveryOutcome.exhaustedTaskIds
-                      }
-                    )
-                    continue workflowLoop
+                if (checkpointDecision.status === 'halt') {
+                  const haltReason = checkpointDecision.reason || '主代理未提供原因'
+                  if (!this.shouldAttemptCheckpointHaltRecovery(haltReason)) {
+                    throw new Error(`Orchestrator checkpoint halted workflow: ${haltReason}`)
+                  }
+                  this.logger.warn(
+                    '[workforce] pre-dispatch checkpoint halt downgraded to continue for recoverable reason',
+                    {
+                      workflowId: workflow.id,
+                      phase: 'pre-dispatch',
+                      reason: haltReason
+                    }
+                  )
+                }
+
+                if (checkpointDecision.approvedTaskIds.length > 0) {
+                  const approvedSet = new Set(checkpointDecision.approvedTaskIds)
+                  const approvedTasks = ready.filter(task => approvedSet.has(task.id))
+                  if (approvedTasks.length > 0) {
+                    dispatchCandidates = approvedTasks
                   }
                 }
-                throw new Error(`Orchestrator checkpoint halted workflow: ${haltReason}`)
+              } else {
+                recordOrchestratorCheckpoint({
+                  phase: 'pre-dispatch',
+                  status: 'fallback',
+                  reportedTaskIds: [],
+                  readyTaskIds: ready.map(task => task.id)
+                })
               }
+            }
 
-              newlyCompletedTasks.forEach(task => {
-                checkpointRecoveryAttempts.delete(task.id)
-                checkpointRecoveryReasons.delete(task.id)
-                checkpointRecoveryPhases.delete(task.id)
-              })
+            const newlyCompletedTasks = subtasks.filter(
+              task => completed.has(task.id) && !reportedToOrchestrator.has(task.id)
+            )
 
-              if (checkpointDecision.approvedTaskIds.length > 0) {
-                const approvedSet = new Set(checkpointDecision.approvedTaskIds)
-                const approvedTasks = ready.filter(task => approvedSet.has(task.id))
-                if (approvedTasks.length > 0) {
-                  dispatchCandidates = approvedTasks
-                }
-              }
-            } else {
-              recordOrchestratorCheckpoint({
+            if (newlyCompletedTasks.length > 0) {
+              const checkpointDecision = await this.runOrchestratorCheckpoint({
+                workflowId: workflow.id,
+                sessionId: resolvedSessionId,
+                orchestratorAgentCode,
                 phase: 'between-waves',
-                status: 'fallback',
-                reportedTaskIds: newlyCompletedTasks.map(task => task.id),
-                readyTaskIds: ready.map(task => task.id)
+                userInput: input,
+                recentlyCompletedTasks: newlyCompletedTasks,
+                readyTasks: ready,
+                results,
+                executions,
+                abortSignal
               })
-            }
-          }
-        }
 
-        const batch: Array<{ task: SubTask; key: string }> = []
-        const remaining = [...dispatchCandidates]
-        while (batch.length < availableSlots && remaining.length > 0) {
-          const next = this.findNextFairTask(remaining, lastServedIndexByConcurrencyKey, keyResolver)
-          if (!next) {
-            break
-          }
+              newlyCompletedTasks.forEach(task => reportedToOrchestrator.add(task.id))
 
-          const key = keyResolver(next)
-          const inUse = inProgressByConcurrencyKey.get(key) || 0
-          const limit = this.getConcurrencyLimitForKey(key)
-          if (inUse < limit) {
-            batch.push({ task: next, key })
-            inProgressByConcurrencyKey.set(key, inUse + 1)
-          }
+              if (checkpointDecision) {
+                recordOrchestratorCheckpoint({
+                  phase: 'between-waves',
+                  status: checkpointDecision.status,
+                  reportedTaskIds: newlyCompletedTasks.map(task => task.id),
+                  readyTaskIds: ready.map(task => task.id),
+                  approvedTaskIds: checkpointDecision.approvedTaskIds,
+                  reason: checkpointDecision.reason,
+                  persistedTaskId: checkpointDecision.persistedTaskId
+                })
 
-          const nextIndex = remaining.findIndex(task => task.id === next.id)
-          if (nextIndex >= 0) {
-            remaining.splice(nextIndex, 1)
-          }
-        }
+                if (checkpointDecision.status === 'halt') {
+                  const haltReason = checkpointDecision.reason || '主代理未提供原因'
+                  if (this.shouldAttemptCheckpointHaltRecovery(haltReason)) {
+                    const recoveryTargets = this.selectCheckpointRecoveryTargets(
+                      haltReason,
+                      newlyCompletedTasks
+                    )
+                    const recoveryOutcome = scheduleCheckpointRecovery({
+                      phase: 'between-waves',
+                      reason: haltReason,
+                      targets: recoveryTargets
+                    })
 
-        if (batch.length > 0) {
-          // Execute batch, but don't fail entire workflow on single task failure
-          const batchResults = await Promise.allSettled(
-            batch.map(async ({ task, key }) => {
-              try {
-                await executeTask(task)
-              } finally {
-                const current = inProgressByConcurrencyKey.get(key) || 0
-                if (current <= 1) {
-                  inProgressByConcurrencyKey.delete(key)
-                } else {
-                  inProgressByConcurrencyKey.set(key, current - 1)
+                    if (recoveryOutcome.recoveredTaskIds.length > 0) {
+                      this.logger.warn(
+                        '[workforce] checkpoint halt converted to recovery retry',
+                        {
+                          workflowId: workflow.id,
+                          phase: 'between-waves',
+                          reason: haltReason,
+                          recoveredTaskIds: recoveryOutcome.recoveredTaskIds,
+                          exhaustedTaskIds: recoveryOutcome.exhaustedTaskIds
+                        }
+                      )
+                      continue workflowLoop
+                    }
+                  }
+                  throw new Error(`Orchestrator checkpoint halted workflow: ${haltReason}`)
                 }
+
+                newlyCompletedTasks.forEach(task => {
+                  checkpointRecoveryAttempts.delete(task.id)
+                  checkpointRecoveryReasons.delete(task.id)
+                  checkpointRecoveryPhases.delete(task.id)
+                })
+
+                if (checkpointDecision.approvedTaskIds.length > 0) {
+                  const approvedSet = new Set(checkpointDecision.approvedTaskIds)
+                  const approvedTasks = ready.filter(task => approvedSet.has(task.id))
+                  if (approvedTasks.length > 0) {
+                    dispatchCandidates = approvedTasks
+                  }
+                }
+              } else {
+                recordOrchestratorCheckpoint({
+                  phase: 'between-waves',
+                  status: 'fallback',
+                  reportedTaskIds: newlyCompletedTasks.map(task => task.id),
+                  readyTaskIds: ready.map(task => task.id)
+                })
               }
-            })
-          )
-
-          // Check if any task failed
-          const failures = batchResults.filter(r => r.status === 'rejected')
-          if (failures.length > 0) {
-            // If all tasks in batch failed, throw the first error
-            if (failures.length === batch.length) {
-              const firstError = (failures[0] as PromiseRejectedResult).reason
-              throw firstError
             }
-            // Otherwise continue with remaining tasks
           }
-        } else {
-          throwIfAborted()
-          await new Promise(resolve => setTimeout(resolve, 100))
+
+          const batch: Array<{ task: SubTask; key: string }> = []
+          const remaining = [...dispatchCandidates]
+          while (batch.length < availableSlots && remaining.length > 0) {
+            const next = this.findNextFairTask(remaining, lastServedIndexByConcurrencyKey, keyResolver)
+            if (!next) {
+              break
+            }
+
+            const key = keyResolver(next)
+            const inUse = inProgressByConcurrencyKey.get(key) || 0
+            const limit = this.getConcurrencyLimitForKey(key)
+            if (inUse < limit) {
+              batch.push({ task: next, key })
+              inProgressByConcurrencyKey.set(key, inUse + 1)
+            }
+
+            const nextIndex = remaining.findIndex(task => task.id === next.id)
+            if (nextIndex >= 0) {
+              remaining.splice(nextIndex, 1)
+            }
+          }
+
+          if (batch.length > 0) {
+            // Execute batch, but don't fail entire workflow on single task failure
+            const batchResults = await Promise.allSettled(
+              batch.map(async ({ task, key }) => {
+                try {
+                  await executeTask(task)
+                } finally {
+                  const current = inProgressByConcurrencyKey.get(key) || 0
+                  if (current <= 1) {
+                    inProgressByConcurrencyKey.delete(key)
+                  } else {
+                    inProgressByConcurrencyKey.set(key, current - 1)
+                  }
+                }
+              })
+            )
+
+            // Check if any task failed
+            const failures = batchResults.filter(r => r.status === 'rejected')
+            if (failures.length > 0) {
+              // If all tasks in batch failed, throw the first error
+              if (failures.length === batch.length) {
+                const firstError = (failures[0] as PromiseRejectedResult).reason
+                throw firstError
+              }
+              // Otherwise continue with remaining tasks
+            }
+          } else {
+            throwIfAborted()
+            await new Promise(resolve => setTimeout(resolve, 100))
+          }
         }
-      }
 
-      recordStageTransition('checkpoint', {
-        checkpointsRecorded: orchestratorCheckpoints.length
-      })
-
-      if (checkpointEnabled && orchestratorAgentCode) {
-        const finalReportedTasks = subtasks.filter(task => completed.has(task.id))
-        const finalCheckpointDecision = await this.runOrchestratorCheckpoint({
-          workflowId: workflow.id,
-          sessionId: resolvedSessionId,
-          orchestratorAgentCode,
-          phase: 'final',
-          userInput: input,
-          recentlyCompletedTasks: finalReportedTasks,
-          readyTasks: [],
-          results,
-          executions,
-          abortSignal
+        recordStageTransition('checkpoint', {
+          checkpointsRecorded: orchestratorCheckpoints.length
         })
 
-        if (finalCheckpointDecision) {
-          recordOrchestratorCheckpoint({
+        if (checkpointEnabled && orchestratorAgentCode) {
+          const finalReportedTasks = subtasks.filter(task => completed.has(task.id))
+          const finalCheckpointDecision = await this.runOrchestratorCheckpoint({
+            workflowId: workflow.id,
+            sessionId: resolvedSessionId,
+            orchestratorAgentCode,
             phase: 'final',
-            status: finalCheckpointDecision.status,
-            reportedTaskIds: finalReportedTasks.map(task => task.id),
-            readyTaskIds: [],
-            approvedTaskIds: finalCheckpointDecision.approvedTaskIds,
-            reason: finalCheckpointDecision.reason,
-            persistedTaskId: finalCheckpointDecision.persistedTaskId
+            userInput: input,
+            recentlyCompletedTasks: finalReportedTasks,
+            readyTasks: [],
+            results,
+            executions,
+            abortSignal
           })
 
-          if (finalCheckpointDecision.status === 'halt') {
-            const haltReason = finalCheckpointDecision.reason || '主代理未提供原因'
-            throw new Error(`Orchestrator checkpoint halted workflow: ${haltReason}`)
+          if (finalCheckpointDecision) {
+            recordOrchestratorCheckpoint({
+              phase: 'final',
+              status: finalCheckpointDecision.status,
+              reportedTaskIds: finalReportedTasks.map(task => task.id),
+              readyTaskIds: [],
+              approvedTaskIds: finalCheckpointDecision.approvedTaskIds,
+              reason: finalCheckpointDecision.reason,
+              persistedTaskId: finalCheckpointDecision.persistedTaskId
+            })
+
+            if (finalCheckpointDecision.status === 'halt') {
+              const haltReason = finalCheckpointDecision.reason || '主代理未提供原因'
+              if (this.shouldAttemptCheckpointHaltRecovery(haltReason)) {
+                const recoveryTargets = this.selectCheckpointRecoveryTargets(
+                  haltReason,
+                  finalReportedTasks
+                )
+                const recoveryOutcome = scheduleCheckpointRecovery({
+                  phase: 'final',
+                  reason: haltReason,
+                  targets: recoveryTargets
+                })
+                if (recoveryOutcome.recoveredTaskIds.length > 0) {
+                  this.logger.warn('[workforce] final checkpoint halt converted to recovery retry', {
+                    workflowId: workflow.id,
+                    phase: 'final',
+                    reason: haltReason,
+                    recoveredTaskIds: recoveryOutcome.recoveredTaskIds,
+                    exhaustedTaskIds: recoveryOutcome.exhaustedTaskIds
+                  })
+                  continue workflowLoop
+                }
+              }
+              throw new Error(`Orchestrator checkpoint halted workflow: ${haltReason}`)
+            }
+
+            finalReportedTasks.forEach(task => {
+              checkpointRecoveryAttempts.delete(task.id)
+              checkpointRecoveryReasons.delete(task.id)
+              checkpointRecoveryPhases.delete(task.id)
+            })
+          } else if (finalReportedTasks.length > 0 || preDispatchCheckpointExecuted) {
+            recordOrchestratorCheckpoint({
+              phase: 'final',
+              status: 'fallback',
+              reportedTaskIds: finalReportedTasks.map(task => task.id),
+              readyTaskIds: []
+            })
           }
-
-          finalReportedTasks.forEach(task => {
-            checkpointRecoveryAttempts.delete(task.id)
-            checkpointRecoveryReasons.delete(task.id)
-            checkpointRecoveryPhases.delete(task.id)
-          })
-        } else if (finalReportedTasks.length > 0 || preDispatchCheckpointExecuted) {
-          recordOrchestratorCheckpoint({
-            phase: 'final',
-            status: 'fallback',
-            reportedTaskIds: finalReportedTasks.map(task => task.id),
-            readyTaskIds: []
-          })
         }
+
+        break workflowLoop
       }
 
       recordStageTransition('integration', {
@@ -4100,6 +4847,7 @@ ${clippedContent}`)
         taskTimeline,
         runTimeline,
         retryStates: taskRetryStates,
+        recoveryState,
         status: 'completed'
       })
 
@@ -4122,6 +4870,8 @@ ${clippedContent}`)
             orchestratorCheckpoints,
             orchestratorParticipation: orchestratorCheckpoints.length > 0,
             routingContext: resolvedOptions.routingContext || null,
+            recoveryMode,
+            recoveryState: observability.recoveryState,
             scheduling: {
               maxConcurrent: MAX_CONCURRENT,
               concurrencyLimits: CONCURRENCY_LIMITS,
@@ -4219,6 +4969,7 @@ ${clippedContent}`)
         taskTimeline: fallbackTaskTimeline,
         runTimeline: fallbackRunTimeline,
         retryStates: taskRetryStates,
+        recoveryState,
         status: failureStatus
       })
 
@@ -4237,6 +4988,8 @@ ${clippedContent}`)
             orchestratorCheckpoints,
             orchestratorParticipation: orchestratorCheckpoints.length > 0,
             cancelledByUser: cancelled,
+            recoveryMode,
+            recoveryState: observability.recoveryState,
             correlation: observability.correlation,
             timeline: observability.timeline,
             assignments: observability.assignments,
@@ -4272,6 +5025,10 @@ ${clippedContent}`)
       where: { id: workflowTaskId },
       select: {
         id: true,
+        status: true,
+        createdAt: true,
+        startedAt: true,
+        completedAt: true,
         metadata: true
       }
     })
@@ -4284,6 +5041,24 @@ ${clippedContent}`)
     if (!metadata.graph || !metadata.integration || !metadata.sharedContext) {
       return null
     }
+
+    const workflowTaskUpdatedAt =
+      workflowTask.completedAt instanceof Date
+        ? workflowTask.completedAt
+        : workflowTask.startedAt instanceof Date
+          ? workflowTask.startedAt
+          : workflowTask.createdAt instanceof Date
+            ? workflowTask.createdAt
+            : new Date()
+
+    const derivedContinuationStatus: 'completed' | 'failed' | 'cancelled' | 'running' =
+      workflowTask.status === 'completed'
+        ? 'completed'
+        : workflowTask.status === 'failed'
+          ? 'failed'
+          : workflowTask.status === 'cancelled'
+            ? 'cancelled'
+            : 'running'
 
     const correlation =
       metadata.correlation && typeof metadata.correlation === 'object'
@@ -4302,14 +5077,16 @@ ${clippedContent}`)
       metadata.continuationSnapshot && typeof metadata.continuationSnapshot === 'object'
         ? metadata.continuationSnapshot
         : {
-            workflowId: metadata.graph.workflowId || workflowTask.id,
-            sessionId: correlation?.sessionId,
-            status: 'running',
-            resumable: false,
-            failedTasks: [],
-            retryableTasks: [],
-            updatedAt: new Date().toISOString()
-          }
+          workflowId: metadata.graph.workflowId || workflowTask.id,
+          sessionId: correlation?.sessionId,
+          status: derivedContinuationStatus,
+          resumable: false,
+          failedTasks: [],
+          retryableTasks: [],
+          updatedAt: workflowTaskUpdatedAt.toISOString()
+        }
+
+    const recoverySource = this.normalizePersistedRecoveryState(metadata.recoveryState)
 
     return {
       workflowId: metadata.graph.workflowId || workflowTask.id,
@@ -4330,7 +5107,15 @@ ${clippedContent}`)
         task: Array.isArray(timelineSource.task) ? timelineSource.task : [],
         run: Array.isArray(timelineSource.run) ? timelineSource.run : []
       },
-      integration: metadata.integration,
+      integration: {
+        ...metadata.integration,
+        taskOutputs: Array.isArray(metadata.integration?.taskOutputs)
+          ? metadata.integration.taskOutputs
+          : [],
+        rawTaskOutputs: Array.isArray(metadata.integration?.rawTaskOutputs)
+          ? metadata.integration.rawTaskOutputs
+          : []
+      },
       lifecycleStages: Array.isArray(metadata.lifecycleStages) ? metadata.lifecycleStages : [],
       assignments: Array.isArray(metadata.assignments) ? metadata.assignments : [],
       retryState: {
@@ -4341,6 +5126,7 @@ ${clippedContent}`)
         totalRetried:
           typeof retryStateSource.totalRetried === 'number' ? retryStateSource.totalRetried : 0
       },
+      recoveryState: recoverySource,
       continuationSnapshot: {
         workflowId: continuationSource.workflowId || metadata.graph.workflowId || workflowTask.id,
         sessionId:
@@ -4349,11 +5135,11 @@ ${clippedContent}`)
             : undefined,
         status:
           continuationSource.status === 'completed' ||
-          continuationSource.status === 'failed' ||
-          continuationSource.status === 'cancelled' ||
-          continuationSource.status === 'running'
+            continuationSource.status === 'failed' ||
+            continuationSource.status === 'cancelled' ||
+            continuationSource.status === 'running'
             ? continuationSource.status
-            : 'running',
+            : derivedContinuationStatus,
         resumable: Boolean(continuationSource.resumable),
         failedTasks: Array.isArray(continuationSource.failedTasks)
           ? continuationSource.failedTasks
@@ -4364,7 +5150,7 @@ ${clippedContent}`)
         updatedAt:
           typeof continuationSource.updatedAt === 'string' && continuationSource.updatedAt.length > 0
             ? continuationSource.updatedAt
-            : new Date().toISOString()
+            : workflowTaskUpdatedAt.toISOString()
       },
       sharedContext: {
         workflowId: metadata.sharedContext.workflowId || workflowTask.id,

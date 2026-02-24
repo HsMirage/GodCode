@@ -44,7 +44,7 @@ export function authenticate(req: Request, res: Response, next: NextFunction) {
     req.user = decoded;
     
     logger.debug(`User authenticated: ${decoded.email}`);
-    next();
+    return next();
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
       return errorResponse(res, '令牌已过期', 401, 'Token expired');
@@ -72,14 +72,14 @@ export function authorize(...allowedRoles: string[]) {
       return errorResponse(res, '权限不足', 403, 'Insufficient permissions');
     }
 
-    next();
+    return next();
   };
 }
 
 /**
  * 可选认证中间件（不强制要求登录）
  */
-export function optionalAuth(req: Request, res: Response, next: NextFunction) {
+export function optionalAuth(req: Request, _res: Response, next: NextFunction) {
   try {
     const authHeader = req.headers.authorization;
     
@@ -94,9 +94,9 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction) {
       req.user = decoded;
     }
     
-    next();
+    return next();
   } catch (error) {
     // 忽略错误，继续处理请求
-    next();
+    return next();
   }
 }

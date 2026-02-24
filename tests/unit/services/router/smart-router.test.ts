@@ -99,7 +99,7 @@ describe('SmartRouter', () => {
         expect.objectContaining({
           description: input,
           prompt: context.prompt,
-          category: 'visual-engineering',
+          category: 'zhinv',
           parentTaskId: 'parent-1',
           metadata: expect.objectContaining({
             routing: expect.objectContaining({
@@ -120,7 +120,7 @@ describe('SmartRouter', () => {
       expect(mockWorkforceEngine.executeWorkflow).toHaveBeenCalledWith(
         input,
         expect.objectContaining({
-          category: 'unspecified-high',
+          category: 'dayu',
           routingContext: expect.objectContaining({
             strategy: 'workforce',
             complexityScore: expect.any(Number),
@@ -128,6 +128,23 @@ describe('SmartRouter', () => {
           })
         })
       )
+    })
+
+    it('should prioritize explicit primary agent over rule-based workforce routing', async () => {
+      const input = '创建用户注册功能'
+
+      await router.route(input, {
+        sessionId: 'session-1',
+        agentCode: 'haotian'
+      })
+
+      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: 'session-1',
+          subagent_type: 'haotian'
+        })
+      )
+      expect(mockWorkforceEngine.executeWorkflow).not.toHaveBeenCalled()
     })
 
     it('should propagate abort signal to workforce strategy', async () => {
@@ -179,7 +196,7 @@ describe('SmartRouter', () => {
         'any input',
         'session-1',
         expect.objectContaining({
-          category: 'unspecified-high',
+          category: 'dayu',
           routingContext: expect.objectContaining({
             strategy: 'workforce',
             complexityScore: 1

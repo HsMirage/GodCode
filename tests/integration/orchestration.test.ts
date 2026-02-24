@@ -195,7 +195,7 @@ describe('Orchestration Engines Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Test task',
         prompt: 'Do this',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       })
 
@@ -206,7 +206,7 @@ describe('Orchestration Engines Integration', () => {
           data: expect.objectContaining({
             type: 'subtask',
             metadata: expect.objectContaining({
-              category: 'quick'
+              category: 'tianbing'
             })
           })
         })
@@ -215,14 +215,14 @@ describe('Orchestration Engines Integration', () => {
 
     it('should delegate task with direct agent type', async () => {
       mocks.llmAdapter.sendMessage.mockResolvedValueOnce({
-        content: 'Oracle analysis',
+        content: 'Baize analysis',
         usage: { input_tokens: 10, output_tokens: 10 }
       })
 
       const result = await delegateEngine.delegateTask({
         description: 'Research task',
         prompt: 'Search this',
-        subagent_type: 'oracle',
+        subagent_type: 'baize',
         sessionId: 'test-session-123'
       })
 
@@ -232,7 +232,7 @@ describe('Orchestration Engines Integration', () => {
           data: expect.objectContaining({
             type: 'subtask',
             metadata: expect.objectContaining({
-              subagent_type: 'oracle'
+              subagent_type: 'baize'
             })
           })
         })
@@ -248,7 +248,7 @@ describe('Orchestration Engines Integration', () => {
       await delegateEngine.delegateTask({
         description: 'Test',
         prompt: 'Test',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       })
 
@@ -268,7 +268,7 @@ describe('Orchestration Engines Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Test',
         prompt: 'Test',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       })
 

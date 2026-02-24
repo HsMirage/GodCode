@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import fs from 'node:fs'
 import { DelegateEngine } from '@/main/services/delegate/delegate-engine'
 import { WorkforceEngine } from '@/main/services/workforce/workforce-engine'
 
@@ -8,7 +9,8 @@ const mocks = vi.hoisted(() => {
       create: vi.fn(),
       update: vi.fn(),
       findMany: vi.fn(),
-      findFirst: vi.fn()
+      findFirst: vi.fn(),
+      findUnique: vi.fn()
     },
     agentBinding: {
       findUnique: vi.fn()
@@ -92,6 +94,8 @@ vi.mock('@/main/services/binding.service', () => ({
 describe('Workforce Engine Integration', () => {
   let delegateEngine: DelegateEngine
   let workforceEngine: WorkforceEngine
+  const existsSyncSpy = vi.spyOn(fs, 'existsSync').mockReturnValue(false)
+  const readFileSyncSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(() => '')
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -99,6 +103,7 @@ describe('Workforce Engine Integration', () => {
     mocks.llmAdapter.streamMessage.mockReset()
     mocks.prisma.task.create.mockReset()
     mocks.prisma.task.update.mockReset()
+    mocks.prisma.task.findUnique.mockReset()
     mocks.prisma.model.findMany.mockReset()
     mocks.prisma.model.findFirst.mockReset()
     mocks.prisma.session.findFirst.mockReset()
@@ -180,12 +185,54 @@ describe('Workforce Engine Integration', () => {
       })
     )
 
+    mocks.prisma.task.findUnique.mockResolvedValue(null)
+
     delegateEngine = new DelegateEngine()
     workforceEngine = new WorkforceEngine()
   })
 
   afterEach(() => {
+    existsSyncSpy.mockReset()
+    existsSyncSpy.mockReturnValue(false)
+    readFileSyncSpy.mockReset()
+    readFileSyncSpy.mockImplementation(() => '')
+    delete process.env.WORKFORCE_STRICT_ROLE_MODE
     vi.restoreAllMocks()
+  })
+
+  describe('Workflow Observability', () => {
+    it('returns terminal continuation status when metadata snapshot is missing', async () => {
+      const now = new Date('2026-02-22T09:00:00.000Z')
+      mocks.prisma.task.findUnique.mockResolvedValue({
+        id: 'workflow-xyz',
+        status: 'completed',
+        updatedAt: now,
+        metadata: {
+          graph: { workflowId: 'workflow-xyz', nodeOrder: [], nodes: [] },
+          integration: {
+            summary: 'integration summary',
+            conflicts: [],
+            unresolvedItems: [],
+            taskOutputs: [],
+            rawTaskOutputs: []
+          },
+          sharedContext: {
+            workflowId: 'workflow-xyz',
+            totalEntries: 0,
+            activeEntries: 0,
+            archivedEntries: 0,
+            entries: [],
+            archived: []
+          }
+        }
+      })
+
+      const snapshot = await workforceEngine.getWorkflowObservability('workflow-xyz')
+
+      expect(snapshot).not.toBeNull()
+      expect(snapshot?.continuationSnapshot.status).toBe('completed')
+      expect(snapshot?.continuationSnapshot.updatedAt).toEqual(expect.any(String))
+    })
   })
 
   describe('Task Decomposition', () => {
@@ -235,7 +282,7 @@ describe('Workforce Engine Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Quick task',
         prompt: 'Do something quickly',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       })
 
@@ -246,7 +293,7 @@ describe('Workforce Engine Integration', () => {
           data: expect.objectContaining({
             type: 'subtask',
             metadata: expect.objectContaining({
-              category: 'quick'
+              category: 'tianbing'
             })
           })
         })
@@ -262,7 +309,7 @@ describe('Workforce Engine Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Research task',
         prompt: 'Research this topic',
-        subagent_type: 'oracle',
+        subagent_type: 'baize',
         sessionId: 'test-session-123'
       })
 
@@ -271,11 +318,166 @@ describe('Workforce Engine Integration', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             metadata: expect.objectContaining({
-              subagent_type: 'oracle'
+              subagent_type: 'baize'
             })
           })
         })
       )
+    })
+  })
+
+  describe('Role-aligned workflow lifecycle', () => {
+    it('should record plan→dispatch→checkpoint→integration→finalize lifecycle with stage owners and evidence gaps', async () => {
+      const decomposition = {
+        subtasks: [{ id: 't1', description: 'Implement feature task', dependencies: [] }]
+      }
+
+      mocks.llmAdapter.sendMessage.mockResolvedValueOnce({
+        content: JSON.stringify(decomposition),
+        usage: { input_tokens: 20, output_tokens: 20 }
+      })
+
+      const dispatchCalls: Array<any> = []
+      const checkpointOutputs = [
+        JSON.stringify({ status: 'continue', approved_task_ids: ['t1'] }),
+        JSON.stringify({ status: 'continue', approved_task_ids: [] }),
+        JSON.stringify({ status: 'continue', approved_task_ids: [] })
+      ]
+
+      const workerDispatcherModule = await import('@/main/services/workforce/worker-dispatcher')
+      const dispatchSpy = vi
+        .spyOn(workerDispatcherModule.WorkforceWorkerDispatcher.prototype, 'dispatch')
+        .mockImplementation(async (input: any) => {
+          dispatchCalls.push(input)
+          const metadata = input.metadata || {}
+          if (metadata.orchestrationCheckpoint) {
+            const output = checkpointOutputs.shift() || JSON.stringify({ status: 'continue' })
+            return {
+              taskId: `checkpoint_${dispatchCalls.length}`,
+              output,
+              success: true,
+              runId: `run_checkpoint_${dispatchCalls.length}`,
+              model: 'openai-compatible::gpt-4o',
+              modelSource: 'system-default'
+            }
+          }
+
+          return {
+            taskId: `exec_${dispatchCalls.length}`,
+            output: ['changes: updated src/main/services/workforce/workforce-engine.ts', 'validation: pnpm vitest --run'].join('\n'),
+            success: true,
+            runId: `run_exec_${dispatchCalls.length}`,
+            model: 'openai-compatible::gpt-4o',
+            modelSource: 'system-default'
+          }
+        })
+
+      try {
+        await workforceEngine.executeWorkflow('Build role aligned workflow', 'test-session-123', {
+          agentCode: 'haotian',
+          enableRetry: false
+        })
+      } finally {
+        dispatchSpy.mockRestore()
+      }
+
+      const finalUpdate = mocks.prisma.task.update.mock.calls.at(-1)?.[0]
+      const lifecycle = finalUpdate?.data?.metadata?.timeline?.workflow || []
+      expect(lifecycle.map((item: any) => item.stage)).toEqual([
+        'plan',
+        'dispatch',
+        'checkpoint',
+        'integration',
+        'finalize'
+      ])
+      expect(lifecycle.map((item: any) => item.details?.stageOwner)).toEqual([
+        'fuxi',
+        'haotian',
+        'haotian',
+        'haotian',
+        'haotian'
+      ])
+
+      const unresolvedItems = finalUpdate?.data?.metadata?.integration?.unresolvedItems || []
+      expect(unresolvedItems.some((entry: string) => entry.includes('evidence-gap'))).toBe(true)
+
+      const executionDispatch = dispatchCalls.find(call => !call?.metadata?.orchestrationCheckpoint)
+      expect(executionDispatch?.metadata?.workflowPhase).toBe('execution')
+      expect(executionDispatch?.metadata?.runtimeBindingSnapshot).toEqual(
+        expect.objectContaining({
+          primaryAgentRolePolicy: expect.objectContaining({
+            alias: 'haotian',
+            canonicalAgent: 'haotian',
+            canonicalRole: 'orchestration'
+          })
+        })
+      )
+    })
+
+    it('should reject non-haotian orchestrator when strict role mode is enabled', async () => {
+      process.env.WORKFORCE_STRICT_ROLE_MODE = 'true'
+
+      await expect(
+        workforceEngine.executeWorkflow('Run strict role flow', 'test-session-123', {
+          agentCode: 'fuxi',
+          enableRetry: false
+        })
+      ).rejects.toThrow('Strict role mode requires orchestration owner "haotian"')
+    })
+
+    it('should keep workflow executable in soft mode when strict role mode is disabled', async () => {
+      process.env.WORKFORCE_STRICT_ROLE_MODE = 'false'
+
+      mocks.llmAdapter.sendMessage.mockResolvedValueOnce({
+        content: JSON.stringify({ subtasks: [{ id: 't1', description: 'Implement task', dependencies: [] }] }),
+        usage: { input_tokens: 20, output_tokens: 20 }
+      })
+
+      const workerDispatcherModule = await import('@/main/services/workforce/worker-dispatcher')
+      const checkpointOutputs = [
+        JSON.stringify({ status: 'continue', approved_task_ids: ['t1'] }),
+        JSON.stringify({ status: 'continue', approved_task_ids: [] }),
+        JSON.stringify({ status: 'continue', approved_task_ids: [] })
+      ]
+      const dispatchSpy = vi
+        .spyOn(workerDispatcherModule.WorkforceWorkerDispatcher.prototype, 'dispatch')
+        .mockImplementation(async (input: any) => {
+          if (input?.metadata?.orchestrationCheckpoint) {
+            return {
+              taskId: `checkpoint_${Date.now()}`,
+              output: checkpointOutputs.shift() || JSON.stringify({ status: 'continue' }),
+              success: true,
+              runId: `run_checkpoint_${Date.now()}`,
+              model: 'openai-compatible::gpt-4o',
+              modelSource: 'system-default'
+            }
+          }
+
+          return {
+            taskId: `exec_${Date.now()}`,
+            output: [
+              'objective: implement role-aligned flow',
+              'changes: src/main/services/workforce/workforce-engine.ts',
+              'validation: pnpm vitest tests/integration/workforce-engine.test.ts --run',
+              'residual-risk: none'
+            ].join('\n'),
+            success: true,
+            runId: `run_exec_${Date.now()}`,
+            model: 'openai-compatible::gpt-4o',
+            modelSource: 'system-default'
+          }
+        })
+
+      try {
+        const result = await workforceEngine.executeWorkflow('Run soft role flow', 'test-session-123', {
+          agentCode: 'fuxi',
+          enableRetry: false
+        })
+
+        expect(result.success).toBe(true)
+      } finally {
+        dispatchSpy.mockRestore()
+      }
     })
   })
 
@@ -355,7 +557,7 @@ describe('Workforce Engine Integration', () => {
       const result = await delegateEngine.delegateTask({
         description: 'Failing task',
         prompt: 'This will fail',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       })
 
@@ -385,6 +587,137 @@ describe('Workforce Engine Integration', () => {
       expect(dag.get('3')).toEqual(['1'])
       expect(dag.get('4')).toEqual(['2', '3'])
     })
+
+    it('should recover failed workflow task and complete with recovery observability', async () => {
+      const mockDecomposition = {
+        subtasks: [{ id: 't1', description: 'Recoverable task', dependencies: [] }]
+      }
+
+      mocks.llmAdapter.sendMessage.mockResolvedValueOnce({
+        content: JSON.stringify(mockDecomposition),
+        usage: { input_tokens: 10, output_tokens: 10 }
+      })
+
+      const dispatchSpy = vi
+        .spyOn((workforceEngine as any).workerDispatcher, 'dispatch')
+        .mockImplementation(async (input: any) => {
+          if (input?.metadata?.recoveryContext) {
+            return {
+              success: true,
+              output: [
+                'objective: recover from transient task error',
+                'changes: src/main/services/workforce/workforce-engine.ts',
+                'validation: pnpm vitest tests/integration/workforce-engine.test.ts --run',
+                'residual-risk: low'
+              ].join('\n'),
+              taskId: 'subtask_recovery',
+              runId: 'run_recovery_1',
+              model: 'openai-compatible::gpt-4o',
+              modelSource: 'system-default'
+            }
+          }
+
+          throw new Error('network timeout while executing subtask')
+        })
+
+      try {
+        const result = await workforceEngine.executeWorkflow('Recover and continue workflow', 'test-session-123', {
+          enableRetry: false,
+          recoveryConfig: {
+            enabled: true,
+            maxAttempts: 2,
+            classBudget: {
+              transient: 2,
+              config: 1,
+              dependency: 1,
+              implementation: 1,
+              permission: 1,
+              unknown: 1
+            },
+            fallbackPolicy: 'category-first'
+          }
+        })
+
+        expect(result.success).toBe(true)
+
+        const finalWorkflowUpdate = mocks.prisma.task.update.mock.calls
+          .map((call: any[]) => call[0])
+          .reverse()
+          .find((call: Record<string, any>) => call?.data?.status === 'completed')
+
+        expect(finalWorkflowUpdate?.data?.metadata?.recoveryState?.recoveredTasks).toContain('t1')
+        expect(finalWorkflowUpdate?.data?.metadata?.recoveryState?.history?.length).toBeGreaterThan(0)
+        expect(
+          finalWorkflowUpdate?.data?.metadata?.timeline?.task?.some(
+            (item: any) => item.taskId === 't1' && item.status === 'completed'
+          )
+        ).toBe(true)
+
+        const recoveryDispatchCall = dispatchSpy.mock.calls.find(
+          (call: any[]) => call?.[0]?.metadata?.recoveryContext
+        )?.[0] as Record<string, any> | undefined
+        expect(recoveryDispatchCall?.metadata?.primaryAgentRoleAlias).toBe('haotian')
+        expect(recoveryDispatchCall?.metadata?.workflowStage).toBe('dispatch')
+      } finally {
+        dispatchSpy.mockRestore()
+      }
+    })
+
+    it('should record terminal unrecovered diagnostics for permission failures', async () => {
+      const mockDecomposition = {
+        subtasks: [{ id: 't_perm', description: 'Permission task', dependencies: [] }]
+      }
+
+      mocks.llmAdapter.sendMessage.mockResolvedValueOnce({
+        content: JSON.stringify(mockDecomposition),
+        usage: { input_tokens: 10, output_tokens: 10 }
+      })
+
+      const dispatchSpy = vi
+        .spyOn((workforceEngine as any).workerDispatcher, 'dispatch')
+        .mockRejectedValue(new Error('403 forbidden for this operation'))
+
+      try {
+        await expect(
+          workforceEngine.executeWorkflow('Permission failure workflow', 'test-session-123', {
+            enableRetry: false,
+            recoveryConfig: {
+              enabled: true,
+              maxAttempts: 2,
+              classBudget: {
+                transient: 2,
+                config: 1,
+                dependency: 1,
+                implementation: 1,
+                permission: 1,
+                unknown: 1
+              },
+              fallbackPolicy: 'category-first'
+            }
+          })
+        ).rejects.toThrow('403 forbidden')
+
+        const finalWorkflowUpdate = mocks.prisma.task.update.mock.calls
+          .map((call: any[]) => call[0])
+          .reverse()
+          .find((call: Record<string, any>) => call?.data?.status === 'failed')
+
+        expect(finalWorkflowUpdate?.data?.metadata?.recoveryState?.unrecoveredTasks).toContain('t_perm')
+        expect(finalWorkflowUpdate?.data?.metadata?.recoveryState?.terminalDiagnostics?.[0]).toEqual(
+          expect.objectContaining({
+            taskId: 't_perm',
+            failureClass: 'permission'
+          })
+        )
+        expect(
+          finalWorkflowUpdate?.data?.metadata?.recoveryState?.history?.some(
+            (item: any) => item.taskId === 't_perm' && item.status === 'aborted'
+          )
+        ).toBe(true)
+      } finally {
+        dispatchSpy.mockRestore()
+      }
+    })
   })
 
   describe('Delegate Engine and Agent Coordination', () => {
@@ -397,7 +730,7 @@ describe('Workforce Engine Integration', () => {
       await delegateEngine.delegateTask({
         description: 'Continuing task',
         prompt: 'Continue working',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123'
       })
 
@@ -420,7 +753,7 @@ describe('Workforce Engine Integration', () => {
       await delegateEngine.delegateTask({
         description: 'Child task',
         prompt: 'Execute subtask',
-        category: 'quick',
+        category: 'tianbing',
         sessionId: 'test-session-123',
         parentTaskId: 'parent-task-123'
       })

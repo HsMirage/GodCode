@@ -39,16 +39,10 @@ describe('tool allowlist resolver', () => {
     }
   })
 
-  it('supports legacy OMO agent aliases', () => {
-    expect(resolveAgentRuntimeToolNames('sisyphus', AVAILABLE_RUNTIME_TOOLS)).toEqual(
-      resolveAgentRuntimeToolNames('haotian', AVAILABLE_RUNTIME_TOOLS)
-    )
-    expect(resolveAgentRuntimeToolNames('atlas', AVAILABLE_RUNTIME_TOOLS)).toEqual(
-      resolveAgentRuntimeToolNames('kuafu', AVAILABLE_RUNTIME_TOOLS)
-    )
-    expect(resolveAgentRuntimeToolNames('explore', AVAILABLE_RUNTIME_TOOLS)).toEqual(
-      resolveAgentRuntimeToolNames('qianliyan', AVAILABLE_RUNTIME_TOOLS)
-    )
+  it('returns undefined for non-canonical agent codes', () => {
+    expect(resolveAgentRuntimeToolNames('legacy-orchestrator', AVAILABLE_RUNTIME_TOOLS)).toBeUndefined()
+    expect(resolveAgentRuntimeToolNames('legacy-executor', AVAILABLE_RUNTIME_TOOLS)).toBeUndefined()
+    expect(resolveAgentRuntimeToolNames('legacy-researcher', AVAILABLE_RUNTIME_TOOLS)).toBeUndefined()
   })
 
   it('keeps haotian and kuafu away from web/browser tools by default', () => {
@@ -73,7 +67,7 @@ describe('tool allowlist resolver', () => {
     expect(baizeTools).not.toContain('browser_navigate')
   })
 
-  it('resolves runtime tools for every category and alias', () => {
+  it('resolves runtime tools for every canonical category', () => {
     for (const category of CATEGORY_DEFINITIONS) {
       const tools = resolveCategoryRuntimeToolNames(category.code, AVAILABLE_RUNTIME_TOOLS)
       expect(tools).toBeDefined()
@@ -83,12 +77,8 @@ describe('tool allowlist resolver', () => {
       expect(tools || []).not.toContain('browser_navigate')
     }
 
-    expect(resolveCategoryRuntimeToolNames('visual-engineering', AVAILABLE_RUNTIME_TOOLS)).toEqual(
-      resolveCategoryRuntimeToolNames('zhinv', AVAILABLE_RUNTIME_TOOLS)
-    )
-    expect(resolveCategoryRuntimeToolNames('unspecified-high', AVAILABLE_RUNTIME_TOOLS)).toEqual(
-      resolveCategoryRuntimeToolNames('dayu', AVAILABLE_RUNTIME_TOOLS)
-    )
+    expect(resolveCategoryRuntimeToolNames('legacy-visual', AVAILABLE_RUNTIME_TOOLS)).toBeUndefined()
+    expect(resolveCategoryRuntimeToolNames('legacy-general', AVAILABLE_RUNTIME_TOOLS)).toBeUndefined()
   })
 
   it('prefers explicit availableTools, then subagent, then category', () => {
@@ -114,4 +104,3 @@ describe('tool allowlist resolver', () => {
     expect(dayuOnly).not.toContain('websearch')
   })
 })
-
