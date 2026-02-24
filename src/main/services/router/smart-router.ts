@@ -65,6 +65,7 @@ const COMPLEXITY_HINTS = [
   /分解|拆分|规划|plan|分步|阶段|跨模块|跨文件|跨服务|多模型|fallback|strict binding/i
 ]
 const LOW_COMPLEXITY_HINTS = [/解释|是什么|示例|语法|翻译|润色|weather|hello/i]
+const PRIMARY_AGENT_CODES = new Set(['fuxi', 'haotian', 'kuafu'])
 
 export class SmartRouter {
   private delegateEngine = new DelegateEngine()
@@ -167,7 +168,18 @@ export class SmartRouter {
     }
 
     if (context?.agentCode?.trim()) {
-      rationale.push('agentCode in context requires delegate route')
+      const normalized = context.agentCode.trim().toLowerCase()
+      if (PRIMARY_AGENT_CODES.has(normalized)) {
+        rationale.push('primary agentCode must route through workforce orchestration')
+        return {
+          strategy: 'workforce',
+          category: 'dayu',
+          complexityScore: 0.7,
+          rationale
+        }
+      }
+
+      rationale.push('subagent agentCode requires delegate route')
       return {
         strategy: 'delegate',
         subagent: context.agentCode.trim(),

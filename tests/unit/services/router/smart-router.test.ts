@@ -89,6 +89,31 @@ describe('SmartRouter', () => {
   })
 
   describe('route', () => {
+    it('should route primary agentCode through workforce even when input matches delegate rules', async () => {
+      await router.route('分析模块边界', {
+        sessionId: 'session-1',
+        agentCode: 'haotian'
+      })
+
+      expect(mockWorkforceEngine.executeWorkflow).toHaveBeenCalledWith(
+        '分析模块边界',
+        'session-1',
+        expect.objectContaining({ agentCode: 'haotian' })
+      )
+      expect(mockDelegateEngine.delegateTask).not.toHaveBeenCalled()
+    })
+
+    it('should keep subagent agentCode on delegate route', async () => {
+      await router.route('分析模块边界', {
+        sessionId: 'session-1',
+        agentCode: 'qianliyan'
+      })
+
+      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+        expect.objectContaining({ subagent_type: 'qianliyan' })
+      )
+    })
+
     it('should execute delegate strategy correctly', async () => {
       const input = '实现前端页面'
       const context = { prompt: 'Specific prompt', parentTaskId: 'parent-1' }
@@ -138,13 +163,14 @@ describe('SmartRouter', () => {
         agentCode: 'haotian'
       })
 
-      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+      expect(mockWorkforceEngine.executeWorkflow).toHaveBeenCalledWith(
+        input,
+        'session-1',
         expect.objectContaining({
-          sessionId: 'session-1',
-          subagent_type: 'haotian'
+          agentCode: 'haotian'
         })
       )
-      expect(mockWorkforceEngine.executeWorkflow).not.toHaveBeenCalled()
+      expect(mockDelegateEngine.delegateTask).not.toHaveBeenCalled()
     })
 
     it('should propagate abort signal to workforce strategy', async () => {

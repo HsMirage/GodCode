@@ -115,6 +115,9 @@ Server startup tasks require explicit success proof:
 - If task asks to start a server (e.g. npm run dev), keep running until startup success signal appears.
 - Report the exact success signal from output (port/listening/ready line). Do not stop at "starting..."
 </Category_Execution_Contract>`
+const FUXI_BLOCKED_STAGES = new Set(['dispatch', 'checkpoint', 'integration', 'finalize', 'execution'])
+const IMPLEMENTATION_INTENT_PATTERN =
+  /(修复|实现|新增|重构|开发|改代码|implement|fix|build|refactor)/i
 
 /**
  * 旧版本系统提示解析 (兼容性保留)
@@ -253,6 +256,7 @@ export class DelegateEngine {
     const resolvedSessionId = sessionId
     const workspaceDir = await this.resolveWorkspaceDirForSession(resolvedSessionId)
     const loadSkills = this.normalizeLoadSkills(input.loadSkills)
+    const metadataInput = metadata ?? {}
 
     let modelConfig: {
       model: string
@@ -365,7 +369,6 @@ export class DelegateEngine {
       throw new Error('Must provide either category or subagent_type')
     }
 
-    const metadataInput = metadata || {}
     const primaryRoleResolution = resolvePrimaryRolePolicyFromMetadata(metadataInput)
     if (primaryRoleResolution && 'error' in primaryRoleResolution) {
       return {
@@ -427,6 +430,32 @@ export class DelegateEngine {
             'Use canonical handoff or provide roleBoundaryOverride with audit fields.',
           success: false,
           agentType: resolvedSubagentType || resolvedCategory,
+          model: modelConfig.model,
+          modelSource,
+          systemPromptTokens: 0
+        }
+      }
+    }
+
+    const normalizedStage =
+      typeof metadataInput.workflowStage === 'string' ? metadataInput.workflowStage.trim().toLowerCase() : ''
+
+    if (resolvedSubagentType === 'fuxi') {
+      const hasRoleBoundaryOverride = Boolean(rolePolicySnapshot?.override)
+      const blockedByStage =
+        !hasRoleBoundaryOverride && normalizedStage.length > 0 && FUXI_BLOCKED_STAGES.has(normalizedStage)
+      const blockedByIntent =
+        !hasRoleBoundaryOverride &&
+        !['plan', 'planning'].includes(normalizedStage) &&
+        IMPLEMENTATION_INTENT_PATTERN.test(`${description}\n${prompt}`)
+
+      if (blockedByStage || blockedByIntent) {
+        return {
+          taskId: '',
+          output:
+            'FuXi is planning-only and cannot execute implementation tasks. Please handoff to haotian (orchestration) / kuafu (execution).',
+          success: false,
+          agentType: 'fuxi',
           model: modelConfig.model,
           modelSource,
           systemPromptTokens: 0

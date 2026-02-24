@@ -9,11 +9,11 @@ export default defineConfig({
     include: ['tests/**/*.{test,spec}.{js,ts,tsx}'],
     exclude: [
       'node_modules/',
+      '**/node_modules/**',
       'dist/',
       'out/',
       '参考项目/**',
-      'tests/e2e/**',
-      'tests/ceshi/frontend/node_modules/**'
+      'tests/e2e/**'
     ],
     coverage: {
       provider: 'v8',

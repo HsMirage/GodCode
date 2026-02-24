@@ -50,6 +50,7 @@ const prismaMock = {
 vi.mock('@/main/services/database', () => ({
   DatabaseService: {
     getInstance: vi.fn(() => ({
+      init: vi.fn().mockResolvedValue(undefined),
       getClient: vi.fn(() => prismaMock)
     }))
   }

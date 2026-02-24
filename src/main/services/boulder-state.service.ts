@@ -24,10 +24,13 @@ export interface BoulderState {
  */
 export class BoulderStateService {
   private static instance: BoulderStateService | null = null
-  private readonly boulderPath: string
+  private readonly boulderPaths: string[]
 
   private constructor() {
-    this.boulderPath = path.join(process.cwd(), '.sisyphus', 'boulder.json')
+    this.boulderPaths = [
+      path.join(process.cwd(), '.fuxi', 'boulder.json'),
+      path.join(process.cwd(), '.sisyphus', 'boulder.json')
+    ]
   }
 
   static getInstance(): BoulderStateService {
@@ -38,12 +41,13 @@ export class BoulderStateService {
   }
 
   async getState(): Promise<BoulderState> {
-    if (!fs.existsSync(this.boulderPath)) {
+    const existingPath = this.boulderPaths.find(candidate => fs.existsSync(candidate))
+    if (!existingPath) {
       return this.createDefaultState()
     }
 
     try {
-      const content = fs.readFileSync(this.boulderPath, 'utf-8')
+      const content = fs.readFileSync(existingPath, 'utf-8')
       const parsed = JSON.parse(content) as unknown
       return this.normalizeState(parsed)
     } catch (error) {
@@ -127,15 +131,16 @@ export class BoulderStateService {
   }
 
   private async writeState(state: BoulderState): Promise<void> {
-    const dir = path.dirname(this.boulderPath)
+    const targetPath = this.boulderPaths[0]
+    const dir = path.dirname(targetPath)
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true })
     }
 
-    const tempPath = `${this.boulderPath}.tmp`
+    const tempPath = `${targetPath}.tmp`
     try {
       fs.writeFileSync(tempPath, JSON.stringify(state, null, 2))
-      fs.renameSync(tempPath, this.boulderPath)
+      fs.renameSync(tempPath, targetPath)
     } catch (error) {
       console.error('[BoulderState] Failed to write state file:', error)
       if (fs.existsSync(tempPath)) {
@@ -149,7 +154,7 @@ export class BoulderStateService {
 
   private createDefaultState(): BoulderState {
     const defaultPlanName = 'codeall-unified-plan'
-    const defaultPlanPath = path.join(process.cwd(), '.sisyphus', 'plans', `${defaultPlanName}.md`)
+    const defaultPlanPath = path.join(process.cwd(), '.fuxi', 'plans', `${defaultPlanName}.md`)
 
     return {
       active_plan: defaultPlanPath,

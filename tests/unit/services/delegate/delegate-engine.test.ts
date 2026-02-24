@@ -700,6 +700,44 @@ describe('DelegateEngine', () => {
         })
       )
     })
+
+    it('should reject fuxi execution-stage request even when strict role mode is off', async () => {
+      const result = await delegateEngine.delegateTask({
+        description: '实现支付链路并修改后端代码',
+        prompt: '请直接实现并提交代码',
+        subagent_type: 'fuxi',
+        sessionId: 'test-session-123',
+        metadata: { workflowStage: 'execution' }
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.output).toContain('FuXi is planning-only')
+      expect(result.output).toContain('handoff')
+    })
+
+    it('should allow fuxi plan-stage request', async () => {
+      const result = await delegateEngine.delegateTask({
+        description: '为支付链路生成执行计划',
+        prompt: '输出计划文件到 .fuxi/plans/payment.md',
+        subagent_type: 'fuxi',
+        sessionId: 'test-session-123',
+        metadata: { workflowStage: 'plan' }
+      })
+
+      expect(result.success).toBe(true)
+    })
+
+    it('should reject fuxi implementation intent when workflow stage is missing', async () => {
+      const result = await delegateEngine.delegateTask({
+        description: '实现支付链路并修改后端代码',
+        prompt: '请直接实现并提交代码',
+        subagent_type: 'fuxi',
+        sessionId: 'test-session-123'
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.output).toContain('FuXi is planning-only')
+    })
   })
 
   describe('cancelTask', () => {

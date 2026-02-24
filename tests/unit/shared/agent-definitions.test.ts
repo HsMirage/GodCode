@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   AGENT_DEFINITIONS,
   resolvePrimaryAgentRolePolicy,
-  listPrimaryAgentRoleAliases
+  listPrimaryAgentRoleAliases,
+  getAgentByCode
 } from '@/shared/agent-definitions'
 
 describe('primary agent role mapping', () => {
@@ -61,5 +62,10 @@ describe('primary agent role mapping', () => {
     expect(fuxi?.primaryRole?.canonicalRole).toBe('planning')
     expect(haotian?.primaryRole?.canonicalRole).toBe('orchestration')
     expect(kuafu?.primaryRole?.canonicalRole).toBe('execution')
+  })
+
+  it('should set fuxi defaultStrategy to workforce', () => {
+    const fuxi = getAgentByCode('fuxi')
+    expect(fuxi?.defaultStrategy).toBe('workforce')
   })
 })

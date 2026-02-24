@@ -2,7 +2,6 @@ import { describe, test, expect, beforeAll, afterAll, beforeEach, vi } from 'vit
 import type { IpcMainInvokeEvent } from 'electron'
 import { DatabaseService } from '../../src/main/services/database'
 import type { PrismaClient } from '@prisma/client'
-import { createLLMAdapter } from '@/main/services/llm/factory'
 import fs from 'fs'
 
 // Set E2E test mode BEFORE imports that read it
@@ -573,21 +572,16 @@ describe('Chat IPC Integration - handleMessageSend', () => {
 
   test('fuxi handoff should capture .fuxi plan path', async () => {
     const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+    const { SmartRouter } = await import('@/main/services/router/smart-router')
+
+    vi.spyOn(SmartRouter.prototype, 'route').mockResolvedValueOnce({
+      taskId: 'mock-task-id',
+      output: 'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .fuxi/plans/codeall-repair.md',
+      success: true
+    } as any)
+
     vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) =>
       String(p).replace(/\\/g, '/').includes('.fuxi/plans/codeall-repair.md')
-    )
-    vi.mocked(createLLMAdapter).mockImplementationOnce(
-      () =>
-        ({
-          sendMessage: vi.fn(),
-          streamMessage: async function* () {
-            yield {
-              content:
-                'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .fuxi/plans/codeall-repair.md',
-              done: true
-            }
-          }
-        }) as any
     )
 
     const result = await handleMessageSend(mockEvent, {
@@ -606,21 +600,16 @@ describe('Chat IPC Integration - handleMessageSend', () => {
 
   test('fuxi handoff should keep legacy .sisyphus plan path compatibility', async () => {
     const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+    const { SmartRouter } = await import('@/main/services/router/smart-router')
+
+    vi.spyOn(SmartRouter.prototype, 'route').mockResolvedValueOnce({
+      taskId: 'mock-task-id-legacy',
+      output: 'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .sisyphus/plans/legacy-repair.md',
+      success: true
+    } as any)
+
     vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) =>
       String(p).replace(/\\/g, '/').includes('.sisyphus/plans/legacy-repair.md')
-    )
-    vi.mocked(createLLMAdapter).mockImplementationOnce(
-      () =>
-        ({
-          sendMessage: vi.fn(),
-          streamMessage: async function* () {
-            yield {
-              content:
-                'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .sisyphus/plans/legacy-repair.md',
-              done: true
-            }
-          }
-        }) as any
     )
 
     const result = await handleMessageSend(mockEvent, {

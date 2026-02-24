@@ -28,7 +28,10 @@ Incomplete tasks remain in your todo list. Continue working on the next pending 
 
 const COUNTDOWN_SECONDS = 2
 const IDLE_DEDUP_WINDOW_MS = 500
-const BOULDER_STATE_PATH = path.join(process.cwd(), '.sisyphus', 'boulder.json')
+const BOULDER_STATE_PATHS = [
+  path.join(process.cwd(), '.fuxi', 'boulder.json'),
+  path.join(process.cwd(), '.sisyphus', 'boulder.json')
+]
 
 interface BoulderContinuationContext {
   sessionIds: Set<string> | null
@@ -203,34 +206,38 @@ export class TaskContinuationService {
   }
 
   private readBoulderContinuationContext(): BoulderContinuationContext {
-    if (!fs.existsSync(BOULDER_STATE_PATH)) {
-      return { sessionIds: null }
+    for (const boulderPath of BOULDER_STATE_PATHS) {
+      if (!fs.existsSync(boulderPath)) {
+        continue
+      }
+
+      try {
+        const raw = fs.readFileSync(boulderPath, 'utf-8')
+        const parsed = JSON.parse(raw) as Record<string, unknown>
+
+        const sessionIds = Array.isArray(parsed.session_ids)
+          ? new Set(
+              parsed.session_ids
+                .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+                .map(id => id.trim())
+            )
+          : null
+
+        const activePlan =
+          typeof parsed.active_plan === 'string' && parsed.active_plan.trim().length > 0
+            ? parsed.active_plan.trim()
+            : undefined
+
+        return { sessionIds, activePlan }
+      } catch (error) {
+        logger.warn('[TaskContinuation] Failed to read boulder.json for continuation filter', {
+          path: boulderPath,
+          error: error instanceof Error ? error.message : String(error)
+        })
+      }
     }
 
-    try {
-      const raw = fs.readFileSync(BOULDER_STATE_PATH, 'utf-8')
-      const parsed = JSON.parse(raw) as Record<string, unknown>
-
-      const sessionIds = Array.isArray(parsed.session_ids)
-        ? new Set(
-            parsed.session_ids
-              .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
-              .map(id => id.trim())
-          )
-        : null
-
-      const activePlan =
-        typeof parsed.active_plan === 'string' && parsed.active_plan.trim().length > 0
-          ? parsed.active_plan.trim()
-          : undefined
-
-      return { sessionIds, activePlan }
-    } catch (error) {
-      logger.warn('[TaskContinuation] Failed to read boulder.json for continuation filter', {
-        error: error instanceof Error ? error.message : String(error)
-      })
-      return { sessionIds: null }
-    }
+    return { sessionIds: null }
   }
 }
 
