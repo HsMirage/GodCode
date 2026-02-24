@@ -65,7 +65,7 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     type: 'primary',
     mode: 'primary',
     description: '战略规划器，面试模式创建工作计划',
-    defaultStrategy: 'direct-enhanced',
+    defaultStrategy: 'workforce',
     defaultModel: 'claude-3-opus-20240229',
     fallbackModels: [
       { model: 'claude-3-5-sonnet-20240620', provider: 'anthropic' },

@@ -212,6 +212,39 @@ describe('BoulderStateService', () => {
     expect(state.completion_percentage).toBe('0.0%')
   })
 
+  it('should create default boulder state under .fuxi', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false)
+
+    const service = BoulderStateService.getInstance()
+    const state = await service.getState()
+
+    expect(state.active_plan.replace(/\\/g, '/')).toContain('/.fuxi/plans/')
+  })
+
+  it('should read legacy .sisyphus boulder when .fuxi boulder is absent', async () => {
+    vi.mocked(fs.existsSync).mockImplementation(p => String(p).includes('.sisyphus/boulder.json'))
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        active_plan: '/tmp/.sisyphus/plans/legacy.md',
+        session_ids: ['ses_1'],
+        status: 'in_progress',
+        completed_tasks: 1,
+        total_tasks: 2,
+        completion_percentage: '50.0%',
+        last_updated: new Date().toISOString(),
+        phase_status: {},
+        blockers: [],
+        next_actionable_tasks: []
+      })
+    )
+
+    const service = BoulderStateService.getInstance()
+    const state = await service.getState()
+
+    expect(state.active_plan).toBe('/tmp/.sisyphus/plans/legacy.md')
+    expect(state.session_ids).toEqual(['ses_1'])
+  })
+
   it('should report session tracking using boulder session_ids', async () => {
     vi.mocked(fs.readFileSync).mockReturnValue(
       JSON.stringify({

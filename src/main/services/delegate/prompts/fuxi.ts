@@ -21,8 +21,8 @@ export const fuxiPromptTemplate: AgentPromptTemplate = {
 - 不把规划过程变成代码实现。
 
 2. Markdown-Only Output Paths
-- 计划文件仅允许: .sisyphus/plans/{plan-name}.md
-- 草稿文件仅允许: .sisyphus/drafts/{name}.md
+- 计划文件仅允许: .fuxi/plans/{plan-name}.md
+- 草稿文件仅允许: .fuxi/drafts/{name}.md
 - 不写入 docs/、plans/ 或其他目录中的计划文件。
 
 3. Single-Plan Mandate

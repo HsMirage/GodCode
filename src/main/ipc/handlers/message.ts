@@ -114,7 +114,9 @@ function extractRouteOutput(result: RouteResult): string {
 }
 
 function extractPlanPath(content: string): string | undefined {
-  const match = content.match(/(?:[A-Za-z]:)?[^\s"'`]*\.sisyphus[\\/]+plans[\\/]+[^\s"'`<>]+\.md/i)
+  const match = content.match(
+    /(?:[A-Za-z]:)?[^\s"'`]*(?:\.fuxi|\.sisyphus)[\\/]+plans[\\/]+[^\s"'`<>]+\.md/i
+  )
   return match?.[0]
 }
 

@@ -388,6 +388,82 @@ describe('WorkforceEngine', () => {
       expect(checkpointCalls.some(call => call.metadata?.checkpointPhase === 'final')).toBe(true)
     })
 
+    it('should only require orchestrator checkpoint for haotian', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-1', description: '实现首页', dependencies: [] }]
+        })
+      })
+
+      const callTrace: any[] = []
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
+        callTrace.push(delegateInput)
+
+        return {
+          taskId: `subtask-${delegateInput.description}`,
+          output: [
+            'Changed files:',
+            '- src/main/services/workforce/workforce-engine.ts',
+            '',
+            'Verification command:',
+            '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+          ].join('\n'),
+          success: true
+        }
+      })
+
+      await workforceEngine.executeWorkflow('执行流程', 'test-session-123', {
+        agentCode: 'fuxi',
+        enableRetry: false
+      })
+
+      const checkpointCalls = callTrace.filter(input => input.metadata?.orchestrationCheckpoint)
+      expect(checkpointCalls).toHaveLength(0)
+    })
+
+    it('should dispatch checkpoint reviewer as haotian', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-1', description: '实现首页', dependencies: [] }]
+        })
+      })
+
+      const callTrace: any[] = []
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
+        callTrace.push(delegateInput)
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          return {
+            taskId: `checkpoint-${delegateInput.metadata.checkpointPhase}`,
+            output: JSON.stringify({
+              status: 'continue',
+              approved_task_ids: delegateInput.metadata.readyTaskIds || []
+            }),
+            success: true
+          }
+        }
+
+        return {
+          taskId: `subtask-${delegateInput.description}`,
+          output: [
+            'Changed files:',
+            '- src/main/services/workforce/workforce-engine.ts',
+            '',
+            'Verification command:',
+            '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+          ].join('\n'),
+          success: true
+        }
+      })
+
+      await workforceEngine.executeWorkflow('执行流程', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      const checkpointCall = callTrace.find(input => input.metadata?.orchestrationCheckpoint)
+      expect(checkpointCall?.subagent_type).toBe('haotian')
+    })
+
     it('should trigger orchestrator checkpoint in single-wave workflows', async () => {
       mockAdapter.sendMessage.mockResolvedValue({
         content: JSON.stringify({
@@ -1136,6 +1212,59 @@ describe('WorkforceEngine', () => {
       await expect(
         workforceEngine.executeWorkflow('请实现网站首页', 'test-session-123', { enableRetry: false })
       ).rejects.toThrow('non-actionable output')
+    })
+
+    it('should map execution tasks into diverse categories (not only dayu/zhinv)', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            { id: 't1', description: '实现数据库迁移脚本', dependencies: [] },
+            { id: 't2', description: '修复测试用例并补充断言', dependencies: [] },
+            { id: 't3', description: '增加CI工作流和发布脚本', dependencies: [] }
+          ]
+        })
+      })
+
+      await workforceEngine.executeWorkflow('按实现任务执行', 'test-session-123', {
+        agentCode: 'haotian',
+        enableRetry: false
+      })
+
+      const calls = mockWorkerDispatcher.dispatch.mock.calls.map(call => call[0])
+      const executionCalls = calls.filter(input => input.metadata?.workflowPhase === 'execution')
+      expect(executionCalls).toHaveLength(3)
+
+      const categoryByDescription = new Map(
+        executionCalls.map(input => [input.description as string, input.category as string | undefined])
+      )
+
+      expect(categoryByDescription.get('实现数据库迁移脚本')).toBe('guigu')
+      expect(categoryByDescription.get('修复测试用例并补充断言')).toBe('tianbing')
+      expect(categoryByDescription.get('增加CI工作流和发布脚本')).toBe('cangjie')
+      expect(executionCalls.every(input => input.subagent_type === undefined)).toBe(true)
+    })
+
+    it('should parse both .fuxi and legacy .sisyphus plan paths from input', async () => {
+      vi.spyOn(fs, 'existsSync').mockImplementation(candidate => {
+        const normalized = String(candidate).replace(/\\/g, '/')
+        return (
+          normalized.includes('/tmp/workspace-a/.fuxi/plans/new-plan.md') ||
+          normalized.includes('/tmp/workspace-a/.sisyphus/plans/old-plan.md')
+        )
+      })
+      vi.spyOn(fs, 'readFileSync').mockReturnValue('- [ ] Task 1: 实现接口')
+
+      await workforceEngine.executeWorkflow('执行计划 .fuxi/plans/new-plan.md', 'test-session-123', {
+        agentCode: 'kuafu'
+      })
+      await workforceEngine.executeWorkflow('执行计划 .sisyphus/plans/old-plan.md', 'test-session-123', {
+        agentCode: 'kuafu'
+      })
+
+      const executionCalls = mockWorkerDispatcher.dispatch.mock.calls
+        .map(call => call[0])
+        .filter(input => input.description === 'Task 1: 实现接口')
+      expect(executionCalls).toHaveLength(2)
     })
 
     it('should resolve relative plan path against session workspace directory', async () => {

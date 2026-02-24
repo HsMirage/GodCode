@@ -1602,7 +1602,7 @@ Only return the JSON, no other text.`
     const maybePlanPath = await this.resolvePlanPath(input, sessionId, options, workspaceDir)
     if (options.agentCode === 'kuafu' && this.shouldPreferPlanExecution(input, options.agentCode) && !maybePlanPath) {
       throw new Error(
-        '未找到可执行计划文件。请先让伏羲生成计划，或手动指定路径：执行计划 .sisyphus/plans/<plan>.md'
+        '未找到可执行计划文件。请先让伏羲生成计划，或手动指定路径：执行计划 .fuxi/plans/<plan>.md（兼容 .sisyphus/plans/<plan>.md）'
       )
     }
     if (maybePlanPath) {
@@ -1699,7 +1699,9 @@ Only return the JSON, no other text.`
   }
 
   private extractPlanPathFromInput(input: string): string | undefined {
-    const match = input.match(/(?:[A-Za-z]:)?[^\s"'`]*\.sisyphus[\\/]+plans[\\/]+[^\s"'`<>]+\.md/i)
+    const match = input.match(
+      /(?:[A-Za-z]:)?[^\s"'`]*(?:\.fuxi|\.sisyphus)[\\/]+plans[\\/]+[^\s"'`<>]+\.md/i
+    )
     return match?.[0]
   }
 
@@ -2015,7 +2017,7 @@ ${clippedContent}`)
       return 'zhinv'
     }
 
-    if (/(文档撰写|编写文档|changelog|release note|技术写作|说明文档)/i.test(text)) {
+    if (/(文档撰写|编写文档|changelog|release note|技术写作|说明文档|发布脚本|ci工作流|release script|workflow)/i.test(text)) {
       return 'cangjie'
     }
 
@@ -2023,15 +2025,15 @@ ${clippedContent}`)
       return 'maliang'
     }
 
+    if (/(数据库迁移脚本|migration script|迁移脚本|复杂推理|算法|策略设计|复杂逻辑|proof|reasoning)/i.test(text)) {
+      return 'guigu'
+    }
+
     if (/(深度|复杂重构|架构重构|性能优化|并发|安全加固|迁移)/i.test(text)) {
       return 'guixu'
     }
 
-    if (/(复杂推理|算法|策略设计|复杂逻辑|proof|reasoning)/i.test(text)) {
-      return 'guigu'
-    }
-
-    if (/(小改|微调|单文件|拼写|格式化|trivial|quick fix)/i.test(text)) {
+    if (/(小改|微调|单文件|拼写|格式化|trivial|quick fix|测试用例|断言)/i.test(text)) {
       return 'tianbing'
     }
 
@@ -2066,9 +2068,22 @@ ${clippedContent}`)
       ) &&
       ['tianbing', 'cangjie'].includes(explicitCategory)
     ) {
-      if (explicitCategory === 'tianbing' && /(quick|快速|小问题|小改|微调|单文件|trivial)/i.test(text)) {
+      if (
+        explicitCategory === 'tianbing' &&
+        /(quick|快速|小问题|小改|微调|单文件|trivial|测试用例|断言)/i.test(text)
+      ) {
         return 'tianbing'
       }
+
+      if (
+        explicitCategory === 'cangjie' &&
+        /(文档撰写|编写文档|changelog|release note|技术写作|说明文档|发布脚本|ci工作流|release script|workflow)/i.test(
+          text
+        )
+      ) {
+        return 'cangjie'
+      }
+
       return this.normalizeWorkflowCategory(workflowCategory)
     }
 
@@ -2098,7 +2113,7 @@ ${clippedContent}`)
 
     if (
       /\[(reject|rejected)\]/i.test(normalized) ||
-      /(unable to proceed|cannot proceed|no \.sisyphus\/plans)/i.test(lower)
+      /(unable to proceed|cannot proceed|no (?:\.fuxi|\.sisyphus)\/plans)/i.test(lower)
     ) {
       return 'explicit-rejection-output'
     }
@@ -2373,7 +2388,7 @@ ${clippedContent}`)
   }
 
   private shouldRequireOrchestratorCheckpoint(agentCode?: string): boolean {
-    return this.isPrimaryOrchestrator(agentCode)
+    return (agentCode || '').trim().toLowerCase() === 'haotian'
   }
 
   private buildCheckpointResultPreview(output: string): string {
@@ -2655,7 +2670,7 @@ ${clippedContent}`)
         sessionId: input.sessionId,
         description: `Orchestrator checkpoint review (${input.workflowId})`,
         prompt,
-        subagent_type: input.orchestratorAgentCode,
+        subagent_type: 'haotian',
         parentTaskId: input.workflowId,
         useDynamicPrompt: false,
         availableTools: [],
@@ -4397,6 +4412,13 @@ ${clippedContent}`)
     })
     if (session?.space?.workDir) {
       return session.space.workDir
+    }
+
+    if (session?.spaceId) {
+      const space = await this.prisma.space.findUnique({ where: { id: session.spaceId } })
+      if (space?.workDir) {
+        return space.workDir
+      }
     }
 
     throw new Error(`Session workspace not found for workflow: ${sessionId}`)

@@ -90,6 +90,9 @@ export interface DelegateTaskResult {
 }
 
 const DEFAULT_SYSTEM_PROMPT = 'You are CodeAll, an AI coding agent.'
+const FUXI_BLOCKED_STAGES = new Set(['dispatch', 'checkpoint', 'integration', 'finalize', 'execution'])
+const IMPLEMENTATION_INTENT_PATTERN =
+  /(修复|实现|新增|重构|开发|改代码|implement|fix|build|refactor)/i
 
 /**
  * 旧版本系统提示解析 (兼容性保留)
@@ -173,6 +176,7 @@ export class DelegateEngine {
     const resolvedSessionId = sessionId
     const workspaceDir = await this.resolveWorkspaceDirForSession(resolvedSessionId)
     const loadSkills = this.normalizeLoadSkills(input.loadSkills)
+    const metadataInput = metadata ?? {}
 
     let modelConfig: {
       model: string
@@ -283,6 +287,29 @@ export class DelegateEngine {
       }
     } else {
       throw new Error('Must provide either category or subagent_type')
+    }
+
+    const normalizedStage =
+      typeof metadataInput.workflowStage === 'string' ? metadataInput.workflowStage.trim().toLowerCase() : ''
+
+    if (subagent_type === 'fuxi') {
+      const blockedByStage = normalizedStage.length > 0 && FUXI_BLOCKED_STAGES.has(normalizedStage)
+      const blockedByIntent =
+        !['plan', 'planning'].includes(normalizedStage) &&
+        IMPLEMENTATION_INTENT_PATTERN.test(`${description}\n${prompt}`)
+
+      if (blockedByStage || blockedByIntent) {
+        return {
+          taskId: '',
+          output:
+            'FuXi is planning-only and cannot execute implementation tasks. Please handoff to haotian (orchestration) / kuafu (execution).',
+          success: false,
+          agentType: 'fuxi',
+          model: modelConfig.model,
+          modelSource,
+          systemPromptTokens: 0
+        }
+      }
     }
 
     const task = await this.prisma.task.create({

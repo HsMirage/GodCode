@@ -273,6 +273,31 @@ describe('TaskContinuationService', () => {
   })
 
   describe('boulder session filter', () => {
+    it('should read continuation boulder from .fuxi first with .sisyphus fallback', () => {
+      vi.mocked(fs.existsSync).mockImplementation(p => String(p).includes('.fuxi/boulder.json'))
+      vi.mocked(fs.readFileSync).mockImplementation(p => {
+        const normalized = String(p).replace(/\\/g, '/')
+        if (normalized.includes('.fuxi/boulder.json')) {
+          return JSON.stringify({
+            active_plan: '/tmp/.fuxi/plans/demo.md',
+            session_ids: [sessionId]
+          })
+        }
+        return JSON.stringify({
+          active_plan: '/tmp/.sisyphus/plans/legacy.md',
+          session_ids: ['ses_other']
+        })
+      })
+
+      service.setTodos(sessionId, [
+        { id: '1', content: 'pending', status: 'pending', priority: 'medium' }
+      ])
+
+      const prompt = service.getContinuationPrompt(sessionId)
+      expect(prompt).toContain('/tmp/.fuxi/plans/demo.md')
+      expect(prompt).not.toContain('legacy.md')
+    })
+
     it('should block continuation for sessions not listed in boulder session_ids', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true)
       vi.mocked(fs.readFileSync).mockReturnValue(
