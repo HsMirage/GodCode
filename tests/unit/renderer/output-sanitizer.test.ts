@@ -22,4 +22,16 @@ describe('sanitizeDisplayOutput', () => {
     const input = '修复完成。\nEverything is clean now.'
     expect(sanitizeDisplayOutput(input)).toBe(input)
   })
+
+  it('keeps narrative lines containing recipient_name and command words', () => {
+    const input = [
+      '排查记录：recipient_name 是日志字段名。',
+      '这个 command 不是工具调用，只是自然语言描述。'
+    ].join('\n')
+
+    const output = sanitizeDisplayOutput(input)
+
+    expect(output).toContain('recipient_name 是日志字段名')
+    expect(output).toContain('这个 command 不是工具调用')
+  })
 })

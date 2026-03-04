@@ -4,6 +4,10 @@
  * 负责 Hook 的注册、移除和触发
  */
 
+import { randomUUID } from 'node:crypto'
+import { EventEmitter } from 'node:events'
+import { logger } from '../../../shared/logger'
+import { AuditLogService } from '../audit-log.service'
 import type {
   HookEventType,
   HookConfig,
@@ -15,14 +19,43 @@ import type {
   MessageInfo,
   ContextOverflowInfo,
   EditErrorInfo,
+  TaskLifecycleInfo,
   HookExecutionResult,
-  EventEmitResult
+  EventEmitResult,
+  HookExecutionAuditRecord,
+  HookExecutionStrategySnapshot,
+  HookExecutionContextSnapshot,
+  HookExecutionOutcome,
+  HookExecutionStatus,
+  MessageInjectionResult
 } from './types'
+
+class HookTimeoutError extends Error {
+  constructor(
+    public readonly hookId: string,
+    public readonly timeoutMs: number
+  ) {
+    super(`Hook "${hookId}" timed out after ${timeoutMs}ms`)
+    this.name = 'HookTimeoutError'
+  }
+}
+
+interface HookRuntimeState {
+  consecutiveFailures: number
+  circuitOpenUntil?: number
+}
 
 export class HookManager {
   private static instance: HookManager | null = null
+  private readonly eventEmitter = new EventEmitter()
   private hooks: Map<string, RegisteredHook> = new Map()
   private eventHooks: Map<HookEventType, Set<string>> = new Map()
+  private readonly maxExecutionAudits = 200
+  private executionAudits: HookExecutionAuditRecord[] = []
+  private readonly hookTimeoutMs = 2000
+  private readonly circuitBreakerFailureThreshold = 3
+  private readonly circuitBreakerCooldownMs = 30_000
+  private runtimeStates: Map<string, HookRuntimeState> = new Map()
 
   private constructor() {
     // 初始化事件映射
@@ -31,7 +64,8 @@ export class HookManager {
       'onToolEnd',
       'onMessageCreate',
       'onContextOverflow',
-      'onEditError'
+      'onEditError',
+      'onTaskLifecycle'
     ]
     for (const event of events) {
       this.eventHooks.set(event, new Set())
@@ -96,6 +130,7 @@ export class HookManager {
 
     this.eventHooks.get(hook.event)?.delete(hookId)
     this.hooks.delete(hookId)
+    this.runtimeStates.delete(hookId)
     return true
   }
 
@@ -154,6 +189,284 @@ export class HookManager {
     return hooks.sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
   }
 
+  private getRuntimeState(hookId: string): HookRuntimeState {
+    const existing = this.runtimeStates.get(hookId)
+    if (existing) {
+      return existing
+    }
+
+    const initial: HookRuntimeState = { consecutiveFailures: 0 }
+    this.runtimeStates.set(hookId, initial)
+    return initial
+  }
+
+  private isCircuitOpen(hook: RegisteredHook, now = Date.now()): { open: boolean; openUntil?: number } {
+    const state = this.getRuntimeState(hook.id)
+    if (!state.circuitOpenUntil) {
+      return { open: false }
+    }
+
+    if (state.circuitOpenUntil <= now) {
+      state.circuitOpenUntil = undefined
+      return { open: false }
+    }
+
+    return { open: true, openUntil: state.circuitOpenUntil }
+  }
+
+  private markHookSuccess(hook: RegisteredHook): void {
+    const state = this.getRuntimeState(hook.id)
+    state.consecutiveFailures = 0
+    state.circuitOpenUntil = undefined
+  }
+
+  private markHookFailure(hook: RegisteredHook): Date | undefined {
+    const state = this.getRuntimeState(hook.id)
+    state.consecutiveFailures += 1
+
+    if (state.consecutiveFailures >= this.circuitBreakerFailureThreshold) {
+      state.circuitOpenUntil = Date.now() + this.circuitBreakerCooldownMs
+      state.consecutiveFailures = 0
+      return new Date(state.circuitOpenUntil)
+    }
+
+    return undefined
+  }
+
+  private withTimeout<T>(promise: Promise<T>, hookId: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new HookTimeoutError(hookId, this.hookTimeoutMs))
+      }, this.hookTimeoutMs)
+
+      promise
+        .then(value => {
+          clearTimeout(timer)
+          resolve(value)
+        })
+        .catch(error => {
+          clearTimeout(timer)
+          reject(error)
+        })
+    })
+  }
+
+  private toErrorMessage(error: unknown): string {
+    if (error instanceof HookTimeoutError) {
+      return error.message
+    }
+
+    if (error instanceof Error) {
+      return error.message
+    }
+
+    return String(error)
+  }
+
+  private resolveExecutionStatus(error?: unknown): HookExecutionStatus {
+    if (!error) {
+      return 'success'
+    }
+
+    if (error instanceof HookTimeoutError) {
+      return 'timeout'
+    }
+
+    return 'error'
+  }
+
+  private createReturnValuePreview(value: unknown): string | undefined {
+    if (value === undefined) {
+      return undefined
+    }
+
+    try {
+      const serialized = JSON.stringify(value)
+      if (serialized.length <= 500) {
+        return serialized
+      }
+      return `${serialized.slice(0, 500)}...`
+    } catch {
+      return '[Unserializable return value]'
+    }
+  }
+
+  private buildStrategySnapshot(hook: RegisteredHook): HookExecutionStrategySnapshot {
+    return {
+      hookId: hook.id,
+      hookName: hook.name,
+      event: hook.event,
+      priority: hook.priority ?? 100,
+      enabled: hook.enabled ?? true
+    }
+  }
+
+  private async persistExecutionAudit(record: HookExecutionAuditRecord): Promise<void> {
+    try {
+      await AuditLogService.getInstance().log({
+        action: 'hook:execution',
+        entityType: 'hook',
+        entityId: record.strategy.hookId,
+        sessionId: record.execution.sessionId,
+        success: record.result.success,
+        errorMsg: record.result.error,
+        metadata: {
+          timestamp: record.timestamp.toISOString(),
+          strategy: record.strategy,
+          execution: record.execution,
+          result: record.result
+        }
+      })
+    } catch (error) {
+      logger.warn('Failed to persist hook execution audit log:', error)
+    }
+  }
+
+  private pushExecutionAudit(
+    hook: RegisteredHook,
+    execution: HookExecutionContextSnapshot,
+    result: HookExecutionOutcome
+  ): void {
+    const record: HookExecutionAuditRecord = {
+      id: randomUUID(),
+      timestamp: new Date(),
+      strategy: this.buildStrategySnapshot(hook),
+      execution,
+      result
+    }
+
+    this.executionAudits.unshift(record)
+
+    if (this.executionAudits.length > this.maxExecutionAudits) {
+      this.executionAudits.length = this.maxExecutionAudits
+    }
+
+    this.eventEmitter.emit('execution-audit-appended', record)
+    void this.persistExecutionAudit(record)
+  }
+
+  onExecutionAuditAppended(listener: (record: HookExecutionAuditRecord) => void): () => void {
+    this.eventEmitter.on('execution-audit-appended', listener)
+    return () => {
+      this.eventEmitter.off('execution-audit-appended', listener)
+    }
+  }
+
+  getRecentExecutionAudits(limit = 50): HookExecutionAuditRecord[] {
+    if (!Number.isFinite(limit) || limit <= 0) {
+      return []
+    }
+
+    return this.executionAudits.slice(0, Math.floor(limit))
+  }
+
+  private async emitEvent<TPayload, TExtra extends object = Record<string, never>>(
+    event: HookEventType,
+    payload: TPayload,
+    callbackFactory: (hook: RegisteredHook) => (payload: TPayload) => Promise<unknown>,
+    executionFactory: (payload: TPayload) => HookExecutionContextSnapshot,
+    onResult?: (result: unknown, state: TExtra) => void,
+    initialExtra?: TExtra
+  ): Promise<EventEmitResult & TExtra> {
+    const hooks = this.getByEvent(event)
+    const hookResults: HookExecutionResult[] = []
+    const extra = (initialExtra ?? ({} as TExtra)) as TExtra
+
+    for (const hook of hooks) {
+      const circuit = this.isCircuitOpen(hook)
+      if (circuit.open) {
+        const circuitOpenUntil = circuit.openUntil ? new Date(circuit.openUntil) : undefined
+        const errorMessage = circuitOpenUntil
+          ? `Hook "${hook.id}" skipped because circuit is open until ${circuitOpenUntil.toISOString()}`
+          : `Hook "${hook.id}" skipped because circuit is open`
+
+        hookResults.push({
+          hookId: hook.id,
+          success: false,
+          duration: 0,
+          status: 'circuit_open',
+          degraded: true,
+          error: errorMessage,
+          circuitOpenUntil
+        })
+
+        this.pushExecutionAudit(hook, executionFactory(payload), {
+          success: false,
+          duration: 0,
+          status: 'circuit_open',
+          degraded: true,
+          error: errorMessage,
+          circuitOpenUntil
+        })
+        continue
+      }
+
+      const startTime = Date.now()
+      try {
+        const callback = callbackFactory(hook)
+        const result = await this.withTimeout(callback(payload), hook.id)
+
+        hook.executionCount++
+        hook.lastExecutedAt = new Date()
+        this.markHookSuccess(hook)
+
+        if (onResult) {
+          onResult(result, extra)
+        }
+
+        const duration = Date.now() - startTime
+        hookResults.push({
+          hookId: hook.id,
+          success: true,
+          duration,
+          status: 'success',
+          degraded: false,
+          returnValue: result
+        })
+
+        this.pushExecutionAudit(hook, executionFactory(payload), {
+          success: true,
+          duration,
+          status: 'success',
+          degraded: false,
+          returnValuePreview: this.createReturnValuePreview(result)
+        })
+      } catch (error) {
+        hook.errorCount++
+        const duration = Date.now() - startTime
+        const status = this.resolveExecutionStatus(error)
+        const errorMessage = this.toErrorMessage(error)
+        const circuitOpenUntil = this.markHookFailure(hook)
+
+        hookResults.push({
+          hookId: hook.id,
+          success: false,
+          duration,
+          status,
+          degraded: true,
+          error: errorMessage,
+          circuitOpenUntil
+        })
+
+        this.pushExecutionAudit(hook, executionFactory(payload), {
+          success: false,
+          duration,
+          status,
+          degraded: true,
+          error: errorMessage,
+          circuitOpenUntil
+        })
+      }
+    }
+
+
+    return {
+      event,
+      hookResults,
+      ...extra
+    }
+  }
+
   /**
    * 触发 onToolStart 事件
    */
@@ -161,45 +474,37 @@ export class HookManager {
     context: HookContext,
     input: ToolExecutionInput
   ): Promise<EventEmitResult & { shouldSkip?: boolean; modifiedInput?: ToolExecutionInput }> {
-    const hooks = this.getByEvent('onToolStart')
-    const results: HookExecutionResult[] = []
-    let shouldSkip = false
-    let modifiedInput = { ...input }
+    const payload = { input: { ...input } }
 
-    for (const hook of hooks) {
-      const startTime = Date.now()
-      try {
+    return this.emitEvent(
+      'onToolStart',
+      payload,
+      hook => async current => {
         const callback = hook.callback as HookCallbackMap['onToolStart']
-        const result = await callback(context, modifiedInput)
-
-        hook.executionCount++
-        hook.lastExecutedAt = new Date()
-
-        if (result?.skip) {
-          shouldSkip = true
+        return callback(context, current.input)
+      },
+      current => ({
+        sessionId: context.sessionId,
+        workspaceDir: context.workspaceDir,
+        userId: context.userId,
+        tool: current.input.tool,
+        callId: current.input.callId
+      }),
+      (result, state) => {
+        const typed = result as { skip?: boolean; modified?: Partial<ToolExecutionInput> } | undefined
+        if (typed?.skip) {
+          state.shouldSkip = true
         }
-        if (result?.modified) {
-          modifiedInput = { ...modifiedInput, ...result.modified }
+        if (typed?.modified) {
+          state.modifiedInput = { ...(state.modifiedInput || input), ...typed.modified }
+          payload.input = state.modifiedInput
         }
-
-        results.push({
-          hookId: hook.id,
-          success: true,
-          duration: Date.now() - startTime,
-          returnValue: result
-        })
-      } catch (error) {
-        hook.errorCount++
-        results.push({
-          hookId: hook.id,
-          success: false,
-          duration: Date.now() - startTime,
-          error: error instanceof Error ? error.message : String(error)
-        })
+      },
+      {
+        shouldSkip: false,
+        modifiedInput: { ...input }
       }
-    }
-
-    return { event: 'onToolStart', hookResults: results, shouldSkip, modifiedInput }
+    )
   }
 
   /**
@@ -210,41 +515,36 @@ export class HookManager {
     input: ToolExecutionInput,
     output: ToolExecutionOutput
   ): Promise<EventEmitResult & { modifiedOutput?: ToolExecutionOutput }> {
-    const hooks = this.getByEvent('onToolEnd')
-    const results: HookExecutionResult[] = []
-    let modifiedOutput = { ...output }
-
-    for (const hook of hooks) {
-      const startTime = Date.now()
-      try {
-        const callback = hook.callback as HookCallbackMap['onToolEnd']
-        const result = await callback(context, input, modifiedOutput)
-
-        hook.executionCount++
-        hook.lastExecutedAt = new Date()
-
-        if (result?.modifiedOutput) {
-          modifiedOutput = { ...modifiedOutput, ...result.modifiedOutput }
-        }
-
-        results.push({
-          hookId: hook.id,
-          success: true,
-          duration: Date.now() - startTime,
-          returnValue: result
-        })
-      } catch (error) {
-        hook.errorCount++
-        results.push({
-          hookId: hook.id,
-          success: false,
-          duration: Date.now() - startTime,
-          error: error instanceof Error ? error.message : String(error)
-        })
-      }
+    const payload = {
+      input,
+      output: { ...output }
     }
 
-    return { event: 'onToolEnd', hookResults: results, modifiedOutput }
+    return this.emitEvent(
+      'onToolEnd',
+      payload,
+      hook => async current => {
+        const callback = hook.callback as HookCallbackMap['onToolEnd']
+        return callback(context, current.input, current.output)
+      },
+      current => ({
+        sessionId: context.sessionId,
+        workspaceDir: context.workspaceDir,
+        userId: context.userId,
+        tool: current.input.tool,
+        callId: current.input.callId
+      }),
+      (result, state) => {
+        const typed = result as { modifiedOutput?: Partial<ToolExecutionOutput> } | undefined
+        if (typed?.modifiedOutput) {
+          state.modifiedOutput = { ...(state.modifiedOutput || output), ...typed.modifiedOutput }
+          payload.output = state.modifiedOutput
+        }
+      },
+      {
+        modifiedOutput: { ...output }
+      }
+    )
   }
 
   /**
@@ -253,46 +553,55 @@ export class HookManager {
   async emitMessageCreate(
     context: HookContext,
     message: MessageInfo
-  ): Promise<EventEmitResult & { modifiedContent?: string; injections?: string[] }> {
-    const hooks = this.getByEvent('onMessageCreate')
-    const results: HookExecutionResult[] = []
-    let modifiedContent = message.content
-    const injections: string[] = []
-
-    for (const hook of hooks) {
-      const startTime = Date.now()
-      try {
-        const callback = hook.callback as HookCallbackMap['onMessageCreate']
-        const result = await callback(context, { ...message, content: modifiedContent })
-
-        hook.executionCount++
-        hook.lastExecutedAt = new Date()
-
-        if (result?.modifiedContent) {
-          modifiedContent = result.modifiedContent
-        }
-        if (result?.inject) {
-          injections.push(result.inject)
-        }
-
-        results.push({
-          hookId: hook.id,
-          success: true,
-          duration: Date.now() - startTime,
-          returnValue: result
-        })
-      } catch (error) {
-        hook.errorCount++
-        results.push({
-          hookId: hook.id,
-          success: false,
-          duration: Date.now() - startTime,
-          error: error instanceof Error ? error.message : String(error)
-        })
-      }
+  ): Promise<EventEmitResult & { modifiedContent?: string; injections?: MessageInjectionResult[] }> {
+    const payload = {
+      message: { ...message, content: message.content }
     }
 
-    return { event: 'onMessageCreate', hookResults: results, modifiedContent, injections }
+    return this.emitEvent(
+      'onMessageCreate',
+      payload,
+      hook => async current => {
+        const callback = hook.callback as HookCallbackMap['onMessageCreate']
+        return callback(context, current.message)
+      },
+      () => ({
+        sessionId: context.sessionId,
+        workspaceDir: context.workspaceDir,
+        userId: context.userId,
+        messageId: message.id,
+        messageRole: message.role
+      }),
+      (result, state) => {
+        const typed = result as
+          | { modifiedContent?: string; inject?: string | MessageInjectionResult }
+          | undefined
+        if (typed?.modifiedContent) {
+          state.modifiedContent = typed.modifiedContent
+          payload.message.content = typed.modifiedContent
+        }
+        if (typed?.inject) {
+          if (typeof typed.inject === 'string') {
+            state.injections?.push({
+              type: 'hook-injection',
+              source: 'unknown',
+              content: typed.inject
+            })
+          } else {
+            state.injections?.push({
+              type: typed.inject.type || 'hook-injection',
+              source: typed.inject.source || 'unknown',
+              priority: typed.inject.priority,
+              content: typed.inject.content
+            })
+          }
+        }
+      },
+      {
+        modifiedContent: message.content,
+        injections: [] as MessageInjectionResult[]
+      }
+    )
   }
 
   /**
@@ -302,45 +611,35 @@ export class HookManager {
     context: HookContext,
     info: ContextOverflowInfo
   ): Promise<EventEmitResult & { action?: 'compact' | 'warn' | 'ignore'; injections?: string[] }> {
-    const hooks = this.getByEvent('onContextOverflow')
-    const results: HookExecutionResult[] = []
-    let action: 'compact' | 'warn' | 'ignore' | undefined
-    const injections: string[] = []
-
-    for (const hook of hooks) {
-      const startTime = Date.now()
-      try {
+    return this.emitEvent(
+      'onContextOverflow',
+      info,
+      hook => async current => {
         const callback = hook.callback as HookCallbackMap['onContextOverflow']
-        const result = await callback(context, info)
-
-        hook.executionCount++
-        hook.lastExecutedAt = new Date()
-
-        if (result?.action) {
-          action = result.action
+        return callback(context, current)
+      },
+      current => ({
+        sessionId: context.sessionId,
+        workspaceDir: context.workspaceDir,
+        userId: context.userId,
+        currentTokens: current.currentTokens,
+        maxTokens: current.maxTokens,
+        usagePercentage: current.usagePercentage
+      }),
+      (result, state) => {
+        const typed = result as { action?: 'compact' | 'warn' | 'ignore'; injection?: string } | undefined
+        if (typed?.action) {
+          state.action = typed.action
         }
-        if (result?.injection) {
-          injections.push(result.injection)
+        if (typed?.injection) {
+          state.injections?.push(typed.injection)
         }
-
-        results.push({
-          hookId: hook.id,
-          success: true,
-          duration: Date.now() - startTime,
-          returnValue: result
-        })
-      } catch (error) {
-        hook.errorCount++
-        results.push({
-          hookId: hook.id,
-          success: false,
-          duration: Date.now() - startTime,
-          error: error instanceof Error ? error.message : String(error)
-        })
+      },
+      {
+        action: undefined as 'compact' | 'warn' | 'ignore' | undefined,
+        injections: [] as string[]
       }
-    }
-
-    return { event: 'onContextOverflow', hookResults: results, action, injections }
+    )
   }
 
   /**
@@ -348,47 +647,58 @@ export class HookManager {
    */
   async emitEditError(
     context: HookContext,
-    error: EditErrorInfo
+    editError: EditErrorInfo
   ): Promise<EventEmitResult & { recovery?: string; injections?: string[] }> {
-    const hooks = this.getByEvent('onEditError')
-    const results: HookExecutionResult[] = []
-    let recovery: string | undefined
-    const injections: string[] = []
-
-    for (const hook of hooks) {
-      const startTime = Date.now()
-      try {
+    return this.emitEvent(
+      'onEditError',
+      editError,
+      hook => async current => {
         const callback = hook.callback as HookCallbackMap['onEditError']
-        const result = await callback(context, error)
-
-        hook.executionCount++
-        hook.lastExecutedAt = new Date()
-
-        if (result?.recovery) {
-          recovery = result.recovery
+        return callback(context, current)
+      },
+      current => ({
+        sessionId: context.sessionId,
+        workspaceDir: context.workspaceDir,
+        userId: context.userId,
+        filePath: current.filePath,
+        errorType: current.errorType
+      }),
+      (result, state) => {
+        const typed = result as { recovery?: string; injection?: string } | undefined
+        if (typed?.recovery) {
+          state.recovery = typed.recovery
         }
-        if (result?.injection) {
-          injections.push(result.injection)
+        if (typed?.injection) {
+          state.injections?.push(typed.injection)
         }
-
-        results.push({
-          hookId: hook.id,
-          success: true,
-          duration: Date.now() - startTime,
-          returnValue: result
-        })
-      } catch (error) {
-        hook.errorCount++
-        results.push({
-          hookId: hook.id,
-          success: false,
-          duration: Date.now() - startTime,
-          error: error instanceof Error ? error.message : String(error)
-        })
+      },
+      {
+        recovery: undefined as string | undefined,
+        injections: [] as string[]
       }
-    }
+    )
+  }
 
-    return { event: 'onEditError', hookResults: results, recovery, injections }
+  /**
+   * 触发 onTaskLifecycle 事件
+   */
+  async emitTaskLifecycle(context: HookContext, info: TaskLifecycleInfo): Promise<EventEmitResult> {
+    return this.emitEvent(
+      'onTaskLifecycle',
+      info,
+      hook => async current => {
+        const callback = hook.callback as HookCallbackMap['onTaskLifecycle']
+        return callback(context, current)
+      },
+      current => ({
+        sessionId: context.sessionId,
+        workspaceDir: context.workspaceDir,
+        userId: context.userId,
+        workflowId: current.workflowId,
+        taskId: current.taskId,
+        taskStatus: current.status
+      })
+    )
   }
 
   /**
@@ -408,7 +718,8 @@ export class HookManager {
       onToolEnd: 0,
       onMessageCreate: 0,
       onContextOverflow: 0,
-      onEditError: 0
+      onEditError: 0,
+      onTaskLifecycle: 0
     }
 
     let enabled = 0
@@ -442,11 +753,14 @@ export class HookManager {
    */
   clear(): void {
     this.hooks.clear()
+    this.executionAudits = []
+    this.runtimeStates.clear()
     for (const set of this.eventHooks.values()) {
       set.clear()
     }
   }
 }
+
 
 // 导出单例实例
 export const hookManager = HookManager.getInstance()

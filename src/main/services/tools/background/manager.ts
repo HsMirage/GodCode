@@ -10,7 +10,6 @@
 
 import { ChildProcess, spawn } from 'child_process'
 import os from 'os'
-import path from 'path'
 import { EventEmitter } from 'events'
 import { processCleanupService } from '../../process-cleanup.service'
 import { logger } from '../../../../shared/logger'

@@ -1,3 +1,6 @@
+import fs from 'fs'
+import path from 'path'
+import { SETTING_KEYS } from '@/main/services/settings/schema-registry'
 import { IpcMainInvokeEvent } from 'electron'
 import { Prisma, type Message as PrismaMessage } from '@prisma/client'
 import type { Message as DomainMessage } from '@/types/domain'
@@ -8,8 +11,8 @@ import { costTracker } from '@/main/services/llm/cost-tracker'
 import { LoggerService } from '@/main/services/logger'
 import { SmartRouter } from '@/main/services/router/smart-router'
 import { extractRouteOutput } from './route-output'
-import { SecureStorageService } from '@/main/services/secure-storage.service'
 import { taskContinuationService } from '@/main/services/task-continuation.service'
+import { ModelSelectionService } from '@/main/services/llm/model-selection.service'
 import { backgroundTaskManager, cancelTasks } from '@/main/services/tools/background'
 import { toolExecutionService } from '@/main/services/tools/tool-execution.service'
 import { getAgentPromptByCode } from '@/main/services/delegate/agents'
@@ -17,14 +20,23 @@ import { resolveScopedRuntimeToolNames } from '@/main/services/delegate/tool-all
 import { llmRetryNotifier } from '@/main/services/llm/retry-notifier'
 import { EVENT_CHANNELS } from '@/shared/ipc-channels'
 import { PRIMARY_AGENTS, CATEGORY_AGENTS } from '@/shared/agent-definitions'
+import { hookManager } from '@/main/services/hooks'
 import { BoulderStateService } from '@/main/services/boulder-state.service'
-import path from 'node:path'
-import fs from 'node:fs'
+import { skillRegistry } from '@/main/services/skills/registry'
+import type { Skill, SkillCommandInvocation, SkillRuntimePayload } from '@/main/services/skills/types'
+import {
+  buildContextInjectionPayload,
+  type ContextInjectionCandidate,
+  type ContextInjectionSummary,
+  type ContextInjectionType
+} from '@/main/services/hooks/context-injection-policy'
+
 
 type MessageSendInput = {
   sessionId: string
   content: string
   agentCode?: string
+  skillCommand?: SkillCommandInvocation
 }
 
 type MessageAbortInput = {
@@ -51,8 +63,131 @@ const toLLMConfig = (config: unknown): LLMConfig => {
   return config as LLMConfig
 }
 
+function parseSettingInt(value: string | null | undefined, min: number, max: number): number | null {
+  if (!value) return null
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return null
+  return Math.max(min, Math.min(max, Math.trunc(parsed)))
+}
+
 function resolveAgentRuntimeToolNames(agentCode: string): string[] | undefined {
   return resolveScopedRuntimeToolNames({ subagentType: agentCode })
+}
+
+function mergeScopedToolNames(
+  agentScopedToolNames?: string[],
+  skillScopedToolNames?: string[]
+): string[] | undefined {
+  if (agentScopedToolNames === undefined && skillScopedToolNames === undefined) {
+    return undefined
+  }
+
+  if (agentScopedToolNames === undefined) {
+    return skillScopedToolNames
+  }
+
+  if (skillScopedToolNames === undefined) {
+    return agentScopedToolNames
+  }
+
+  const skillScopedSet = new Set(skillScopedToolNames)
+  return agentScopedToolNames.filter(toolName => skillScopedSet.has(toolName))
+}
+
+function normalizeSkillModelOverride(skillRuntimePayload?: SkillRuntimePayload): string | undefined {
+  const model = skillRuntimePayload?.model?.trim()
+  return model || undefined
+}
+
+function normalizeContextInjectionType(type: unknown): ContextInjectionType {
+  if (
+    type === 'workspace-rules' ||
+    type === 'continuation-reminder' ||
+    type === 'hook-injection' ||
+    type === 'context-overflow-warning' ||
+    type === 'edit-recovery' ||
+    type === 'custom'
+  ) {
+    return type
+  }
+  return 'custom'
+}
+
+function normalizeSkillCommand(command: string): string {
+  const trimmed = command.trim()
+  if (!trimmed) return ''
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+}
+
+function resolveSkillByInvocation(invocation: SkillCommandInvocation): Skill | undefined {
+  const normalizedCommand = normalizeSkillCommand(invocation.command)
+  if (!normalizedCommand) return undefined
+
+  const commandResolved = skillRegistry.findByCommand(normalizedCommand)
+  if (commandResolved) return commandResolved
+
+  const directId = invocation.command.trim()
+  if (directId) {
+    return skillRegistry.get(directId)
+  }
+
+  return undefined
+}
+
+function renderSkillTemplate(template: string, input: string): string {
+  const placeholderPattern = /\{\{\s*input\s*\}\}/gi
+  if (placeholderPattern.test(template)) {
+    return template.replace(placeholderPattern, input)
+  }
+
+  if (!input) return template
+  return `${template}\n\n${input}`
+}
+
+function assembleSkillRuntimePayload(
+  invocation: SkillCommandInvocation,
+  fallbackContent: string
+): {
+  runtimePayload: SkillRuntimePayload
+  resolvedContent: string
+} {
+  const skill = resolveSkillByInvocation(invocation)
+  if (!skill) {
+    throw new Error(`未找到可执行的技能命令: ${invocation.command}`)
+  }
+
+  if (skill.enabled === false) {
+    throw new Error(`技能已被禁用: ${skill.id}`)
+  }
+
+  if (!skill.template?.trim()) {
+    throw new Error(`技能缺少模板字段 template: ${skill.id}`)
+  }
+
+  const normalizedCommand = normalizeSkillCommand(invocation.command)
+  const normalizedInput = typeof invocation.input === 'string' ? invocation.input.trim() : ''
+  const fallbackInput = fallbackContent.trim()
+  const effectiveInput = normalizedInput || fallbackInput
+
+  const runtimePayload: SkillRuntimePayload = {
+    id: skill.id,
+    name: skill.name,
+    command: normalizedCommand,
+    rawInput: invocation.rawInput?.trim() || null,
+    input: effectiveInput || null,
+    renderedPrompt: renderSkillTemplate(skill.template, effectiveInput),
+    template: skill.template,
+    allowedTools: Array.isArray(skill.allowedTools) ? skill.allowedTools : null,
+    agent: skill.agent?.trim() || null,
+    model: skill.model?.trim() || null,
+    subtask: typeof skill.subtask === 'boolean' ? skill.subtask : null,
+    mcpConfig: skill.mcpConfig || null
+  }
+
+  return {
+    runtimePayload,
+    resolvedContent: runtimePayload.renderedPrompt
+  }
 }
 
 function extractPlanPath(content: string): string | undefined {
@@ -77,7 +212,17 @@ export async function handleMessageSend(
   const prisma = DatabaseService.getInstance().getClient()
   const logger = LoggerService.getInstance().getLogger()
   const router = new SmartRouter()
-  const normalizedAgentCode = input.agentCode?.trim()
+
+  let resolvedContent = input.content
+  let skillRuntimePayload: SkillRuntimePayload | undefined
+
+  if (input.skillCommand) {
+    const skillAssembly = assembleSkillRuntimePayload(input.skillCommand, input.content)
+    resolvedContent = skillAssembly.resolvedContent
+    skillRuntimePayload = skillAssembly.runtimePayload
+  }
+
+  const normalizedAgentCode = (skillRuntimePayload?.agent ?? input.agentCode)?.trim()
   const agentCode =
     normalizedAgentCode && normalizedAgentCode.toLowerCase() !== 'default'
       ? normalizedAgentCode
@@ -86,13 +231,24 @@ export async function handleMessageSend(
     ? [...PRIMARY_AGENTS, ...CATEGORY_AGENTS].find(def => def.code === agentCode)
     : undefined
 
+  const userMessageMetadata: Record<string, unknown> = {}
+  if (agentCode) {
+    userMessageMetadata.agentCode = agentCode
+  }
+  if (skillRuntimePayload) {
+    userMessageMetadata.skill = skillRuntimePayload
+  }
+
   const userMessage = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const created = await tx.message.create({
       data: {
         sessionId: input.sessionId,
         role: 'user',
-        content: input.content,
-        metadata: agentCode ? { agentCode } : {}
+        content: resolvedContent,
+        metadata:
+          Object.keys(userMessageMetadata).length > 0
+            ? (userMessageMetadata as Prisma.InputJsonValue)
+            : undefined
       }
     })
 
@@ -110,11 +266,17 @@ export async function handleMessageSend(
     ? selectedDefinition.defaultStrategy === 'direct-enhanced'
       ? 'direct'
       : selectedDefinition.defaultStrategy
-    : router.analyzeTask(input.content, { agentCode })
+    : router.analyzeTask(resolvedContent, { agentCode })
   let assistantContent = ''
   let assistantMetadata: Record<string, unknown> | undefined = agentCode
     ? { agentCode }
     : undefined
+  if (skillRuntimePayload) {
+    assistantMetadata = {
+      ...(assistantMetadata || {}),
+      skill: skillRuntimePayload
+    }
+  }
 
   // Get workspace directory from session's space
   const session = await prisma.session.findUnique({
@@ -127,7 +289,8 @@ export async function handleMessageSend(
     spaceId: session?.space?.id ?? null,
     workspaceDir,
     agentCode,
-    strategy
+    strategy,
+    skillId: skillRuntimePayload?.id
   })
   const streamAbortController = new AbortController()
   let streamDoneSent = false
@@ -160,57 +323,19 @@ export async function handleMessageSend(
 
   try {
     if (strategy === 'direct') {
-      // Enforced resolution order:
-      // 1) agent-specific bound model (Settings -> Agent Bindings)
-      // 2) system global default model (Settings -> defaultModelId)
-      // 3) otherwise: block with a clear error
-      const bindingPromise = agentCode
-        ? prisma.agentBinding.findUnique({
-            where: { agentCode },
-            select: { enabled: true, modelId: true, temperature: true }
-          })
-        : Promise.resolve(null)
-
-      const [binding, defaultModelSetting] = await Promise.all([
-        bindingPromise,
-        prisma.systemSetting.findUnique({ where: { key: 'defaultModelId' } })
+      const skillModelOverride = normalizeSkillModelOverride(skillRuntimePayload)
+      const [modelSelection, maxToolIterationsSetting] = await Promise.all([
+        ModelSelectionService.getInstance().resolveModelSelection({
+          overrideModelSpec: skillModelOverride,
+          agentCode,
+          temperatureFallback: undefined
+        }),
+        prisma.systemSetting.findUnique({ where: { key: SETTING_KEYS.MAX_TOOL_ITERATIONS } })
       ])
 
-      let resolvedModelId: string | null = null
-      if (binding?.enabled && binding.modelId) {
-        resolvedModelId = binding.modelId
-      } else {
-        resolvedModelId = defaultModelSetting?.value?.trim() || null
-      }
-
-      const resolvedModel = resolvedModelId
-        ? await prisma.model.findUnique({
-            where: { id: resolvedModelId },
-            include: { apiKeyRef: true }
-          })
-        : null
-
-      if (!resolvedModel) {
-        throw new Error(
-          '未配置可用模型。请在“设置 -> 模型”中设置系统默认模型，或在“设置 -> Agent 绑定”中为当前 Agent 绑定模型。'
-        )
-      }
-
-      // Credentials resolution (new relation first, legacy fallback)
-      const encryptedApiKey = resolvedModel.apiKeyRef?.encryptedKey ?? resolvedModel.apiKey
-      const resolvedBaseURL = resolvedModel.apiKeyRef?.baseURL ?? resolvedModel.baseURL ?? undefined
-
-      if (!encryptedApiKey) {
-        throw new Error('当前模型缺少 API Key。请在“设置 -> API Keys / 模型”中补全后重试。')
-      }
-
-      // Decrypt API key before use
-      const secureStorage = SecureStorageService.getInstance()
-      const decryptedApiKey = secureStorage.decrypt(encryptedApiKey)
-
-      const adapter = createLLMAdapter(resolvedModel.provider, {
-        apiKey: decryptedApiKey,
-        baseURL: resolvedBaseURL
+      const adapter = createLLMAdapter(modelSelection.provider, {
+        apiKey: modelSelection.apiKey,
+        baseURL: modelSelection.baseURL
       })
 
       const history = await prisma.message.findMany({
@@ -224,17 +349,31 @@ export async function handleMessageSend(
         scopedAgentToolNames !== undefined
           ? toolExecutionService.getToolDefinitions(scopedAgentToolNames).map(tool => tool.name)
           : undefined
-      const agentToolNames = effectiveScopedAgentToolNames ?? []
+      const skillScopedToolNames = skillRuntimePayload?.allowedTools
+        ? resolveScopedRuntimeToolNames({ availableTools: skillRuntimePayload.allowedTools })
+        : undefined
+      const effectiveSkillScopedToolNames =
+        skillScopedToolNames !== undefined
+          ? toolExecutionService.getToolDefinitions(skillScopedToolNames).map(tool => tool.name)
+          : undefined
+      const effectiveRuntimeToolNames = mergeScopedToolNames(
+        effectiveScopedAgentToolNames,
+        effectiveSkillScopedToolNames
+      )
+      const agentToolNames = effectiveRuntimeToolNames ?? []
       const agentToolDefinitions =
-        effectiveScopedAgentToolNames !== undefined
+        effectiveRuntimeToolNames !== undefined
           ? toolExecutionService.getToolDefinitions(agentToolNames)
           : undefined
 
-      const baseConfig = toLLMConfig(resolvedModel.config)
+      const baseConfig = toLLMConfig(modelSelection.config)
+      const maxToolIterations =
+        parseSettingInt(maxToolIterationsSetting?.value, 1, 1000) ?? baseConfig.maxToolIterations
       const llmConfig = {
         ...baseConfig,
-        model: resolvedModel.modelName,
-        temperature: binding?.temperature ?? baseConfig.temperature,
+        model: modelSelection.model,
+        temperature: modelSelection.temperature ?? baseConfig.temperature,
+        maxToolIterations,
         workspaceDir,
         sessionId: input.sessionId,
         agentCode,
@@ -244,17 +383,24 @@ export async function handleMessageSend(
 
       logger.info('[handleMessageSend] Resolved chat model', {
         agentCode,
-        resolvedModelId,
-        provider: resolvedModel.provider,
-        modelName: resolvedModel.modelName,
-        baseURL: resolvedBaseURL,
+        modelId: modelSelection.modelId,
+        provider: modelSelection.provider,
+        modelName: modelSelection.model,
+        baseURL: modelSelection.baseURL,
         temperature: llmConfig.temperature,
+        maxToolIterations: llmConfig.maxToolIterations,
         hasAgentSystemPrompt: Boolean(agentSystemPrompt),
-        agentToolCount: agentToolNames.length
+        agentToolCount: agentToolNames.length,
+        modelSource: modelSelection.source,
+        protocol: modelSelection.protocol,
+        skillId: skillRuntimePayload?.id,
+        skillModelOverride: skillModelOverride ?? null,
+        skillToolScopeCount: effectiveSkillScopedToolNames?.length ?? null,
+        executionPath: 'direct'
       })
 
       const domainMessages = toDomainMessages(history)
-      const messagesForLLM: DomainMessage[] = agentSystemPrompt
+      const initialMessagesForHook: DomainMessage[] = agentSystemPrompt
         ? [
             {
               id: `system:${input.sessionId}:${agentCode}`,
@@ -268,9 +414,62 @@ export async function handleMessageSend(
           ]
         : domainMessages
 
-      await toolExecutionService.withAllowedTools(effectiveScopedAgentToolNames, async () => {
+      const messageCreateResult = await hookManager.emitMessageCreate(
+        {
+          sessionId: input.sessionId,
+          workspaceDir,
+          userId: undefined
+        },
+        {
+          id: `system:runtime:${input.sessionId}`,
+          role: 'system',
+          content: agentSystemPrompt ?? ''
+        }
+      )
+
+      const injectionCandidates: ContextInjectionCandidate[] = (messageCreateResult.injections ?? [])
+        .map(injection => {
+          const content = injection.content?.trim()
+          if (!content) {
+            return null
+          }
+          return {
+            type: normalizeContextInjectionType(injection.type),
+            source: injection.source || 'hook-manager',
+            content,
+            priority: injection.priority
+          } satisfies ContextInjectionCandidate
+        })
+        .filter((candidate): candidate is ContextInjectionCandidate => candidate !== null)
+
+      let contextInjectionSummary: ContextInjectionSummary | undefined
+      let messagesForLLM: DomainMessage[] = initialMessagesForHook
+
+      if (injectionCandidates.length > 0) {
+        const injectionPayload = buildContextInjectionPayload(injectionCandidates)
+        contextInjectionSummary = injectionPayload.summary
+
+        if (injectionPayload.injectedContent.trim()) {
+          const injectedSystemMessage: DomainMessage = {
+            id: `system:injection:${input.sessionId}:${Date.now()}`,
+            sessionId: input.sessionId,
+            role: 'system',
+            content: injectionPayload.injectedContent,
+            createdAt: new Date(),
+            metadata: {
+              source: 'hook-context-injection',
+              summary: injectionPayload.summary
+            }
+          }
+
+          messagesForLLM = agentSystemPrompt
+            ? [messagesForLLM[0], injectedSystemMessage, ...messagesForLLM.slice(1)]
+            : [injectedSystemMessage, ...messagesForLLM]
+        }
+      }
+
+      await toolExecutionService.withAllowedTools(effectiveRuntimeToolNames, async () => {
         for await (const chunk of adapter.streamMessage(messagesForLLM, llmConfig)) {
-          // Accumulate text content
           if (chunk.content) {
             assistantContent += chunk.content
           }
@@ -279,7 +478,6 @@ export async function handleMessageSend(
             streamDoneSent = true
           }
 
-          // Send stream chunk event with full type information
           event.sender.send(EVENT_CHANNELS.MESSAGE_STREAM_CHUNK, {
             sessionId: input.sessionId,
             content: chunk.content,
@@ -289,7 +487,6 @@ export async function handleMessageSend(
             error: chunk.error
           })
 
-          // If there's an error, also send to the error channel
           if (chunk.type === 'error' && chunk.error) {
             event.sender.send(EVENT_CHANNELS.MESSAGE_STREAM_ERROR, {
               sessionId: input.sessionId,
@@ -300,17 +497,41 @@ export async function handleMessageSend(
         }
       })
 
-      costTracker.trackUsage(resolvedModel.provider, 0, 0)
-    } else {
-      const routeContext = {
-        sessionId: input.sessionId,
-        prompt: input.content,
-        agentCode,
-        abortSignal: streamAbortController.signal
+      if (contextInjectionSummary && contextInjectionSummary.totalCount > 0) {
+        assistantMetadata = {
+          ...(assistantMetadata || {}),
+          contextInjectionSummary
+        }
       }
-      const routeResult = await router.route(input.content, {
-        ...routeContext,
-        forceWorkforce: selectedDefinition?.defaultStrategy === 'workforce'
+
+      assistantMetadata = {
+        ...(assistantMetadata || {}),
+        routeStrategy: strategy,
+        executionPath: 'direct',
+        model: modelSelection.model,
+        modelSource: modelSelection.source
+      }
+
+      costTracker.trackUsage(modelSelection.provider, 0, 0)
+    } else {
+      const skillScopedToolNames = skillRuntimePayload?.allowedTools
+        ? resolveScopedRuntimeToolNames({ availableTools: skillRuntimePayload.allowedTools })
+        : undefined
+      const effectiveSkillScopedToolNames =
+        skillScopedToolNames !== undefined
+          ? toolExecutionService.getToolDefinitions(skillScopedToolNames).map(tool => tool.name)
+          : undefined
+      const skillModelOverride = normalizeSkillModelOverride(skillRuntimePayload)
+
+      const routeResult = await router.route(resolvedContent, {
+        sessionId: input.sessionId,
+        prompt: resolvedContent,
+        agentCode,
+        abortSignal: streamAbortController.signal,
+        forceWorkforce: selectedDefinition?.defaultStrategy === 'workforce',
+        availableTools: effectiveSkillScopedToolNames,
+        overrideModelSpec: skillModelOverride,
+        skillRuntime: skillRuntimePayload
       })
 
       if (streamAbortController.signal.aborted) {
@@ -327,6 +548,16 @@ export async function handleMessageSend(
       }
 
       assistantContent = extractRouteOutput(routeResult)
+
+      const executionPath =
+        'workflowId' in routeResult ? 'workforce' : 'taskId' in routeResult ? 'delegate' : 'direct'
+      assistantMetadata = {
+        ...(assistantMetadata || {}),
+        routeStrategy: strategy,
+        executionPath,
+        skillModelOverride: skillModelOverride ?? null,
+        skillToolScopeCount: effectiveSkillScopedToolNames?.length ?? null
+      }
 
       if (!streamWasAborted) {
         event.sender.send(EVENT_CHANNELS.MESSAGE_STREAM_CHUNK, {

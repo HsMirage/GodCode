@@ -1,8 +1,6 @@
-import { useEffect } from 'react'
 import { Dialog } from '@headlessui/react'
-import { X, Download, RotateCcw, AlertTriangle } from 'lucide-react'
+import { X, Download, RotateCcw } from 'lucide-react'
 import { useUpdaterStore } from '../../store/updater.store'
-import { cn } from '../../utils'
 
 export function UpdateDialog() {
   const { status, updateInfo, progress, setStatus } = useUpdaterStore()

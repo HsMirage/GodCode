@@ -1,5 +1,9 @@
 import { IpcMainInvokeEvent } from 'electron'
-import { taskContinuationService, Todo } from '../../services/task-continuation.service'
+import {
+  taskContinuationService,
+  Todo,
+  type TaskContinuationConfig
+} from '../../services/task-continuation.service'
 
 export async function handleTaskContinuationGetStatus(
   _event: IpcMainInvokeEvent,
@@ -23,4 +27,22 @@ export async function handleTaskContinuationSetTodos(
 ) {
   taskContinuationService.setTodos(input.sessionId, input.todos)
   return { success: true }
+}
+
+export async function handleTaskContinuationGetConfig(_event: IpcMainInvokeEvent) {
+  return {
+    success: true,
+    data: taskContinuationService.getConfig()
+  }
+}
+
+export async function handleTaskContinuationSetConfig(
+  _event: IpcMainInvokeEvent,
+  config: Partial<TaskContinuationConfig>
+) {
+  const next = taskContinuationService.setConfig(config)
+  return {
+    success: true,
+    data: next
+  }
 }

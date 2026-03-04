@@ -34,8 +34,13 @@ export const modelCreateSchema = z.object({
       timeoutMs: z.number().int().min(1000).max(10 * 60 * 1000).optional(),
       maxRetries: z.number().int().min(0).max(10).optional(),
       baseDelayMs: z.number().int().min(0).max(60000).optional(),
-      maxToolIterations: z.number().int().min(1).max(50).optional(),
+      maxToolIterations: z.number().int().min(1).max(1000).optional(),
       defaultMaxTokens: z.number().int().min(1).max(200000).optional(),
+      contextWindow: z.number().int().min(1).max(10_000_000).optional(),
+      maxOutputTokens: z.number().int().min(1).max(200000).optional(),
+      concurrencyLimit: z.number().int().min(1).max(1000).optional(),
+      capabilities: z.array(z.string().min(1)).max(32).optional(),
+      apiProtocol: z.enum(['chat/completions', 'responses']).optional(),
       thinkingMode: z.boolean().optional()
     })
     .passthrough()
@@ -61,8 +66,13 @@ export const modelUpdateSchema = z.object({
         timeoutMs: z.number().int().min(1000).max(10 * 60 * 1000).optional(),
         maxRetries: z.number().int().min(0).max(10).optional(),
         baseDelayMs: z.number().int().min(0).max(60000).optional(),
-        maxToolIterations: z.number().int().min(1).max(50).optional(),
+        maxToolIterations: z.number().int().min(1).max(1000).optional(),
         defaultMaxTokens: z.number().int().min(1).max(200000).optional(),
+        contextWindow: z.number().int().min(1).max(10_000_000).optional(),
+        maxOutputTokens: z.number().int().min(1).max(200000).optional(),
+        concurrencyLimit: z.number().int().min(1).max(1000).optional(),
+        capabilities: z.array(z.string().min(1)).max(32).optional(),
+        apiProtocol: z.enum(['chat/completions', 'responses']).optional(),
         thinkingMode: z.boolean().optional()
       })
       .passthrough()

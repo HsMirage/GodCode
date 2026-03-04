@@ -272,11 +272,9 @@ class PostgresManager {
         stdio: ['ignore', 'pipe', 'pipe']
       })
 
-      let stdout = ''
       let stderr = ''
 
       proc.stdout?.on('data', data => {
-        stdout += data.toString()
         // Log stdout line by line with prefix
         data
           .toString()
@@ -387,7 +385,9 @@ class PostgresManager {
       // Use 'exit' and also resolve early when we see the success output.
       const startTimeoutMs = 60_000
       let settled = false
-      let startTimer: NodeJS.Timeout | undefined
+      const startTimer: NodeJS.Timeout = setTimeout(() => {
+        settleReject(new Error(`pg_ctl start timed out after ${startTimeoutMs}ms`))
+      }, startTimeoutMs)
 
       const settleResolve = () => {
         if (settled) return
@@ -404,10 +404,6 @@ class PostgresManager {
         if (startTimer) clearTimeout(startTimer)
         reject(err)
       }
-
-      startTimer = setTimeout(() => {
-        settleReject(new Error(`pg_ctl start timed out after ${startTimeoutMs}ms`))
-      }, startTimeoutMs)
 
       let stdout = ''
       let stderr = ''
@@ -495,7 +491,7 @@ class PostgresManager {
   async stop(): Promise<void> {
     console.log('[PostgresManager] Stopping PostgreSQL...')
 
-    return new Promise((resolve, reject) => {
+    return new Promise(resolve => {
       const args = ['-D', this.dbPath, 'stop', '-m', 'fast']
       const binPath = path.dirname(this.binaries.pg_ctl)
       const nativePath = path.dirname(binPath)
@@ -529,6 +525,24 @@ interface EmbeddedPostgresInstance {
 let embeddedPostgres: EmbeddedPostgresInstance | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let prismaClient: any = null
+
+const OPENAI_PROTOCOL_REQUIRED_PROVIDERS = new Set([
+  'openai',
+  'openai-compatible',
+  'openai-compat',
+  'custom',
+  'azure-openai',
+  'azure'
+])
+
+function readApiProtocol(config: unknown): string {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return ''
+  }
+
+  const value = (config as Record<string, unknown>).apiProtocol
+  return typeof value === 'string' ? value.trim() : ''
+}
 
 async function ensureBindingSchemaCompatibility(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -668,6 +682,53 @@ async function ensureBindingSchemaCompatibility(
       CREATE INDEX IF NOT EXISTS "SessionState_status_idx" ON "SessionState"("status")
     `)
   }
+
+  const models = await client.model.findMany({
+    select: {
+      id: true,
+      provider: true,
+      modelName: true,
+      config: true
+    }
+  })
+
+  let migratedCount = 0
+  for (const model of models as Array<{
+    id: string
+    provider: string
+    modelName: string
+    config: unknown
+  }>) {
+    const provider = model.provider.trim().toLowerCase()
+    if (!OPENAI_PROTOCOL_REQUIRED_PROVIDERS.has(provider)) {
+      continue
+    }
+
+    const protocol = readApiProtocol(model.config)
+    if (protocol === 'chat/completions' || protocol === 'responses') {
+      continue
+    }
+
+    const nextConfig =
+      model.config && typeof model.config === 'object' && !Array.isArray(model.config)
+        ? { ...(model.config as Record<string, unknown>) }
+        : {}
+    nextConfig.apiProtocol = 'responses'
+
+    await client.model.update({
+      where: { id: model.id },
+      data: { config: nextConfig }
+    })
+
+    migratedCount += 1
+    console.warn(
+      `[Database] Patched model protocol to responses: ${model.provider}/${model.modelName} (${model.id})`
+    )
+  }
+
+  if (migratedCount > 0) {
+    console.warn(`[Database] Model protocol migration complete: ${migratedCount} model(s) updated`)
+  }
 }
 
 async function tableExists(
@@ -740,15 +801,34 @@ function splitSqlStatements(sql: string): string[] {
   return out
 }
 
+function resolvePrismaMigrationsDir(): string {
+  const bundledAppPath = path.join(app.getAppPath(), 'prisma', 'migrations')
+  const resourcesPath = path.join(process.resourcesPath, 'prisma', 'migrations')
+  const devFromBundlePath = path.join(__dirname, '..', '..', 'prisma', 'migrations')
+  const cwdPath = path.join(process.cwd(), 'prisma', 'migrations')
+
+  const candidates = Array.from(new Set([bundledAppPath, resourcesPath, devFromBundlePath, cwdPath]))
+
+  for (const dir of candidates) {
+    if (fs.existsSync(dir)) return dir
+  }
+
+  throw new Error(
+    `Prisma migrations not found. Checked: ${candidates.join(', ')}. Cannot bootstrap schema.`
+  )
+}
+
 async function ensureBaseSchema(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   client: any
 ): Promise<void> {
-  const isTestEnv = process.env.NODE_ENV === 'test' || !!process.env.VITEST
-  if (isTestEnv) return
+  const isVitest = !!process.env.VITEST
+  const isNodeTest = process.env.NODE_ENV === 'test'
+  const isElectronE2E = process.env.CODEALL_E2E_TEST === '1'
+  if (isVitest || (isNodeTest && !isElectronE2E)) return
 
-  // On a fresh dev database, tables may not exist because we don't run Prisma migrations at runtime.
-  // In dev, we bootstrap the schema from prisma/migrations/**/migration.sql.
+  // On a fresh database, tables may not exist because we don't run Prisma migrations at runtime.
+  // Bootstrap schema from bundled/dev Prisma migration.sql files.
   const hasSpace = await tableExists(client, 'Space')
   const hasAgentBinding = await tableExists(client, 'AgentBinding')
   if (hasSpace && hasAgentBinding) return
@@ -760,10 +840,7 @@ async function ensureBaseSchema(
     )
   }
 
-  const migrationsDir = path.join(process.cwd(), 'prisma', 'migrations')
-  if (!fs.existsSync(migrationsDir)) {
-    throw new Error(`Prisma migrations not found at ${migrationsDir}. Cannot bootstrap schema.`)
-  }
+  const migrationsDir = resolvePrismaMigrationsDir()
 
   const dirs = fs
     .readdirSync(migrationsDir, { withFileTypes: true })
@@ -970,8 +1047,10 @@ export class DatabaseService {
     const databaseUrl = `postgresql://${credentials.user}:${credentials.password}@localhost:${credentials.port}/postgres`
     process.env.DATABASE_URL = databaseUrl
 
-    // Set Prisma query engine path for packaged app
-    if (app.isPackaged) {
+    // Set Prisma query engine path for packaged app.
+    // NOTE: Do NOT force Windows engine on non-Windows systems.
+    // Prisma can auto-resolve the correct engine from generated client files.
+    if (app.isPackaged && process.platform === 'win32') {
       const enginePath = path.join(
         process.resourcesPath,
         'prisma-client',

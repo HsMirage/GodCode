@@ -240,7 +240,7 @@ export class SessionStateRecoveryService {
   }
 
   async calculateProgress(
-    planName: string
+    _planName: string
   ): Promise<{ completed: number; total: number; percentage: string }> {
     const boulderService = BoulderStateService.getInstance()
     const state = await boulderService.getState()

@@ -29,7 +29,11 @@ const mocks = vi.hoisted(() => {
     },
     model: {
       findFirst: vi.fn(),
-      findMany: vi.fn()
+      findMany: vi.fn(),
+      findUnique: vi.fn()
+    },
+    systemSetting: {
+      findUnique: vi.fn()
     },
     $transaction: vi.fn((callback: any): any => callback(prisma))
   }
@@ -106,6 +110,8 @@ describe('Workforce Engine Integration', () => {
     mocks.prisma.task.findUnique.mockReset()
     mocks.prisma.model.findMany.mockReset()
     mocks.prisma.model.findFirst.mockReset()
+    mocks.prisma.model.findUnique.mockReset()
+    mocks.prisma.systemSetting.findUnique.mockReset()
     mocks.prisma.session.findFirst.mockReset()
     mocks.prisma.session.findUnique.mockReset()
     mocks.prisma.space.findFirst.mockReset()
@@ -135,6 +141,16 @@ describe('Workforce Engine Integration', () => {
         createdAt: new Date()
       }
     ])
+    mocks.prisma.systemSetting.findUnique.mockResolvedValue({ key: 'defaultModelId', value: 'model_123' })
+    mocks.prisma.model.findUnique.mockResolvedValue({
+      id: 'model_123',
+      provider: 'openai-compatible',
+      apiKey: 'test-key',
+      baseURL: null,
+      modelName: 'gpt-4o',
+      config: { apiProtocol: 'chat/completions' },
+      apiKeyRef: null
+    })
 
     mocks.bindingService.getCategoryModelConfig.mockImplementation(async (category: string) => {
       if (category === 'quick') {
@@ -256,6 +272,12 @@ describe('Workforce Engine Integration', () => {
       expect(subtasks[0].id).toBe('t1')
       expect(subtasks[1].dependencies).toContain('t1')
       expect(subtasks[2].dependencies).toContain('t2')
+      expect(mocks.prisma.systemSetting.findUnique).toHaveBeenCalledWith({
+        where: { key: 'defaultModelId' }
+      })
+      expect(mocks.prisma.model.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'model_123' } })
+      )
     })
 
     it('should handle decomposition failure with fallback', async () => {

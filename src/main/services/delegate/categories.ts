@@ -16,7 +16,6 @@ import { zhinv, cangjie, tianbing, guigu, maliang, guixu, tudi, dayu } from './p
 import type { CategoryPromptTemplate } from './prompts/types'
 
 export interface CategoryConfig {
-  model: string
   temperature: number
   promptTemplate?: CategoryPromptTemplate
 }
@@ -41,7 +40,6 @@ const CATEGORY_PROMPT_MAP: Record<string, CategoryPromptTemplate> = Object.fromE
 const categoriesRegistry = CATEGORY_DEFINITIONS.reduce(
   (acc, def) => {
     const config: CategoryConfig = {
-      model: def.defaultModel,
       temperature: def.defaultTemperature,
       promptTemplate: CATEGORY_PROMPT_MAP[def.code]
     }

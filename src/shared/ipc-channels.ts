@@ -34,6 +34,9 @@ export const INVOKE_CHANNELS = {
   MESSAGE_STREAM: 'message:stream',
   MESSAGE_ABORT: 'message:abort',
 
+  // Skill Operations
+  SKILL_COMMAND_ITEMS: 'skill:command-items',
+
   // Model Operations
   MODEL_CREATE: 'model:create',
   MODEL_LIST: 'model:list',
@@ -50,11 +53,14 @@ export const INVOKE_CHANNELS = {
   TASK_CONTINUATION_GET_STATUS: 'task-continuation:get-status',
   TASK_CONTINUATION_ABORT: 'task-continuation:abort',
   TASK_CONTINUATION_SET_TODOS: 'task-continuation:set-todos',
+  TASK_CONTINUATION_GET_CONFIG: 'task-continuation:get-config',
+  TASK_CONTINUATION_SET_CONFIG: 'task-continuation:set-config',
 
   // Background task center operations
   BACKGROUND_TASK_LIST: 'background-task:list',
   BACKGROUND_TASK_GET_OUTPUT: 'background-task:get-output',
   BACKGROUND_TASK_CANCEL: 'background-task:cancel',
+  BACKGROUND_TASK_STATS: 'background-task:stats',
 
   // Artifact Operations
   ARTIFACT_GET: 'artifact:get',
@@ -146,6 +152,8 @@ export const INVOKE_CHANNELS = {
 
   // Workflow Observability Operations
   WORKFLOW_OBSERVABILITY_GET: 'workflow-observability:get',
+  HOOK_GOVERNANCE_GET: 'hook-governance:get',
+  HOOK_GOVERNANCE_SET: 'hook-governance:set',
 
   // Enhanced Artifact Operations
   ARTIFACT_GET_DIFF: 'artifact:get-diff',
@@ -157,6 +165,8 @@ export const INVOKE_CHANNELS = {
   SETTING_GET: 'setting:get',
   SETTING_SET: 'setting:set',
   SETTING_GET_ALL: 'setting:get-all',
+  SETTING_GET_RESOLVED: 'setting:get-resolved',
+  SETTING_SCHEMA_LIST: 'setting:schema-list',
 
   // Session Continuity Operations
   SESSION_STATE_GET: 'session-state:get',
@@ -184,6 +194,7 @@ export const EVENT_CHANNELS = {
   BACKGROUND_TASK_OUTPUT: 'background-task:output',
   BACKGROUND_TASK_COMPLETED: 'background-task:completed',
   BACKGROUND_TASK_CANCELLED: 'background-task:cancelled',
+  HOOK_AUDIT_APPENDED: 'hook-audit:appended',
 
   // Agent Run Events
   AGENT_RUN_UPDATE: 'agent-run:update',

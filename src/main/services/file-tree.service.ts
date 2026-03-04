@@ -75,7 +75,7 @@ export class FileTreeService extends EventEmitter {
     }
 
     const watcher = watch(rootDir, {
-      ignored: /(^|[\/\\])\../,
+      ignored: /(^|[/\\])\../,
       persistent: true,
       ignoreInitial: true,
       depth: 10

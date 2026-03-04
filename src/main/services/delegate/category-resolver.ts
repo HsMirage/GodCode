@@ -24,7 +24,6 @@ export interface ResolvedAgent {
   name: string
   chineseName: string
   description: string
-  defaultModel: string
   tools: string[]
   metadata: AgentPromptMetadata
 }
@@ -37,7 +36,6 @@ export interface ResolvedCategory {
   name: string
   chineseName: string
   description: string
-  defaultModel: string
   defaultTemperature: number
 }
 
@@ -75,7 +73,6 @@ export class CategoryResolver {
       name: def.name,
       chineseName: def.chineseName,
       description: def.description,
-      defaultModel: def.defaultModel,
       tools: def.tools,
       metadata: {
         ...defaultMeta,
@@ -140,7 +137,6 @@ export class CategoryResolver {
       name: def.name,
       chineseName: def.chineseName,
       description: def.description,
-      defaultModel: def.defaultModel,
       defaultTemperature: def.defaultTemperature
     }
   }

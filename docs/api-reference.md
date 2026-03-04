@@ -1281,6 +1281,28 @@ Artifact 创建事件。
 | `session-recovery:list` | 无 | 列出可恢复会话 |
 | `session-recovery:resume-prompt` | `sessionId` | 获取恢复提示 |
 
+### 恢复场景矩阵（Task Continuation + Session Recovery）
+
+> 目的：定义自动续跑与崩溃恢复的核心场景，作为后续 P1-2-B 测试补齐基线。
+
+| 场景ID | 触发条件 | 前置状态 | 预期行为 | 观测点（代码证据） | 当前测试覆盖 |
+|---|---|---|---|---|---|
+| R1 未完成 Todo 自动续跑判定 | 请求续跑状态 | 存在未完成 todo，且不在 abort 抑制窗口 | `shouldContinue = true`，返回 continuation prompt | `src/main/services/task-continuation.service.ts:98-125` | 已覆盖（unit）`tests/unit/services/task-continuation.test.ts:89-119` |
+| R2 用户主动中止后的抑制 | 用户执行 abort 后立即请求续跑状态 | `markAborted` 已记录，未超过 `abortWindowMs` | `shouldContinue = false`，不触发续跑 | `src/main/services/task-continuation.service.ts:142-160`；`src/main/ipc/handlers/message.ts:454` | 已覆盖（unit）`tests/unit/services/task-continuation.test.ts:144-171` |
+| R3 抑制窗口过期后恢复资格 | abort 后等待超过窗口再次请求续跑状态 | `markAborted` 已记录，已超过 `abortWindowMs` | 重新允许续跑判定（可返回 true） | `src/main/services/task-continuation.service.ts:142-160` | 已覆盖（unit）`tests/unit/services/task-continuation.test.ts:161-171` |
+| R4 Boulder 会话白名单隔离 | 在非授权 session 请求续跑状态 | boulder `session_ids` 不包含当前 session | `shouldContinue = false`，提示中不注入该会话续跑路径 | `src/main/services/task-continuation.service.ts:234-241` | 已覆盖（unit）`tests/unit/services/task-continuation.test.ts:275-316` |
+| R5 active plan 提示优先 | 生成续跑提示 | boulder 存在 `active_plan` | prompt 使用 active plan 路径替代默认提示 | `src/main/services/task-continuation.service.ts:243-267` | 已覆盖（unit）`tests/unit/services/task-continuation.test.ts:111-119` |
+| R6 自动续跑倒计时去重 | 连续触发续跑倒计时 | 两次触发间隔小于 `idleDedupWindowMs` | 第二次触发被去重，避免重复自动续跑 | `src/main/services/task-continuation.service.ts:162-205` | 已覆盖（unit）`tests/unit/services/task-continuation.test.ts:224-238` |
+| R7 跨重启崩溃检测与候选恢复 | 应用启动时检测 crash marker | 会话存在未完成工作 + marker 命中 | 将会话标记为 crashed，可进入恢复计划流程 | `src/main/services/session-continuity.service.ts:486-576`；`src/main/index.ts:113-123` | 部分覆盖（workflow/integration）`tests/unit/services/workforce/workforce-engine.test.ts:2076-2149`；`tests/integration/workforce-engine.test.ts:591-717` |
+| R8 恢复计划执行分支 | 执行恢复计划 | 恢复模式开/关，且存在可恢复/不可恢复任务 | 返回 success / unrecoverable / disabled 分支结果 | `src/main/services/session-continuity.service.ts:581-633` | 部分覆盖（workflow/unit）`tests/unit/services/workforce/workforce-engine.test.ts:2195-2234` |
+| R9 UI 手动恢复链路 | 用户点击“继续任务” | UI 已拿到 `continuationPrompt` | Renderer 调用 `message:send`，把 continuationPrompt 作为用户消息发送 | `src/renderer/src/components/session/SessionResumeIndicator.tsx:120-130` | 已覆盖（E2E）`tests/e2e/session-workflow.spec.ts:161-307`；已覆盖（renderer unit）`tests/unit/renderer/session-resume-indicator.test.tsx:8-46` |
+
+#### 覆盖结论
+
+- 核心判定逻辑（R1-R6）已有单测覆盖，可作为稳定基线。
+- 跨重启与恢复执行（R7-R8）已有工作流级覆盖，但缺少面向 `SessionContinuityService` 行为边界的专门测试。
+- UI 手动恢复链路（R9）已由 renderer unit + E2E 覆盖，从 IPC 状态到消息发送链路具备自动化验证。
+
 ---
 
 ## 数据库 Schema

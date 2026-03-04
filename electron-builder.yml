@@ -62,6 +62,7 @@ win:
   signingHashAlgorithms:
     - sha256
   sign: null # Skip code signing for development builds
+  signAndEditExecutable: false
   signDlls: false
 
 mac:

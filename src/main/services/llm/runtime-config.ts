@@ -50,9 +50,9 @@ export function resolveLLMRuntimeConfig(config: LLMConfig): ResolvedLLMRuntimeCo
     10 * 60 * 1000
   )
   const maxToolIterations = clampInt(
-    toInt(config.maxToolIterations) ?? envInt('CODEALL_LLM_MAX_TOOL_ITERATIONS') ?? 10,
+    toInt(config.maxToolIterations) ?? envInt('CODEALL_LLM_MAX_TOOL_ITERATIONS') ?? 100,
     1,
-    50
+    1000
   )
   const defaultMaxTokens = clampInt(
     toInt(config.defaultMaxTokens) ?? envInt('CODEALL_LLM_DEFAULT_MAX_TOKENS') ?? 8192,

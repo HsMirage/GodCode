@@ -372,7 +372,7 @@ export const fillFormTool: BrowserTool = {
       elements: {
         type: 'array',
         description: 'Elements from snapshot to fill out.',
-        // @ts-ignore
+        // Schema array items shape is runtime-validated
         items: {
           type: 'object',
           properties: {

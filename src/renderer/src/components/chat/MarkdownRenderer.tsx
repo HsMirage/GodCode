@@ -197,7 +197,7 @@ function parseInline(text: string): React.ReactNode[] {
     }
 
     // Find next special character
-    const nextSpecial = remaining.search(/[`*\[]/)
+    const nextSpecial = remaining.search(/[`*[]/)
     if (nextSpecial === -1) {
       elements.push(remaining)
       break

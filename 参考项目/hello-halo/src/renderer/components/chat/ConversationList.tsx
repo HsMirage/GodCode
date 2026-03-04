@@ -1,50 +1,77 @@
 /**
  * Conversation List - Resizable sidebar for multiple conversations
- * Supports drag-to-resize, inline title editing, and conversation management
+ * Self-contained: subscribes to its own data from stores, no data props from parent.
+ * Supports drag-to-resize, inline title editing, and conversation management.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import type { ConversationMeta } from '../../types'
+import { useState, useEffect, useCallback, useRef, memo } from 'react'
+import { createPortal } from 'react-dom'
+import { Virtuoso } from 'react-virtuoso'
 import { MessageSquare, Plus } from '../icons/ToolIcons'
+import { ChevronLeft, EllipsisVertical, Pin, Pencil, Trash2 } from 'lucide-react'
 import { useTranslation } from '../../i18n'
-import { useConversationTaskStatus } from '../../stores/chat.store'
+import { useChatStore, useAllConversationStatuses } from '../../stores/chat.store'
+import { useSpaceStore } from '../../stores/space.store'
+import { useAppStore } from '../../stores/app.store'
+import { api } from '../../api'
 import { TaskStatusDot } from '../pulse/TaskStatusDot'
 import { PulseSidebarSection } from '../pulse/PulseSidebarSection'
+import { AutomationBadge } from '../apps/AutomationBadge'
+import type { ConversationMeta } from '../../types'
 
 // Width constraints (in pixels)
 const MIN_WIDTH = 140
-const MAX_WIDTH = 320
-const DEFAULT_WIDTH = 192 // w-48 = 12rem = 192px
+const MAX_WIDTH = 360
+const DEFAULT_WIDTH = 260
+const clampWidth = (v: number) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, v))
 
 interface ConversationListProps {
-  conversations: ConversationMeta[]
-  currentConversationId?: string
-  onSelect: (id: string) => void
-  onNew: () => void
-  onDelete?: (id: string) => void
-  onRename?: (id: string, newTitle: string) => void
-  onStar?: (id: string, starred: boolean) => void
-  /** Whether to show the Pulse sidebar section (Form B) at the top */
-  showPulse?: boolean
+  onClose?: () => void
+  /** Whether the sidebar is currently visible (used to skip heavy Pulse section when hidden) */
+  visible?: boolean
 }
 
-export function ConversationList({
-  conversations,
-  currentConversationId,
-  onSelect,
-  onNew,
-  onDelete,
-  onRename,
-  onStar,
-  showPulse = false
+export const ConversationList = memo(function ConversationList({
+  onClose,
+  visible = true,
 }: ConversationListProps) {
   const { t } = useTranslation()
-  const [width, setWidth] = useState(DEFAULT_WIDTH)
+
+  // Self-subscribe to data from stores (precise selectors)
+  const conversations = useChatStore(state => {
+    const spaceState = state.spaceStates.get(state.currentSpaceId ?? '')
+    return spaceState?.conversations ?? []
+  })
+  const currentConversationId = useChatStore(state => {
+    const spaceState = state.spaceStates.get(state.currentSpaceId ?? '')
+    return spaceState?.currentConversationId ?? undefined
+  })
+  const layoutConfig = useAppStore(state => state.config?.layout)
+
+  // Single batch subscription for all conversation statuses (replaces N individual hooks)
+  const conversationStatuses = useAllConversationStatuses()
+
+  // Width state - initialized from persisted config
+  const initialWidth = layoutConfig?.sidebarWidth
+  const [width, setWidth] = useState(initialWidth != null ? clampWidth(initialWidth) : DEFAULT_WIDTH)
   const [isDragging, setIsDragging] = useState(false)
+  const widthRef = useRef(width)
+
+  // Sync width when config arrives asynchronously
+  useEffect(() => {
+    if (initialWidth !== undefined && !isDragging) {
+      const clamped = clampWidth(initialWidth)
+      setWidth(clamped)
+      widthRef.current = clamped
+    }
+  }, [initialWidth, isDragging])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const editInputRef = useRef<HTMLInputElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   // Handle drag resize
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -61,10 +88,19 @@ export function ConversationList({
       const newWidth = e.clientX - containerRect.left
       const clampedWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, newWidth))
       setWidth(clampedWidth)
+      widthRef.current = clampedWidth
     }
 
     const handleMouseUp = () => {
       setIsDragging(false)
+      // Persist width to in-memory store + backend config
+      const currentConfig = useAppStore.getState().config
+      if (currentConfig) {
+        useAppStore.getState().updateConfig({ layout: { ...currentConfig.layout, sidebarWidth: widthRef.current } })
+      }
+      api.setConfig({ layout: { sidebarWidth: widthRef.current } }).catch(err =>
+        console.error('[ConversationList] Failed to persist sidebar width:', err)
+      )
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -83,6 +119,25 @@ export function ConversationList({
       editInputRef.current.select()
     }
   }, [editingId])
+
+  // Close dropdown menu on outside click
+  useEffect(() => {
+    if (!menuOpenId) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpenId(null)
+        setMenuPosition(null)
+      }
+    }
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [menuOpenId])
+
+  // Reset menu state when conversations change (e.g. space switch)
+  useEffect(() => {
+    setMenuOpenId(null)
+    setMenuPosition(null)
+  }, [conversations])
 
   // Format date
   const formatDate = (dateStr: string) => {
@@ -106,8 +161,11 @@ export function ConversationList({
 
   // Save edited title
   const handleSaveEdit = () => {
-    if (editingId && editingTitle.trim() && onRename) {
-      onRename(editingId, editingTitle.trim())
+    if (editingId && editingTitle.trim()) {
+      const spaceId = useSpaceStore.getState().currentSpace?.id
+      if (spaceId) {
+        useChatStore.getState().renameConversation(spaceId, editingId, editingTitle.trim())
+      }
     }
     setEditingId(null)
     setEditingTitle('')
@@ -130,122 +188,141 @@ export function ConversationList({
     }
   }
 
+  // Render a single conversation item (used by Virtuoso)
+  const renderConversationItem = useCallback((conversation: ConversationMeta) => (
+    <div
+      onClick={() => editingId !== conversation.id && useChatStore.getState().selectConversation(conversation.id)}
+      className={`w-full px-3 py-2 text-left hover:bg-secondary/50 transition-colors cursor-pointer group relative ${
+        conversation.id === currentConversationId ? 'bg-primary/10 border-l-2 border-primary' : ''
+      }`}
+    >
+      {/* Edit mode */}
+      {editingId === conversation.id ? (
+        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <input
+            ref={editInputRef}
+            type="text"
+            value={editingTitle}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            onKeyDown={handleEditKeyDown}
+            onBlur={handleSaveEdit}
+            className="flex-1 text-sm bg-input border border-border rounded px-2 py-1 focus:outline-none focus:border-primary min-w-0"
+            placeholder={t('Conversation title...')}
+          />
+          <button
+            onClick={handleSaveEdit}
+            className="p-1 hover:bg-primary/20 text-primary rounded transition-colors flex-shrink-0"
+            title={t('Save')}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-2 relative">
+            <MessageSquare className="w-4 h-4 text-blue-500 flex-shrink-0" />
+            <span className="text-sm truncate flex-1">
+              {conversation.title}
+            </span>
+            {/* Absolutely positioned so idle placeholder doesn't steal title space */}
+            <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none">
+              <TaskStatusDot status={conversationStatuses.get(conversation.id) ?? 'idle'} size="sm" />
+            </div>
+            {/* More button (on hover) - absolutely positioned to not take layout space */}
+            <div className="absolute -right-1 top-[calc(50%+1px)] -translate-y-1/2 hidden group-hover:block">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (menuOpenId === conversation.id) {
+                    setMenuOpenId(null)
+                    setMenuPosition(null)
+                  } else {
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                    const MENU_HEIGHT_ESTIMATE = 120
+                    const spaceBelow = window.innerHeight - rect.bottom - 4
+                    const top = spaceBelow >= MENU_HEIGHT_ESTIMATE
+                      ? rect.bottom + 4
+                      : Math.max(4, rect.top - MENU_HEIGHT_ESTIMATE - 4)
+                    setMenuPosition({ top, left: rect.right })
+                    setMenuOpenId(conversation.id)
+                  }
+                }}
+                className="px-1.5 py-1 rounded transition-colors bg-secondary text-foreground/80 hover:text-foreground hover:bg-secondary"
+                title={t('More')}
+              >
+                <EllipsisVertical className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {/* Keep menu open even when not hovering */}
+            {menuOpenId === conversation.id && (
+              <div className="absolute -right-1 top-[calc(50%+1px)] -translate-y-1/2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setMenuOpenId(null)
+                    setMenuPosition(null)
+                  }}
+                  className="px-1.5 py-1 rounded bg-secondary text-foreground"
+                  title={t('More')}
+                >
+                  <EllipsisVertical className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            {formatDate(conversation.updatedAt)}
+          </p>
+        </>
+      )}
+    </div>
+  ), [editingId, editingTitle, currentConversationId, conversationStatuses, menuOpenId, t])
+
   return (
+    <>
     <div
       ref={containerRef}
       className="border-r border-border flex flex-col bg-card/50 relative"
       style={{ width, transition: isDragging ? 'none' : 'width 0.2s ease' }}
     >
       {/* Header */}
-      <div className="p-3 border-b border-border">
+      <div className="p-3 border-b border-border flex items-center justify-between">
         <span className="text-sm font-medium text-muted-foreground">{t('Conversations')}</span>
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="relative p-1 hover:bg-secondary rounded-md transition-colors text-muted-foreground hover:text-foreground before:content-[''] before:absolute before:-inset-2"
+            title={t('Close sidebar')}
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
-      {/* Pulse section - Form B: global tasks at top of sidebar */}
-      {showPulse && <PulseSidebarSection />}
+      {/* Automation apps status badge — quick jump to AppsPage */}
+      <AutomationBadge />
 
-      {/* Conversation list */}
-      <div className="flex-1 overflow-auto py-2">
-        {conversations.map((conversation) => (
-          <div
-            key={conversation.id}
-            onClick={() => editingId !== conversation.id && onSelect(conversation.id)}
-            className={`w-full px-3 py-2 text-left hover:bg-secondary/50 transition-colors cursor-pointer group ${
-              conversation.id === currentConversationId ? 'bg-primary/10 border-l-2 border-primary' : ''
-            }`}
-          >
-            {/* Edit mode */}
-            {editingId === conversation.id ? (
-              <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                <input
-                  ref={editInputRef}
-                  type="text"
-                  value={editingTitle}
-                  onChange={(e) => setEditingTitle(e.target.value)}
-                  onKeyDown={handleEditKeyDown}
-                  onBlur={handleSaveEdit}
-                  className="flex-1 text-sm bg-input border border-border rounded px-2 py-1 focus:outline-none focus:border-primary min-w-0"
-                  placeholder={t('Conversation title...')}
-                />
-                <button
-                  onClick={handleSaveEdit}
-                  className="p-1 hover:bg-primary/20 text-primary rounded transition-colors flex-shrink-0"
-                  title={t('Save')}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-blue-500 flex-shrink-0" />
-                  <span className="text-sm truncate flex-1">
-                    {conversation.title.slice(0, 20)}
-                    {conversation.title.length > 20 && '...'}
-                  </span>
-                  <ConversationStatusDot conversationId={conversation.id} />
-                  {/* Action buttons (on hover) */}
-                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">
-                    {onStar && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onStar(conversation.id, !conversation.starred)
-                        }}
-                        className={`p-1 rounded transition-colors ${
-                          conversation.starred
-                            ? 'text-amber-400'
-                            : 'text-muted-foreground/30 hover:text-amber-400'
-                        }`}
-                        title={conversation.starred ? t('Unstar') : t('Star')}
-                      >
-                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill={conversation.starred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                        </svg>
-                      </button>
-                    )}
-                    {onRename && (
-                      <button
-                        onClick={(e) => handleStartEdit(e, conversation)}
-                        className="p-1 hover:bg-primary/20 text-muted-foreground hover:text-primary rounded transition-colors"
-                        title={t('Edit title')}
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </button>
-                    )}
-                    {onDelete && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onDelete(conversation.id)
-                        }}
-                        className="p-1 hover:bg-destructive/20 text-muted-foreground hover:text-destructive rounded transition-colors"
-                        title={t('Delete conversation')}
-                      >
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {formatDate(conversation.updatedAt)}
-                </p>
-              </>
-            )}
-          </div>
-        ))}
+      {/* Pinned section - pinned conversations at top of sidebar (skip when hidden to avoid pulse selector cost) */}
+      {visible && <PulseSidebarSection />}
+
+      {/* Conversation list - virtualized for performance with large lists */}
+      <div className="flex-1 overflow-hidden">
+        <Virtuoso
+          data={conversations}
+          overscan={200}
+          itemContent={(_index, conversation) => renderConversationItem(conversation)}
+        />
       </div>
 
       {/* New conversation button */}
       <div className="p-2 border-t border-border">
         <button
-          onClick={onNew}
+          onClick={() => {
+            const spaceId = useSpaceStore.getState().currentSpace?.id
+            if (spaceId) useChatStore.getState().createConversation(spaceId)
+          }}
           className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-primary hover:bg-primary/10 rounded-lg transition-colors"
         >
           <Plus className="w-4 h-4" />
@@ -262,11 +339,58 @@ export function ConversationList({
         title={t('Drag to resize width')}
       />
     </div>
-  )
-}
 
-/** Extracted sub-component so useConversationTaskStatus hook is called per conversation */
-function ConversationStatusDot({ conversationId }: { conversationId: string }) {
-  const status = useConversationTaskStatus(conversationId)
-  return <TaskStatusDot status={status} size="sm" />
-}
+    {/* Dropdown menu — Portal to document.body, fully outside flex layout */}
+    {menuOpenId && menuPosition && (() => {
+      const conv = conversations.find(c => c.id === menuOpenId)
+      if (!conv) return null
+      return createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[9999] min-w-[140px] bg-popover border border-border rounded-lg shadow-lg py-1"
+          style={{ top: menuPosition.top, left: menuPosition.left, transform: 'translateX(-100%)' }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              const spaceId = useSpaceStore.getState().currentSpace?.id
+              if (spaceId) useChatStore.getState().toggleStarConversation(spaceId, conv.id, !conv.starred)
+              setMenuOpenId(null)
+              setMenuPosition(null)
+            }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-secondary transition-colors"
+          >
+            <Pin className={`w-3.5 h-3.5 ${conv.starred ? 'text-primary' : ''}`} />
+            <span>{conv.starred ? t('Unpin') : t('Pin')}</span>
+          </button>
+          <button
+            onClick={(e) => {
+              handleStartEdit(e, conv)
+              setMenuOpenId(null)
+              setMenuPosition(null)
+            }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-secondary transition-colors"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+            <span>{t('Rename')}</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              const spaceId = useSpaceStore.getState().currentSpace?.id
+              if (spaceId) useChatStore.getState().deleteConversation(spaceId, conv.id)
+              setMenuOpenId(null)
+              setMenuPosition(null)
+            }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>{t('Delete')}</span>
+          </button>
+        </div>,
+        document.body
+      )
+    })()}
+    </>
+  )
+})

@@ -15,8 +15,7 @@ import type {
   AvailableAgent,
   AvailableTool,
   AvailableSkill,
-  AvailableCategory,
-  AgentPromptMetadata
+  AvailableCategory
 } from './category-constants'
 import { categorizeTools, truncateDescription } from './category-constants'
 import { CategoryResolver, type ResolvedAgent } from './category-resolver'

@@ -36,6 +36,7 @@ type SpaceResponse =
 interface ArtifactListProps {
   sessionId: string | null
   onViewDiff?: (artifactId: string, path: string) => void
+  onOpenFile?: (artifactId: string, path: string) => void
 }
 
 const changeTypeConfig = {
@@ -59,7 +60,7 @@ const changeTypeConfig = {
   }
 }
 
-export function ArtifactList({ sessionId, onViewDiff }: ArtifactListProps) {
+export function ArtifactList({ sessionId, onViewDiff, onOpenFile }: ArtifactListProps) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -250,6 +251,17 @@ export function ArtifactList({ sessionId, onViewDiff }: ArtifactListProps) {
 
                 {/* Actions */}
                 <div className="flex items-center justify-end gap-1 mt-2 pt-2 border-t border-slate-800/50">
+                  {onOpenFile && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenFile(artifact.id, artifact.path)}
+                      disabled={isLoading}
+                      className="flex items-center gap-1 px-2 py-1 rounded text-xs text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/10 transition-colors disabled:opacity-50"
+                    >
+                      <FileCode className="w-3.5 h-3.5" />
+                      打开
+                    </button>
+                  )}
                   {onViewDiff && (
                     <button
                       type="button"
@@ -258,7 +270,7 @@ export function ArtifactList({ sessionId, onViewDiff }: ArtifactListProps) {
                       className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition-colors disabled:opacity-50"
                     >
                       <Eye className="w-3.5 h-3.5" />
-                      查看
+                      Diff
                     </button>
                   )}
                   <button

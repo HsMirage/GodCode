@@ -78,6 +78,8 @@ export interface BaseSdkOptionsParams {
   stderrHandler?: (data: string) => void
   /** Optional MCP servers configuration */
   mcpServers?: Record<string, any> | null
+  /** Maximum tool call turns per message (from config) */
+  maxTurns?: number
 }
 
 // ============================================
@@ -88,8 +90,12 @@ export interface BaseSdkOptionsParams {
  * Resolve API credentials for SDK use.
  *
  * This function handles the complexity of different providers:
- * - Anthropic: Direct pass-through
+ * - Anthropic: Routed through OpenAI compat router (PROXY_ANTHROPIC=true)
  * - OpenAI/OAuth: Route through OpenAI compat router with encoded config
+ *
+ * Important: The model is encoded into the apiKey (ANTHROPIC_API_KEY env var)
+ * at session creation time. Model changes require session rebuild — they cannot
+ * be switched dynamically via setModel(). See config.service.ts getAiSourcesSignature().
  *
  * @param credentials - Raw API credentials from getApiCredentials()
  * @returns Resolved credentials ready for SDK
@@ -107,7 +113,7 @@ export async function resolveCredentialsForSdk(
   let anthropicBaseUrl = credentials.baseUrl
   let anthropicApiKey = credentials.apiKey
   let sdkModel = credentials.model || 'claude-opus-4-5-20251101'
-  const displayModel = credentials.model
+  const displayModel = credentials.displayModel || credentials.model
 
   // For non-Anthropic providers (openai or OAuth), use the OpenAI compat router
   if (credentials.provider !== 'anthropic') {
@@ -168,7 +174,7 @@ async function resolveAnthropicPassthrough(
     anthropicBaseUrl: router.baseUrl,
     anthropicApiKey,
     sdkModel: credentials.model || 'claude-opus-4-5-20251101',
-    displayModel: credentials.model
+    displayModel: credentials.displayModel || credentials.model
   }
 }
 
@@ -183,17 +189,19 @@ async function resolveAnthropicPassthrough(
  * Network and filesystem access are intentionally permissive - the goal is not strict
  * security isolation, but rather to enable SDK's internal optimizations.
  *
+ * Note: Do NOT add `network.allowedDomains` config unless you actually need domain filtering.
+ * Setting this array (even to ['*']) triggers SDK's network proxy infrastructure, which:
+ *   - Starts HTTP + SOCKS proxy servers (performance overhead)
+ *   - Routes all network requests through the proxy (added latency)
+ *   - Has a bug where '*' wildcard is not properly handled (causes false blocks)
+ *
  * Security note: SDK has built-in filesystem restrictions (e.g., protecting Halo config files)
  * that are separate from these sandbox settings.
  */
 const SANDBOX_CONFIG = {
-  enabled: true,
+  enabled: false,
   autoAllowBashIfSandboxed: true,
-  network: {
-    allowedDomains: ['*'],        // Allow all domains
-    allowAllUnixSockets: true,    // Allow Docker, databases, etc.
-    allowLocalBinding: true       // Allow starting local servers
-  }
+  // No network config → proxy servers won't start → no performance overhead
 }
 let sandboxSettingsWritten = false
 
@@ -216,8 +224,16 @@ function ensureSandboxSettings(configDir: string): void {
     if (existsSync(settingsPath)) {
       settings = JSON.parse(readFileSync(settingsPath, 'utf-8'))
     }
+    let dirty = false
     if (JSON.stringify(settings.sandbox) !== JSON.stringify(SANDBOX_CONFIG)) {
       settings.sandbox = SANDBOX_CONFIG
+      dirty = true
+    }
+    if (settings.skipWebFetchPreflight !== true) {
+      settings.skipWebFetchPreflight = true
+      dirty = true
+    }
+    if (dirty) {
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2))
     }
   } catch (err) {
@@ -290,6 +306,12 @@ export function buildSdkEnv(params: SdkEnvParams): Record<string, string | numbe
     // Performance: skip file snapshot I/O (Halo doesn't expose /rewind)
     CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING: '1',
 
+    // Windows: pass through Git Bash path (set by git-bash.service during startup)
+    // This was stripped by getCleanUserEnv() along with all CLAUDE_* vars
+    ...(process.env.CLAUDE_CODE_GIT_BASH_PATH
+      ? { CLAUDE_CODE_GIT_BASH_PATH: process.env.CLAUDE_CODE_GIT_BASH_PATH }
+      : {}),
+
     // debug flag to claude code sdk
     // DEBUG: '1',
     // DEBUG_CLAUDE_AGENT_SDK: '1',
@@ -345,7 +367,7 @@ export function buildBaseSdkOptions(params: BaseSdkOptionsParams): Record<string
     }),
     // Use Halo's custom system prompt instead of SDK's 'claude_code' preset
     systemPrompt: buildSystemPrompt({ workDir, modelInfo: credentials.displayModel }),
-    maxTurns: 50,
+    maxTurns: params.maxTurns ?? 50,
     allowedTools: [...DEFAULT_ALLOWED_TOOLS],
     // Enable Skills loading from $CLAUDE_CONFIG_DIR/skills/ and <workspace>/.claude/skills/
     settingSources: ['user', 'project'],

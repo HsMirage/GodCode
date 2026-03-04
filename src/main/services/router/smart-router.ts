@@ -1,5 +1,6 @@
 import { DelegateEngine, type DelegateTaskResult } from '../delegate'
 import { WorkforceEngine, type WorkflowResult } from '../workforce'
+import type { SkillRuntimePayload } from '../skills/types'
 
 export interface RouteContext {
   sessionId?: string
@@ -11,6 +12,12 @@ export interface RouteContext {
   forceWorkforce?: boolean
   /** Abort signal propagated from current UI request */
   abortSignal?: AbortSignal
+  /** Optional runtime tool allowlist override */
+  availableTools?: string[]
+  /** Optional runtime model override */
+  overrideModelSpec?: string
+  /** Optional resolved skill runtime payload for routing metadata */
+  skillRuntime?: SkillRuntimePayload
 }
 
 export interface DirectRouteResult {
@@ -101,12 +108,15 @@ export class SmartRouter {
         subagent_type: selectedSubagent,
         parentTaskId: context?.parentTaskId,
         abortSignal: context?.abortSignal,
+        availableTools: context?.availableTools,
+        model: context?.overrideModelSpec,
         metadata: {
           routing: {
             strategy: decision.strategy,
             complexityScore: decision.complexityScore,
             rationale: decision.rationale
-          }
+          },
+          skill: context?.skillRuntime || null
         }
       })
     }
@@ -116,6 +126,9 @@ export class SmartRouter {
         category: decision.category ?? 'dayu',
         agentCode: context?.agentCode,
         abortSignal: context?.abortSignal,
+        availableTools: context?.availableTools,
+        overrideModelSpec: context?.overrideModelSpec,
+        skillRuntime: context?.skillRuntime,
         routingContext: {
           strategy: decision.strategy,
           complexityScore: decision.complexityScore,

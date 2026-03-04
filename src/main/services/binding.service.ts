@@ -5,7 +5,6 @@
 
 import { DatabaseService } from './database'
 import { LoggerService } from './logger'
-import { SecureStorageService } from './secure-storage.service'
 import { SchemaVersionService } from './schema-version.service'
 import { AuditLogService } from './audit-log.service'
 import { Prisma } from '@prisma/client'
@@ -370,6 +369,8 @@ export class BindingService {
       throw new Error(`Unknown agent code: ${agentCode}`)
     }
 
+    await this.ensureAgentBinding(definition)
+
     const previous = await this.prisma.agentBinding.findUnique({
       where: { agentCode },
       include: { model: true }
@@ -545,6 +546,8 @@ export class BindingService {
       throw new Error(`Unknown category code: ${categoryCode}`)
     }
 
+    await this.ensureCategoryBinding(definition)
+
     const previous = await this.prisma.categoryBinding.findUnique({
       where: { categoryCode },
       include: { model: true }
@@ -602,164 +605,4 @@ export class BindingService {
     }
   }
 
-  // ========== Query Helpers ==========
-
-  private async getSystemDefaultModelConfig(): Promise<{
-    model: string
-    provider: string
-    apiKey?: string
-    baseURL?: string
-  } | null> {
-    const setting = await this.prisma.systemSetting.findUnique({
-      where: { key: 'defaultModelId' }
-    })
-
-    const modelId = setting?.value?.trim()
-    if (!modelId) return null
-
-    const model = await this.prisma.model.findUnique({
-      where: { id: modelId },
-      include: { apiKeyRef: true }
-    })
-
-    if (!model) return null
-
-    const secureStorage = SecureStorageService.getInstance()
-    const decryptedKey = model.apiKeyRef?.encryptedKey
-      ? secureStorage.decrypt(model.apiKeyRef.encryptedKey)
-      : model.apiKey
-        ? secureStorage.decrypt(model.apiKey)
-        : null
-
-    const apiKey = decryptedKey?.trim() || ''
-    if (!apiKey) return null
-
-    return {
-      model: model.modelName,
-      provider: model.provider,
-      apiKey,
-      baseURL: model.apiKeyRef?.baseURL ?? model.baseURL ?? undefined
-    }
-  }
-
-  /**
-   * 获取 Agent 的有效模型配置
-   * 优先使用绑定的模型，否则返回默认配置
-   */
-  async getAgentModelConfig(agentCode: string): Promise<{
-    model: string
-    provider: string
-    temperature: number
-    apiKey?: string
-    baseURL?: string
-  } | null> {
-    const binding = await this.prisma.agentBinding.findUnique({
-      where: { agentCode },
-      include: { model: { include: { apiKeyRef: true } } }
-    })
-
-    if (!binding || !binding.enabled) return null
-
-    if (binding.modelId && !binding.model) {
-      throw new Error(
-        `Agent「${agentCode}」已绑定模型但模型记录不存在。请到“设置 -> Agent 绑定”重新选择模型。`
-      )
-    }
-
-    if (binding.model) {
-      const secureStorage = SecureStorageService.getInstance()
-      const decryptedKey = binding.model.apiKeyRef?.encryptedKey
-        ? secureStorage.decrypt(binding.model.apiKeyRef.encryptedKey)
-        : binding.model.apiKey
-          ? secureStorage.decrypt(binding.model.apiKey)
-          : null
-
-      const apiKey = decryptedKey?.trim() || ''
-      if (!apiKey) {
-        throw new Error(
-          `Agent「${agentCode}」已绑定模型「${binding.model.modelName}」但缺少 API Key。` +
-            `请到“设置 -> API Keys/模型”补全凭据，或到“设置 -> Agent 绑定”切换模型。`
-        )
-      }
-
-      return {
-        model: binding.model.modelName,
-        provider: binding.model.provider,
-        temperature: binding.temperature,
-        apiKey,
-        baseURL: binding.model.apiKeyRef?.baseURL ?? binding.model.baseURL ?? undefined
-      }
-    }
-
-    // Only if the agent has no explicit model binding, fall back to system default.
-    const systemDefault = await this.getSystemDefaultModelConfig()
-    if (!systemDefault) return null
-    return {
-      model: systemDefault.model,
-      provider: systemDefault.provider,
-      temperature: binding.temperature,
-      apiKey: systemDefault.apiKey,
-      baseURL: systemDefault.baseURL
-    }
-  }
-
-  /**
-   * 获取 Category 的有效模型配置
-   */
-  async getCategoryModelConfig(categoryCode: string): Promise<{
-    model: string
-    provider: string
-    temperature: number
-    apiKey?: string
-    baseURL?: string
-  } | null> {
-    const binding = await this.prisma.categoryBinding.findUnique({
-      where: { categoryCode },
-      include: { model: { include: { apiKeyRef: true } } }
-    })
-
-    if (!binding || !binding.enabled) return null
-
-    if (binding.modelId && !binding.model) {
-      throw new Error(
-        `任务类别「${categoryCode}」已绑定模型但模型记录不存在。请到“设置 -> Agent 绑定 -> 任务类别”重新选择模型。`
-      )
-    }
-
-    if (binding.model) {
-      const secureStorage = SecureStorageService.getInstance()
-      const decryptedKey = binding.model.apiKeyRef?.encryptedKey
-        ? secureStorage.decrypt(binding.model.apiKeyRef.encryptedKey)
-        : binding.model.apiKey
-          ? secureStorage.decrypt(binding.model.apiKey)
-          : null
-
-      const apiKey = decryptedKey?.trim() || ''
-      if (!apiKey) {
-        throw new Error(
-          `任务类别「${categoryCode}」已绑定模型「${binding.model.modelName}」但缺少 API Key。` +
-            `请到“设置 -> API Keys/模型”补全凭据，或到“设置 -> Agent 绑定 -> 任务类别”切换模型。`
-        )
-      }
-
-      return {
-        model: binding.model.modelName,
-        provider: binding.model.provider,
-        temperature: binding.temperature,
-        apiKey,
-        baseURL: binding.model.apiKeyRef?.baseURL ?? binding.model.baseURL ?? undefined
-      }
-    }
-
-    // Only if the category has no explicit model binding, fall back to system default.
-    const systemDefault = await this.getSystemDefaultModelConfig()
-    if (!systemDefault) return null
-    return {
-      model: systemDefault.model,
-      provider: systemDefault.provider,
-      temperature: binding.temperature,
-      apiKey: systemDefault.apiKey,
-      baseURL: systemDefault.baseURL
-    }
-  }
 }

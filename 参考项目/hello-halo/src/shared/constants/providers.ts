@@ -71,6 +71,7 @@ export const BUILTIN_PROVIDERS: BuiltinProvider[] = [
     models: [
       { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
       { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5' },
+      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
       { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
       { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' }
     ],
@@ -157,7 +158,24 @@ export const BUILTIN_PROVIDERS: BuiltinProvider[] = [
   },
   {
     id: 'moonshot',
-    name: 'Moonshot AI (Kimi)',
+    name: 'Kimi (中国)',
+    authType: 'api-key',
+    apiUrl: 'https://api.moonshot.cn/v1',
+    modelsUrl: 'https://api.moonshot.cn/v1/models',
+    models: [
+      { id: 'kimi-k2.5', name: 'Kimi K2.5' },
+      { id: 'kimi-k2', name: 'Kimi K2' },
+      { id: 'moonshot-v1-128k', name: 'Moonshot V1 128K' }
+    ],
+    description: 'Moonshot AI Kimi models (China mainland)',
+    website: 'https://platform.moonshot.cn/',
+    region: 'cn',
+    icon: 'moon',
+    notes: 'Kimi K2.5 is the latest multimodal agentic model'
+  },
+  {
+    id: 'moonshot-global',
+    name: 'Kimi (Global)',
     authType: 'api-key',
     apiUrl: 'https://api.moonshot.ai/v1',
     modelsUrl: 'https://api.moonshot.ai/v1/models',
@@ -166,9 +184,9 @@ export const BUILTIN_PROVIDERS: BuiltinProvider[] = [
       { id: 'kimi-k2', name: 'Kimi K2' },
       { id: 'moonshot-v1-128k', name: 'Moonshot V1 128K' }
     ],
-    description: 'Moonshot AI Kimi models',
+    description: 'Moonshot AI Kimi models (Global)',
     website: 'https://platform.moonshot.ai/',
-    region: 'cn',
+    region: 'global',
     icon: 'moon',
     notes: 'Kimi K2.5 is the latest multimodal agentic model'
   },
@@ -191,7 +209,22 @@ export const BUILTIN_PROVIDERS: BuiltinProvider[] = [
   },
   {
     id: 'minimax',
-    name: 'MiniMax',
+    name: 'MiniMax (中国)',
+    authType: 'api-key',
+    apiUrl: 'https://api.minimaxi.com/v1',
+    modelsUrl: 'https://api.minimaxi.com/v1/models',
+    models: [
+      { id: 'MiniMax-M2.1', name: 'MiniMax M2.1' },
+      { id: 'MiniMax-M1', name: 'MiniMax M1' }
+    ],
+    description: 'MiniMax AI models (China mainland)',
+    website: 'https://www.minimaxi.com/',
+    region: 'cn',
+    icon: 'minimize'
+  },
+  {
+    id: 'minimax-global',
+    name: 'MiniMax (Global)',
     authType: 'api-key',
     apiUrl: 'https://api.minimax.io/v1',
     modelsUrl: 'https://api.minimax.io/v1/models',
@@ -199,11 +232,10 @@ export const BUILTIN_PROVIDERS: BuiltinProvider[] = [
       { id: 'MiniMax-M2.1', name: 'MiniMax M2.1' },
       { id: 'MiniMax-M1', name: 'MiniMax M1' }
     ],
-    description: 'MiniMax AI models',
-    website: 'https://www.minimaxi.com/',
-    region: 'cn',
-    icon: 'minimize',
-    notes: 'China mainland use api.minimaxi.com, global use api.minimax.io'
+    description: 'MiniMax AI models (Global)',
+    website: 'https://www.minimax.io/',
+    region: 'global',
+    icon: 'minimize'
   },
   {
     id: 'yi',
@@ -378,7 +410,6 @@ export const BUILTIN_PROVIDERS: BuiltinProvider[] = [
     region: 'global',
     icon: 'github'
   },
-
 ]
 
 // ============================================================================

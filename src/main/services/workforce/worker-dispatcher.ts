@@ -9,15 +9,7 @@ export type WorkerDispatchInput = Omit<
   prompt: string
 }
 
-const DEFAULT_CONCURRENCY_LIMITS: Record<string, number> = {
-  'openai-compatible::gpt-4o-mini': 1,
-  'anthropic::claude-3-5-sonnet-20240620': 2,
-  'openai-compatible': 2,
-  anthropic: 2,
-  dayu: 2,
-  zhinv: 2,
-  default: 3
-}
+const DEFAULT_CONCURRENCY_LIMIT = 3
 
 export class WorkforceWorkerDispatcher {
   private delegateEngine = new DelegateEngine()
@@ -28,21 +20,36 @@ export class WorkforceWorkerDispatcher {
     return concurrencyKey.trim() || 'default'
   }
 
-  private getConcurrencyLimit(key: string): number {
-    const trimmed = key.trim()
-    if (!trimmed) {
-      return DEFAULT_CONCURRENCY_LIMITS.default
-    }
-
-    return DEFAULT_CONCURRENCY_LIMITS[trimmed] ?? DEFAULT_CONCURRENCY_LIMITS.default
+  private parseMetadataConcurrencyLimit(metadata: Record<string, unknown> | undefined): number | null {
+    const rawValue = metadata?.concurrencyLimit
+    const parsed = Number.parseInt(String(rawValue ?? ''), 10)
+    if (!Number.isFinite(parsed)) return null
+    const normalized = Math.trunc(parsed)
+    if (normalized <= 0) return null
+    return normalized
   }
 
-  private async waitForConcurrencySlot(concurrencyKey: string): Promise<void> {
+  private getConcurrencyLimit(
+    _key: string,
+    metadata: Record<string, unknown> | undefined
+  ): number {
+    const metadataLimit = this.parseMetadataConcurrencyLimit(metadata)
+    if (metadataLimit !== null) {
+      return metadataLimit
+    }
+
+    return DEFAULT_CONCURRENCY_LIMIT
+  }
+
+  private async waitForConcurrencySlot(
+    concurrencyKey: string,
+    metadata: Record<string, unknown> | undefined
+  ): Promise<void> {
     const key = this.normalizeConcurrencyKey(concurrencyKey)
 
     for (;;) {
       const inFlight = WorkforceWorkerDispatcher.inFlightByConcurrencyKey.get(key) || 0
-      const limit = this.getConcurrencyLimit(key)
+      const limit = this.getConcurrencyLimit(key, metadata)
 
       if (inFlight < limit) {
         WorkforceWorkerDispatcher.inFlightByConcurrencyKey.set(key, inFlight + 1)
@@ -91,11 +98,12 @@ export class WorkforceWorkerDispatcher {
   }
 
   async dispatch(input: WorkerDispatchInput): Promise<DelegateTaskResult> {
-    const concurrencyKey = String((input.metadata as Record<string, unknown> | undefined)?.concurrencyKey || '')
+    const metadata = input.metadata as Record<string, unknown> | undefined
+    const concurrencyKey = String(metadata?.concurrencyKey || '')
     const shouldThrottle = !input.runInBackground && Boolean(concurrencyKey)
 
     if (shouldThrottle) {
-      await this.waitForConcurrencySlot(concurrencyKey)
+      await this.waitForConcurrencySlot(concurrencyKey, metadata)
     }
 
     try {

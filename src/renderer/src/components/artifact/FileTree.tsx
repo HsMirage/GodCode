@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { Artifact } from '../../../../types/domain'
+import { cn } from '../../utils'
 import {
   ChevronRight,
   ChevronDown,
@@ -93,10 +94,10 @@ const getFileIcon = (filename: string) => {
     case 'json':
     case 'css':
     case 'html':
-      return <FileCode className="w-4 h-4 text-blue-300" />
+      return <FileCode className="w-4 h-4 text-blue-600 dark:text-blue-300" />
     case 'md':
     case 'txt':
-      return <FileText className="w-4 h-4 text-gray-300" />
+      return <FileText className="w-4 h-4 text-slate-600 dark:text-gray-300" />
     case 'png':
     case 'jpg':
     case 'jpeg':
@@ -133,9 +134,11 @@ const FileTreeNode: React.FC<{
     <div className="select-none">
       <button
         type="button"
-        className={`w-full text-left flex items-center py-1 px-2 cursor-pointer hover:bg-white/5 transition-colors rounded focus:outline-none focus:bg-white/10 ${
-          node.type === 'file' ? 'text-gray-200' : 'text-white font-medium'
-        }`}
+        className={cn(
+          'w-full text-left flex items-center py-1 px-2 cursor-pointer transition-colors rounded focus:outline-none',
+          'hover:bg-black/5 dark:hover:bg-white/5 focus:bg-black/10 dark:focus:bg-white/10',
+          node.type === 'file' ? 'text-[var(--text-secondary)]' : 'text-[var(--text-primary)] font-medium'
+        )}
         style={{ paddingLeft: `${level * 12 + 8}px` }}
         onClick={handleClick}
         onKeyDown={e => {

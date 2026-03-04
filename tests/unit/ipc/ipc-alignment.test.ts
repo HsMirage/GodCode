@@ -93,6 +93,7 @@ describe('IPC Channel Alignment', () => {
   describe('Contract Alignment with Main/Preload', () => {
     it('should keep selected invoke channels aligned across shared, main registration, and preload allowlist', () => {
       const channels = [
+        INVOKE_CHANNELS.SKILL_COMMAND_ITEMS,
         INVOKE_CHANNELS.TASK_CONTINUATION_GET_STATUS,
         INVOKE_CHANNELS.TASK_CONTINUATION_ABORT,
         INVOKE_CHANNELS.TASK_CONTINUATION_SET_TODOS,
@@ -100,7 +101,9 @@ describe('IPC Channel Alignment', () => {
         INVOKE_CHANNELS.PROVIDER_CACHE_IS_CONNECTED,
         INVOKE_CHANNELS.PROVIDER_CACHE_GET_AVAILABLE_MODELS,
         INVOKE_CHANNELS.PROVIDER_CACHE_SET_STATUS,
-        INVOKE_CHANNELS.WORKFLOW_OBSERVABILITY_GET
+        INVOKE_CHANNELS.WORKFLOW_OBSERVABILITY_GET,
+        INVOKE_CHANNELS.HOOK_GOVERNANCE_GET,
+        INVOKE_CHANNELS.HOOK_GOVERNANCE_SET
       ]
 
       for (const channel of channels) {
@@ -143,7 +146,8 @@ describe('IPC Channel Alignment', () => {
         EVENT_CHANNELS.BACKGROUND_TASK_STARTED,
         EVENT_CHANNELS.BACKGROUND_TASK_OUTPUT,
         EVENT_CHANNELS.BACKGROUND_TASK_COMPLETED,
-        EVENT_CHANNELS.BACKGROUND_TASK_CANCELLED
+        EVENT_CHANNELS.BACKGROUND_TASK_CANCELLED,
+        EVENT_CHANNELS.HOOK_AUDIT_APPENDED
       ]
 
       for (const channel of eventChannels) {

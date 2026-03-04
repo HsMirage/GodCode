@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Message } from '../chat/MessageCard'
 import { MessageList } from '../chat/MessageList'
-import { MessageInput } from '../chat/MessageInput'
+import { MessageInput, type MessageInputSendPayload } from '../chat/MessageInput'
 import { TypingIndicator } from '../chat/TypingIndicator'
 import { SessionResumeIndicator } from '../session/SessionResumeIndicator'
 import { useStreamingEvents } from '../../hooks/useStreamingEvents'
@@ -49,6 +49,10 @@ export function ChatView() {
               id: msg.id,
               role: msg.role as 'user' | 'assistant',
               content: msg.content,
+              metadata:
+                msg.metadata && typeof msg.metadata === 'object'
+                  ? (msg.metadata as Record<string, unknown>)
+                  : undefined,
               createdAt: msg.createdAt || new Date().toISOString()
             }))
         )
@@ -90,7 +94,8 @@ export function ChatView() {
   }, [error, isStreaming])
 
   const handleSend = useCallback(
-    async (content: string, agentCode?: string) => {
+    async (payload: MessageInputSendPayload, agentCode?: string) => {
+      const { content, skillCommand } = payload
       if (!sessionId || !window.codeall) return false
 
       const userMessage: Message = {
@@ -109,7 +114,8 @@ export function ChatView() {
         await window.codeall.invoke('message:send', {
           sessionId,
           content,
-          agentCode
+          agentCode,
+          skillCommand
         })
         return true
       } catch (error) {

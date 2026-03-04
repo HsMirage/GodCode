@@ -129,7 +129,7 @@ export const newPageTool: BrowserTool = {
       const viewId = `ai-browser-${Date.now()}`
 
       // Create the browser view
-      const state = await browserViewManager.create(viewId, url)
+      await browserViewManager.create(viewId, url)
 
       // Set as active view in context
       ;(context as any).setActiveViewId?.(viewId)
@@ -222,7 +222,7 @@ export const navigateTool: BrowserTool = {
       type: {
         type: 'string',
         description: 'Navigate the page by URL, back or forward in history, or reload.',
-        // @ts-ignore
+        // Schema enum uses literal union array
         enum: ['url', 'back', 'forward', 'reload']
       },
       url: {
@@ -261,7 +261,7 @@ export const navigateTool: BrowserTool = {
           browserViewManager.reload(viewId)
           return { success: true, data: { message: `Successfully reloaded the page.` } }
         case 'url':
-        default:
+        default: {
           if (!rawUrl) {
             return { success: false, error: 'URL is required for navigation' }
           }
@@ -279,6 +279,7 @@ export const navigateTool: BrowserTool = {
 
           await browserViewManager.navigate(viewId, url)
           break
+        }
       }
 
       // Wait for navigation to complete
@@ -359,7 +360,7 @@ export const handleDialogTool: BrowserTool = {
       action: {
         type: 'string',
         description: 'Whether to dismiss or accept the dialog',
-        // @ts-ignore
+        // Schema enum uses literal union array
         enum: ['accept', 'dismiss']
       },
       promptText: {

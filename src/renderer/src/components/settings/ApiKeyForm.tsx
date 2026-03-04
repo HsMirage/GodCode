@@ -12,8 +12,6 @@ interface ApiKeyEntry {
 export function ApiKeyForm() {
   const [keys, setKeys] = useState<ApiKeyEntry[]>([])
   const [loading, setLoading] = useState<Record<string, boolean>>({})
-  const [status, setStatus] = useState<Record<string, 'success' | 'error' | null>>({})
-  const [statusMessage, setStatusMessage] = useState<Record<string, string>>({})
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({})
 
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -89,15 +87,10 @@ export function ApiKeyForm() {
         provider: 'custom'
       })
 
-      setStatus(prev => ({ ...prev, [tempId]: 'success' }))
-      setStatusMessage(prev => ({ ...prev, [tempId]: 'Saved successfully' }))
-
       await loadKeys()
       resetForm()
     } catch (error) {
       console.error('Failed to save key:', error)
-      setStatus(prev => ({ ...prev, [tempId]: 'error' }))
-      setStatusMessage(prev => ({ ...prev, [tempId]: 'Failed to save' }))
     } finally {
       setLoading(prev => ({ ...prev, [tempId]: false }))
     }

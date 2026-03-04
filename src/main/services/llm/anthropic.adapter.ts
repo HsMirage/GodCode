@@ -620,10 +620,9 @@ export class AnthropicAdapter implements LLMAdapter {
       case 'content_block_stop':
         if (currentToolUse) {
           // Tool use block complete - parse arguments
-          let args: Record<string, unknown> = {}
           try {
             if (currentToolUse.input) {
-              args = JSON.parse(currentToolUse.input)
+              JSON.parse(currentToolUse.input)
             }
           } catch (error) {
             logger.error('Failed to parse tool call arguments', {

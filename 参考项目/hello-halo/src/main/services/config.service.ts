@@ -3,7 +3,7 @@
  */
 
 import { app } from 'electron'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { homedir } from 'os'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { v4 as uuidv4 } from 'uuid'
@@ -321,6 +321,10 @@ interface HaloConfig {
   system: {
     autoLaunch: boolean
   }
+  // Agent behavior configuration
+  agent?: {
+    maxTurns: number
+  }
   remoteAccess: {
     enabled: boolean
     port: number
@@ -331,13 +335,33 @@ interface HaloConfig {
   // MCP servers configuration (compatible with Cursor / Claude Desktop format)
   mcpServers: Record<string, McpServerConfig>
   isFirstLaunch: boolean
+  // External notification channels (email, WeCom, DingTalk, Feishu, webhook)
+  notificationChannels?: import('../../shared/types/notification-channels').NotificationChannelsConfig
   // Analytics configuration (auto-generated on first launch)
   analytics?: AnalyticsConfig
+  // Global layout preferences (panel sizes and visibility)
+  layout?: {
+    sidebarOpen?: boolean
+    sidebarWidth?: number
+    artifactRailWidth?: number
+  }
   // Git Bash configuration (Windows only)
   gitBash?: {
     installed: boolean
     path: string | null
     skipped: boolean
+  }
+  // App Store / Registry configuration
+  appStore?: {
+    registries: Array<{
+      id: string
+      name: string
+      url: string
+      enabled: boolean
+      isDefault?: boolean
+    }>
+    cacheTtlMs: number
+    autoCheckUpdates: boolean
   }
 }
 
@@ -431,6 +455,9 @@ const DEFAULT_CONFIG: HaloConfig = {
   },
   system: {
     autoLaunch: false
+  },
+  agent: {
+    maxTurns: 999
   },
   remoteAccess: {
     enabled: false,
@@ -639,15 +666,19 @@ function getAiSourcesSignature(aiSources?: AISourcesConfig): string {
     const currentSource = aiSources.sources.find(s => s.id === aiSources.currentId)
     if (!currentSource) return ''
 
-    // Note: model is excluded from signature because V2 Session supports dynamic model switching
-    // (via setModel method). Only changes to credentials/provider should invalidate sessions.
+    // Model is included in signature: changing model triggers session rebuild.
+    // The model is encoded into ANTHROPIC_API_KEY env var at session creation time
+    // (for all providers when routed through the OpenAI compat router), so dynamic
+    // switching via setModel() is not effective. Session rebuild is the reliable path.
+    // Performance note: if zero-latency model switching becomes needed, consider
+    // a router-side model override (Option B) instead of session rebuild.
     if (currentSource.authType === 'api-key') {
       return [
         'api-key',
         currentSource.provider || '',
         currentSource.apiUrl || '',
-        currentSource.apiKey || ''
-        // model excluded: dynamic switching supported
+        currentSource.apiKey || '',
+        currentSource.model || ''
       ].join('|')
     }
 
@@ -657,8 +688,8 @@ function getAiSourcesSignature(aiSources?: AISourcesConfig): string {
       currentSource.provider || '',
       currentSource.accessToken || '',
       currentSource.refreshToken || '',
-      currentSource.tokenExpires || ''
-      // model excluded: dynamic switching supported
+      currentSource.tokenExpires || '',
+      currentSource.model || ''
     ].join('|')
   }
 
@@ -745,11 +776,14 @@ export function getConfig(): HaloConfig {
       permissions: { ...DEFAULT_CONFIG.permissions, ...parsed.permissions },
       appearance: { ...DEFAULT_CONFIG.appearance, ...parsed.appearance },
       system: { ...DEFAULT_CONFIG.system, ...parsed.system },
+      agent: { ...DEFAULT_CONFIG.agent, ...parsed.agent },
       onboarding: { ...DEFAULT_CONFIG.onboarding, ...parsed.onboarding },
       // mcpServers is a flat map, just use parsed value or default
       mcpServers: parsed.mcpServers || DEFAULT_CONFIG.mcpServers,
       // analytics: keep as-is (managed by analytics.service.ts)
-      analytics: parsed.analytics
+      analytics: parsed.analytics,
+      // layout: keep persisted values (panel sizes and visibility)
+      layout: parsed.layout
     }
   } catch (error) {
     console.error('Failed to read config:', error)
@@ -776,6 +810,9 @@ export function saveConfig(config: Partial<HaloConfig>): HaloConfig {
   if (config.system) {
     newConfig.system = { ...currentConfig.system, ...config.system }
   }
+  if (config.agent) {
+    newConfig.agent = { ...currentConfig.agent, ...config.agent }
+  }
   if (config.onboarding) {
     newConfig.onboarding = { ...currentConfig.onboarding, ...config.onboarding }
   }
@@ -791,8 +828,16 @@ export function saveConfig(config: Partial<HaloConfig>): HaloConfig {
   if ((config as any).gitBash !== undefined) {
     (newConfig as any).gitBash = (config as any).gitBash
   }
+  // layout: shallow merge (panel sizes and visibility)
+  if (config.layout !== undefined) {
+    newConfig.layout = { ...currentConfig.layout, ...config.layout }
+  }
 
   const configPath = getConfigPath()
+  const configDir = dirname(configPath)
+  if (!existsSync(configDir)) {
+    mkdirSync(configDir, { recursive: true })
+  }
   writeFileSync(configPath, JSON.stringify(newConfig, null, 2))
 
   // Detect API config changes and notify subscribers

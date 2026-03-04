@@ -10,6 +10,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "prisma:clean": "node -e \"import('node:fs').then(fs=>fs.rmSync('node_modules/.prisma',{ recursive: true, force: true }))\"",
+    "prisma:generate": "pnpm run prisma:clean && prisma generate",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",
@@ -17,9 +19,11 @@
     "test:watch": "vitest",
     "test:performance": "vitest run tests/performance/",
     "test:e2e": "pnpm build && playwright test",
-    "build:win": "pnpm run build && electron-builder --win --x64",
-    "build:mac": "pnpm run build && electron-builder --mac",
-    "build:linux": "pnpm run build && electron-builder --linux"
+    "test:e2e:ci": "playwright test --grep-invert \"final acceptance\"",
+    "test:e2e:acceptance": "playwright test tests/e2e/final-acceptance.spec.ts",
+    "build:win": "pnpm run prisma:generate && pnpm run build && electron-builder --win --x64",
+    "build:mac": "pnpm run prisma:generate && pnpm run build && electron-builder --mac",
+    "build:linux": "pnpm run prisma:generate && pnpm run build && electron-builder --linux"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",

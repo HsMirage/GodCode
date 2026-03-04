@@ -29,6 +29,7 @@ export type {
   SkillTrigger,
   SkillMetadata,
   SkillMcpConfig,
+  SkillCommandItem,
   SkillContext,
   SkillResult,
   SkillSource,
@@ -50,4 +51,4 @@ export {
 } from './loader'
 
 // Builtin skills
-export { gitMasterSkill, frontendUiUxSkill } from './builtin'
+export { gitMasterSkill, frontendUiUxSkill, reviewSkill, fixSkill, explainSkill } from './builtin'

@@ -238,7 +238,7 @@ export function categorizeTools(toolNames: string[]): AvailableTool[] {
       category = 'lsp'
     } else if (name.startsWith('ast_')) {
       category = 'ast'
-    } else if (name === 'grep' || name === 'glob' || name === 'read') {
+    } else if (name === 'grep' || name === 'glob' || name === 'read' || name === 'file_read') {
       category = 'search'
     } else if (name.startsWith('session_')) {
       category = 'session'

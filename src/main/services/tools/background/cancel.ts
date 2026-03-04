@@ -4,7 +4,7 @@
  * Provides task cancellation functionality for the BackgroundTaskManager.
  */
 
-import { backgroundTaskManager, type BackgroundTask } from './manager'
+import { backgroundTaskManager } from './manager'
 import { logger } from '../../../../shared/logger'
 
 // ============================================================================

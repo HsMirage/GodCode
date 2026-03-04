@@ -108,6 +108,7 @@ import {
   cleanupExtendedServices
 } from './bootstrap'
 import { initializeApp } from './services/config.service'
+import { flushAllPendingIndexWrites } from './services/conversation.service'
 import { disableRemoteAccess } from './services/remote.service'
 import { stopOpenAICompatRouter } from './openai-compat-router'
 import { manualCheckForUpdates } from './services/updater.service'
@@ -115,6 +116,7 @@ import { initAnalytics } from './services/analytics'
 import { registerProtocols } from './services/protocol.service'
 import { setMainWindow } from './services/window.service'
 import { initInstanceId, shutdownHealthSystem, onRendererCrash, onRendererUnresponsive } from './services/health'
+import { getBackgroundService } from './platform/background'
 
 let mainWindow: BrowserWindow | null = null
 let isAppQuitting = false
@@ -303,6 +305,7 @@ function createWindow(): void {
 
   mainWindow.on('ready-to-show', () => {
     console.log('[Main] ready-to-show event fired')
+    mainWindow?.maximize()
     mainWindow?.show()
   })
 
@@ -423,6 +426,9 @@ async function shutdownServices(): Promise<void> {
   }
   hasShutdown = true
 
+  // Flush pending conversation index writes before shutdown
+  flushAllPendingIndexWrites()
+
   // Shutdown health system first (marks clean exit)
   shutdownHealthSystem()
 
@@ -450,6 +456,29 @@ app.on('before-quit', () => {
 })
 
 app.on('window-all-closed', () => {
+  // If the user explicitly requested quit (Cmd+Q, menu quit, tray quit),
+  // always honour it — never let keep-alive block an intentional quit.
+  // before-quit sets isAppQuitting=true *synchronously* before windows close,
+  // so this check is race-free.
+  if (!isAppQuitting) {
+    // Check if the background service wants to keep the process alive
+    // (e.g., automation Apps are running in the background)
+    try {
+      const bgService = getBackgroundService()
+      if (bgService?.shouldKeepAlive()) {
+        console.log('[Main] All windows closed, but keep-alive reasons exist. Staying alive via tray.')
+        // On macOS, hide the dock icon when running in background
+        if (process.platform === 'darwin') {
+          app.dock?.hide()
+        }
+        return
+      }
+    } catch (err) {
+      // shouldKeepAlive() must never prevent quit — treat errors as "no keep-alive"
+      console.error('[Main] shouldKeepAlive() threw, proceeding with quit:', err)
+    }
+  }
+
   if (process.platform !== 'darwin') {
     shutdownServicesWithTimeout(SHUTDOWN_TIMEOUT_MS)
       .catch(console.error)

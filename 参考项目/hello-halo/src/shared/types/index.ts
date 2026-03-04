@@ -24,7 +24,8 @@ export type {
   OAuthStartResult,
   OAuthCompleteResult,
   AISourceType,
-  AISourceUserInfo
+  AISourceUserInfo,
+  LocalizedText
 } from './ai-sources'
 
 // AI Sources - export constants and functions
@@ -43,7 +44,8 @@ export {
   deleteSource,
   setCurrentSource,
   setCurrentModel,
-  getAvailableModels
+  getAvailableModels,
+  resolveLocalizedText
 } from './ai-sources'
 
 // Health System types
@@ -51,3 +53,10 @@ export * from './health'
 
 // Artifact types (shared between main process and file-watcher worker)
 export * from './artifact'
+
+// Notification channel types (shared between main process and renderer)
+export * from './notification-channels'
+
+// File changes types (shared between main process agent and renderer diff)
+export type { FileChangesSummary, ThoughtLike } from '../file-changes'
+export { countChangedLines, calculateDiffStats, extractFileChangesSummaryFromThoughts } from '../file-changes'

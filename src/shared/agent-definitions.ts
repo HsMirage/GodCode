@@ -9,6 +9,11 @@
 export type AgentType = 'primary' | 'subagent'
 export type AgentRoutingStrategy = 'direct-enhanced' | 'workforce' | 'direct'
 export type PrimaryAgentCanonicalRole = 'planning' | 'orchestration' | 'execution'
+export type OpenClawCapabilityId =
+  | 'oc.code.search'
+  | 'oc.code.modify'
+  | 'oc.task.orchestrate'
+  | 'oc.background.observe'
 
 export interface PrimaryAgentRoleMapping {
   aliases: string[]
@@ -17,35 +22,33 @@ export interface PrimaryAgentRoleMapping {
 
 /**
  * Agent 模式：控制模型选择行为
- * - 'primary': 尊重用户 UI 选择的模型，UI 未选时使用自身 fallback chain
- * - 'subagent': 始终使用自身 fallback chain，忽略 UI 模型选择
+ * - 'primary': 尊重用户 UI 选择的模型
+ * - 'subagent': 忽略 UI 模型选择
  */
 export type AgentMode = 'primary' | 'subagent'
-
-/**
- * 回退模型条目
- * 当主模型不可用时，按顺序尝试 fallback 列表中的模型
- */
-export interface FallbackModelEntry {
-  model: string
-  provider: string
-}
 
 export interface AgentDefinition {
   code: string
   name: string // 中文名(拼音)
   chineseName: string // 纯中文名
   type: AgentType
-  /** 模型选择模式：primary 尊重 UI 选择，subagent 使用自身 fallback chain */
+  /** 模型选择模式：primary 尊重 UI 选择，subagent 忽略 UI 模型选择 */
   mode: AgentMode
   description: string
   defaultStrategy: AgentRoutingStrategy
-  defaultModel: string
-  /** 按优先级排序的回退模型列表 */
-  fallbackModels: FallbackModelEntry[]
   defaultTemperature: number
   tools: string[]
   primaryRole?: PrimaryAgentRoleMapping
+}
+
+export type AgentPresetId = 'planner' | 'coder' | 'reviewer' | 'researcher' | 'debugger'
+
+export interface AgentPresetDefinition {
+  id: AgentPresetId
+  label: string
+  description: string
+  mappedAgentCode: string
+  recommendedModelKeywords: string[]
 }
 
 export interface CategoryDefinition {
@@ -54,10 +57,17 @@ export interface CategoryDefinition {
   chineseName: string // 纯中文名
   description: string
   defaultStrategy: AgentRoutingStrategy
-  defaultModel: string
-  /** 按优先级排序的回退模型列表 */
-  fallbackModels: FallbackModelEntry[]
   defaultTemperature: number
+}
+
+export interface OpenClawCapabilityDefinition {
+  id: OpenClawCapabilityId
+  name: string
+  requiredTools: string[]
+  constraints: string[]
+  ownerRoles: PrimaryAgentCanonicalRole[]
+  sourceOfTruth: string[]
+  status: 'draft' | 'confirmed'
 }
 
 /**
@@ -73,11 +83,6 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     mode: 'primary',
     description: '战略规划器，面试模式创建工作计划',
     defaultStrategy: 'workforce',
-    defaultModel: 'claude-3-opus-20240229',
-    fallbackModels: [
-      { model: 'claude-3-5-sonnet-20240620', provider: 'anthropic' },
-      { model: 'gpt-4o', provider: 'openai' }
-    ],
     defaultTemperature: 0.3,
     tools: ['read', 'write', 'edit', 'bash', 'webfetch', 'look_at'],
     primaryRole: {
@@ -93,11 +98,6 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     mode: 'primary',
     description: '主编排器，任务分解、并行委派、TODO工作流',
     defaultStrategy: 'workforce',
-    defaultModel: 'claude-3-5-sonnet-20240620',
-    fallbackModels: [
-      { model: 'gpt-4o', provider: 'openai' },
-      { model: 'gemini-1.5-pro', provider: 'gemini' }
-    ],
     defaultTemperature: 0.3,
     tools: ['read', 'write', 'edit', 'bash', 'glob', 'grep', 'delegate_task', 'look_at'],
     primaryRole: {
@@ -113,10 +113,6 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     mode: 'primary',
     description: '工作计划执行器，任务分发与进度跟踪',
     defaultStrategy: 'workforce',
-    defaultModel: 'claude-3-5-sonnet-20240620',
-    fallbackModels: [
-      { model: 'gpt-4o', provider: 'openai' }
-    ],
     defaultTemperature: 0.2,
     tools: ['read', 'write', 'edit', 'bash', 'glob', 'grep', 'delegate_task', 'look_at'],
     primaryRole: {
@@ -132,10 +128,6 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     mode: 'primary',
     description: '自主深度工作者，深入研究后果断行动',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'gpt-4o',
-    fallbackModels: [
-      { model: 'claude-3-5-sonnet-20240620', provider: 'anthropic' }
-    ],
     defaultTemperature: 0.2,
     tools: [
       'read',
@@ -165,10 +157,6 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     mode: 'subagent',
     description: '架构决策、代码审查、调试专家（只读咨询）',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'gpt-4o',
-    fallbackModels: [
-      { model: 'claude-3-opus-20240229', provider: 'anthropic' }
-    ],
     defaultTemperature: 0.2,
     tools: ['read', 'glob', 'grep']
   },
@@ -180,10 +168,6 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     mode: 'subagent',
     description: '预规划分析，识别隐藏意图和歧义',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'claude-3-5-sonnet-20240620',
-    fallbackModels: [
-      { model: 'gpt-4o', provider: 'openai' }
-    ],
     defaultTemperature: 0.3,
     tools: ['read', 'glob', 'grep']
   },
@@ -195,10 +179,6 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     mode: 'subagent',
     description: '计划审查，验证清晰度和完整性',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'claude-3-5-sonnet-20240620',
-    fallbackModels: [
-      { model: 'gpt-4o', provider: 'openai' }
-    ],
     defaultTemperature: 0.2,
     tools: ['read']
   },
@@ -210,10 +190,6 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     mode: 'subagent',
     description: '文档查找、开源实现、多仓库分析',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'claude-3-haiku-20240307',
-    fallbackModels: [
-      { model: 'gemini-1.5-flash', provider: 'gemini' }
-    ],
     defaultTemperature: 0.3,
     tools: ['webfetch', 'websearch', 'context7', 'github_search']
   },
@@ -225,10 +201,6 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     mode: 'subagent',
     description: '快速代码库探索、上下文搜索',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'claude-3-haiku-20240307',
-    fallbackModels: [
-      { model: 'gpt-4o-mini', provider: 'openai' }
-    ],
     defaultTemperature: 0.2,
     tools: ['read', 'glob', 'grep']
   },
@@ -240,16 +212,79 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
     mode: 'subagent',
     description: '多模态解析器：专注提取图片/PDF/图表信息，返回结构化结论',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'gemini-1.5-flash',
-    fallbackModels: [
-      { model: 'gpt-4o', provider: 'openai' }
-    ],
     defaultTemperature: 0.1,
     tools: []
   }
 ]
 
 export const PRIMARY_AGENTS = AGENT_DEFINITIONS
+
+export const AGENT_PRESET_DEFINITIONS: AgentPresetDefinition[] = [
+  {
+    id: 'planner',
+    label: 'Planner',
+    description: '偏规划与方案拆解，适合需求澄清与执行计划制定',
+    mappedAgentCode: 'fuxi',
+    recommendedModelKeywords: ['claude-opus', 'claude-sonnet', 'gpt-5']
+  },
+  {
+    id: 'coder',
+    label: 'Coder',
+    description: '偏实现与快速迭代，适合代码生成与功能落地',
+    mappedAgentCode: 'luban',
+    recommendedModelKeywords: ['claude-sonnet', 'gpt-5', 'deepseek-coder']
+  },
+  {
+    id: 'reviewer',
+    label: 'Reviewer',
+    description: '偏审查与风险识别，适合代码评审和质量把关',
+    mappedAgentCode: 'baize',
+    recommendedModelKeywords: ['claude-opus', 'o3', 'gpt-5']
+  },
+  {
+    id: 'researcher',
+    label: 'Researcher',
+    description: '偏检索与上下文归纳，适合大仓库探索和资料收集',
+    mappedAgentCode: 'qianliyan',
+    recommendedModelKeywords: ['claude-sonnet', 'gemini', 'deepseek']
+  },
+  {
+    id: 'debugger',
+    label: 'Debugger',
+    description: '偏问题定位与根因分析，适合故障排查与回归验证',
+    mappedAgentCode: 'baize',
+    recommendedModelKeywords: ['claude-opus', 'o3', 'gpt-5']
+  }
+]
+
+const AGENT_PRESET_MAP: Record<AgentPresetId, AgentPresetDefinition> = AGENT_PRESET_DEFINITIONS.reduce(
+  (acc, preset) => {
+    acc[preset.id] = preset
+    return acc
+  },
+  {} as Record<AgentPresetId, AgentPresetDefinition>
+)
+
+export function getAgentPresetById(id: AgentPresetId): AgentPresetDefinition {
+  return AGENT_PRESET_MAP[id]
+}
+
+export function listAgentPresets(): AgentPresetDefinition[] {
+  return AGENT_PRESET_DEFINITIONS.map(preset => ({
+    ...preset,
+    recommendedModelKeywords: [...preset.recommendedModelKeywords]
+  }))
+}
+
+export function getAgentPresetMappedDefinition(presetId: AgentPresetId): AgentDefinition {
+  const preset = getAgentPresetById(presetId)
+  const mapped = getAgentByCode(preset.mappedAgentCode)
+  if (!mapped) {
+    throw new Error(`Unknown mapped agent code for preset "${presetId}": ${preset.mappedAgentCode}`)
+  }
+  return mapped
+}
+
 
 /**
  * 任务类别定义
@@ -261,11 +296,6 @@ export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
     chineseName: '织女',
     description: '前端/UI/UX、设计、样式、动画',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'gpt-4o',
-    fallbackModels: [
-      { model: 'claude-3-5-sonnet-20240620', provider: 'anthropic' },
-      { model: 'gemini-1.5-pro', provider: 'gemini' }
-    ],
     defaultTemperature: 0.7
   },
   {
@@ -274,10 +304,6 @@ export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
     chineseName: '仓颉',
     description: '文档、技术写作',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'claude-3-5-sonnet-20240620',
-    fallbackModels: [
-      { model: 'gemini-1.5-flash', provider: 'gemini' }
-    ],
     defaultTemperature: 0.6
   },
   {
@@ -286,10 +312,6 @@ export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
     chineseName: '天兵',
     description: '琐碎任务，单文件修改',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'claude-3-haiku-20240307',
-    fallbackModels: [
-      { model: 'gpt-4o-mini', provider: 'openai' }
-    ],
     defaultTemperature: 0.3
   },
   {
@@ -298,10 +320,6 @@ export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
     chineseName: '鬼谷',
     description: '复杂推理任务',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'gpt-4o',
-    fallbackModels: [
-      { model: 'claude-3-opus-20240229', provider: 'anthropic' }
-    ],
     defaultTemperature: 0.2
   },
   {
@@ -310,11 +328,6 @@ export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
     chineseName: '马良',
     description: '创意任务',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'claude-3-5-sonnet-20240620',
-    fallbackModels: [
-      { model: 'gpt-4o', provider: 'openai' },
-      { model: 'gemini-1.5-pro', provider: 'gemini' }
-    ],
     defaultTemperature: 0.8
   },
   {
@@ -323,10 +336,6 @@ export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
     chineseName: '归墟',
     description: '深度任务',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'claude-3-opus-20240229',
-    fallbackModels: [
-      { model: 'gpt-4o', provider: 'openai' }
-    ],
     defaultTemperature: 0.2
   },
   {
@@ -335,10 +344,6 @@ export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
     chineseName: '土地',
     description: '通用低复杂度任务',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'claude-3-haiku-20240307',
-    fallbackModels: [
-      { model: 'gpt-4o-mini', provider: 'openai' }
-    ],
     defaultTemperature: 0.5
   },
   {
@@ -347,16 +352,106 @@ export const CATEGORY_DEFINITIONS: CategoryDefinition[] = [
     chineseName: '大禹',
     description: '通用高复杂度任务',
     defaultStrategy: 'direct-enhanced',
-    defaultModel: 'claude-3-5-sonnet-20240620',
-    fallbackModels: [
-      { model: 'gpt-4o', provider: 'openai' },
-      { model: 'claude-3-opus-20240229', provider: 'anthropic' }
-    ],
     defaultTemperature: 0.3
   }
 ]
 
 export const CATEGORY_AGENTS = CATEGORY_DEFINITIONS
+
+export const OPENCLAW_CAPABILITIES: OpenClawCapabilityDefinition[] = [
+  {
+    id: 'oc.code.search',
+    name: '代码读检索',
+    requiredTools: ['read', 'glob', 'grep'],
+    constraints: ['read-only'],
+    ownerRoles: ['planning', 'orchestration', 'execution'],
+    sourceOfTruth: [
+      'src/main/services/delegate/tool-allowlist.ts',
+      'src/main/services/workforce/workforce-engine.ts'
+    ],
+    status: 'confirmed'
+  },
+  {
+    id: 'oc.code.modify',
+    name: '代码写修改',
+    requiredTools: ['write', 'edit'],
+    constraints: ['mutating'],
+    ownerRoles: ['orchestration', 'execution'],
+    sourceOfTruth: [
+      'src/main/services/delegate/tool-allowlist.ts',
+      'src/main/services/delegate/delegate-engine.ts'
+    ],
+    status: 'confirmed'
+  },
+  {
+    id: 'oc.task.orchestrate',
+    name: '任务编排委派',
+    requiredTools: ['delegate_task'],
+    constraints: ['orchestrating'],
+    ownerRoles: ['orchestration'],
+    sourceOfTruth: [
+      'src/main/services/workforce/workforce-engine.ts',
+      'src/main/services/delegate/delegate-engine.ts'
+    ],
+    status: 'confirmed'
+  },
+  {
+    id: 'oc.background.observe',
+    name: '后台任务观测',
+    requiredTools: ['bash', 'read', 'grep'],
+    constraints: ['observability'],
+    ownerRoles: ['orchestration', 'execution'],
+    sourceOfTruth: [
+      'src/main/ipc/handlers/background-task.ts',
+      'src/main/services/tools/background/manager.ts'
+    ],
+    status: 'confirmed'
+  }
+]
+
+const AGENT_CAPABILITY_MAP: Record<string, OpenClawCapabilityId[]> = {
+  fuxi: ['oc.code.search'],
+  haotian: ['oc.code.search', 'oc.code.modify', 'oc.task.orchestrate', 'oc.background.observe'],
+  kuafu: ['oc.code.search', 'oc.code.modify', 'oc.task.orchestrate', 'oc.background.observe'],
+  luban: ['oc.code.search', 'oc.code.modify', 'oc.task.orchestrate', 'oc.background.observe'],
+  baize: ['oc.code.search'],
+  chongming: ['oc.code.search'],
+  leigong: ['oc.code.search'],
+  diting: ['oc.code.search'],
+  qianliyan: ['oc.code.search'],
+  'multimodal-looker': ['oc.code.search']
+}
+
+const CATEGORY_CAPABILITY_MAP: Record<string, OpenClawCapabilityId[]> = {
+  zhinv: ['oc.code.search', 'oc.code.modify'],
+  cangjie: ['oc.code.search', 'oc.code.modify'],
+  tianbing: ['oc.code.search', 'oc.code.modify'],
+  guigu: ['oc.code.search', 'oc.code.modify'],
+  maliang: ['oc.code.search', 'oc.code.modify'],
+  guixu: ['oc.code.search', 'oc.code.modify'],
+  tudi: ['oc.code.search', 'oc.code.modify'],
+  dayu: ['oc.code.search', 'oc.code.modify', 'oc.background.observe']
+}
+
+export function getOpenClawCapabilityById(id: OpenClawCapabilityId): OpenClawCapabilityDefinition | undefined {
+  return OPENCLAW_CAPABILITIES.find(capability => capability.id === id)
+}
+
+export function listOpenClawCapabilitiesByAgent(agentCode: string): OpenClawCapabilityDefinition[] {
+  const normalized = agentCode.trim().toLowerCase()
+  const capabilityIds = AGENT_CAPABILITY_MAP[normalized] || []
+  return capabilityIds
+    .map(id => getOpenClawCapabilityById(id))
+    .filter((capability): capability is OpenClawCapabilityDefinition => Boolean(capability))
+}
+
+export function listOpenClawCapabilitiesByCategory(categoryCode: string): OpenClawCapabilityDefinition[] {
+  const normalized = categoryCode.trim().toLowerCase()
+  const capabilityIds = CATEGORY_CAPABILITY_MAP[normalized] || []
+  return capabilityIds
+    .map(id => getOpenClawCapabilityById(id))
+    .filter((capability): capability is OpenClawCapabilityDefinition => Boolean(capability))
+}
 
 /**
  * 获取所有 Agent 代码

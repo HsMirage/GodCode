@@ -17,16 +17,13 @@ import { createLLMAdapter } from '@/main/services/llm/factory'
 import { truncateToTokenLimit } from '@/main/services/llm/dynamic-truncator'
 import type { LLMConfig } from '@/main/services/llm/adapter.interface'
 import { BindingService } from '@/main/services/binding.service'
-import { SecureStorageService } from '@/main/services/secure-storage.service'
 import { AgentRunService, type RunLogEntry } from '@/main/services/agent-run.service'
 import {
-  resolveModelForAgent,
-  resolveModelForCategory,
-  type ModelSource
-} from '@/main/services/llm/model-resolver'
+  ModelSelectionService,
+  type ModelSource,
+  type ResolvedModelSelection
+} from '@/main/services/llm/model-selection.service'
 import {
-  getAgentByCode,
-  getCategoryByCode,
   listPrimaryAgentRoleAliases,
   resolvePrimaryAgentRolePolicy,
   type PrimaryAgentRolePolicy
@@ -45,6 +42,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 // 动态 Prompt 系统
 import { DynamicPromptBuilder, type PromptBuilderConfig } from './dynamic-prompt-builder'
 import { CategoryResolver, type ResolvedAgent } from './category-resolver'
+import { SETTING_KEYS } from '@/main/services/settings/schema-registry'
 import { resolveScopedRuntimeToolNames } from './tool-allowlist'
 import { getAgentPromptByCode } from './agents'
 import { getCategoryPromptByCode } from './categories'
@@ -53,7 +51,7 @@ import {
   serializeDelegationProtocol,
   type DelegationProtocolInput
 } from './delegation-protocol'
-import type { AvailableSkill, AvailableCategory } from './category-constants'
+import type { AvailableSkill } from './category-constants'
 
 export interface DelegateTaskInput {
   sessionId?: string
@@ -147,6 +145,13 @@ function formatPrimaryRoleAliasExamples(): string {
 
 function isStrictPrimaryRoleModeEnabled(): boolean {
   return process.env.WORKFORCE_STRICT_ROLE_MODE === '1' || process.env.WORKFORCE_STRICT_ROLE_MODE === 'true'
+}
+
+function parseSettingInt(value: string | null | undefined, min: number, max: number): number | null {
+  if (!value) return null
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed)) return null
+  return Math.max(min, Math.min(max, Math.trunc(parsed)))
 }
 
 function resolvePrimaryRolePolicyFromMetadata(
@@ -258,116 +263,18 @@ export class DelegateEngine {
     const loadSkills = this.normalizeLoadSkills(input.loadSkills)
     const metadataInput = metadata ?? {}
 
-    let modelConfig: {
-      model: string
-      temperature: number
-      provider: string
-      apiKey?: string
-      baseURL?: string
-    }
-
-    let modelSource: ModelSource = 'system-default'
-    let modelFromBinding = false
-
-    if (overrideModel) {
-      const parsed = this.parseModelSpecifier(overrideModel)
-      modelConfig = {
-        model: parsed.model,
-        temperature: 0.5,
-        provider: parsed.provider
-      }
-      modelSource = 'override'
-    } else if (resolvedSubagentType) {
-      // 优先从数据库获取 Agent 绑定配置
-      const agentConfig = await this.bindingService.getAgentModelConfig(resolvedSubagentType)
-      if (agentConfig) {
-        modelConfig = {
-          model: agentConfig.model,
-          temperature: agentConfig.temperature,
-          provider: agentConfig.provider,
-          apiKey: agentConfig.apiKey,
-          baseURL: agentConfig.baseURL
-        }
-        modelSource = 'override'
-        modelFromBinding = true
-      } else {
-        // 使用 Agent 定义的 fallback chain 解析模型
-        const agentDef = getAgentByCode(resolvedSubagentType)
-        if (agentDef) {
-          const availableModels = await this.getAvailableModelSet()
-          const resolved = resolveModelForAgent(agentDef, availableModels)
-          if (resolved) {
-            modelConfig = {
-              model: resolved.model,
-              temperature: agentDef.defaultTemperature,
-              provider: resolved.provider
-            }
-            modelSource = resolved.source
-            this.logger.info('[DelegateEngine] Model resolved via fallback chain for agent', {
-              agent: resolvedSubagentType,
-              model: resolved.model,
-              source: resolved.source
-            })
-          } else {
-            throw new Error(
-              `Agent「${resolvedSubagentType}」无可用模型。` +
-              `fallback chain 中的模型均不可用，请在“设置 -> API Keys/模型”中配置至少一个模型。`
-            )
-          }
-        } else {
-          throw new Error(
-            `Agent「${resolvedSubagentType}」未配置可用模型。` +
-            `请在“设置 -> Agent 绑定”中为该 Agent 绑定模型，或设置系统默认模型。`
-          )
-        }
-      }
-    } else if (resolvedCategory) {
-      // 优先从数据库获取 Category 绑定配置
-      const config = await this.bindingService.getCategoryModelConfig(resolvedCategory)
-      if (config) {
-        modelConfig = {
-          model: config.model,
-          temperature: config.temperature,
-          provider: config.provider,
-          apiKey: config.apiKey,
-          baseURL: config.baseURL
-        }
-        modelSource = 'override'
-        modelFromBinding = true
-      } else {
-        // 使用 Category 定义的 fallback chain 解析模型
-        const categoryDef = getCategoryByCode(resolvedCategory)
-        if (categoryDef) {
-          const availableModels = await this.getAvailableModelSet()
-          const resolved = resolveModelForCategory(categoryDef, availableModels)
-          if (resolved) {
-            modelConfig = {
-              model: resolved.model,
-              temperature: categoryDef.defaultTemperature,
-              provider: resolved.provider
-            }
-            modelSource = resolved.source
-            this.logger.info('[DelegateEngine] Model resolved via fallback chain for category', {
-              category: resolvedCategory,
-              model: resolved.model,
-              source: resolved.source
-            })
-          } else {
-            throw new Error(
-              `任务类别「${resolvedCategory}」无可用模型。` +
-              `fallback chain 中的模型均不可用，请在“设置 -> API Keys/模型”中配置至少一个模型。`
-            )
-          }
-        } else {
-          throw new Error(
-            `任务类别「${resolvedCategory}」未配置可用模型。` +
-            `请在“设置 -> Agent 绑定 -> 任务类别”中绑定模型，或设置系统默认模型。`
-          )
-        }
-      }
-    } else {
+    if (!overrideModel && !resolvedSubagentType && !resolvedCategory) {
       throw new Error('Must provide either category or subagent_type')
     }
+
+    const modelSelection: ResolvedModelSelection = await ModelSelectionService.getInstance().resolveModelSelection({
+      overrideModelSpec: overrideModel,
+      agentCode: resolvedSubagentType,
+      categoryCode: resolvedCategory,
+      temperatureFallback: undefined
+    })
+
+    const modelSource: ModelSource = modelSelection.source
 
     const primaryRoleResolution = resolvePrimaryRolePolicyFromMetadata(metadataInput)
     if (primaryRoleResolution && 'error' in primaryRoleResolution) {
@@ -376,7 +283,7 @@ export class DelegateEngine {
         output: primaryRoleResolution.error,
         success: false,
         agentType: resolvedSubagentType || resolvedCategory,
-        model: modelConfig.model,
+        model: modelSelection.model,
         modelSource,
         systemPromptTokens: 0
       }
@@ -403,7 +310,7 @@ export class DelegateEngine {
           'Please align explicit primary agent selection with role policy.',
         success: false,
         agentType: resolvedSubagentType || resolvedCategory,
-        model: modelConfig.model,
+        model: modelSelection.model,
         modelSource,
         systemPromptTokens: 0
       }
@@ -430,7 +337,7 @@ export class DelegateEngine {
             'Use canonical handoff or provide roleBoundaryOverride with audit fields.',
           success: false,
           agentType: resolvedSubagentType || resolvedCategory,
-          model: modelConfig.model,
+          model: modelSelection.model,
           modelSource,
           systemPromptTokens: 0
         }
@@ -456,7 +363,7 @@ export class DelegateEngine {
             'FuXi is planning-only and cannot execute implementation tasks. Please handoff to haotian (orchestration) / kuafu (execution).',
           success: false,
           agentType: 'fuxi',
-          model: modelConfig.model,
+          model: modelSelection.model,
           modelSource,
           systemPromptTokens: 0
         }
@@ -470,13 +377,13 @@ export class DelegateEngine {
         type: 'subtask',
         input: description,
         status: runInBackground ? 'pending' : 'running',
-        assignedModel: modelConfig.model,
+        assignedModel: modelSelection.model,
         assignedAgent: resolvedSubagentType || resolvedCategory,
         metadata: {
           category: resolvedCategory,
           subagent_type: resolvedSubagentType,
           parentTaskId,
-          model: modelConfig.model,
+          model: modelSelection.model,
           modelSource,
           runInBackground: Boolean(runInBackground),
           ...(rolePolicySnapshot ? { primaryAgentRolePolicy: rolePolicySnapshot } : {}),
@@ -489,7 +396,7 @@ export class DelegateEngine {
       taskId: task.id,
       category: resolvedCategory,
       subagent_type: resolvedSubagentType,
-      model: modelConfig.model,
+      model: modelSelection.model,
       workspaceDir
     })
 
@@ -512,7 +419,7 @@ export class DelegateEngine {
         output: `Background task started: ${task.id}`,
         success: true,
         agentType: resolvedSubagentType || resolvedCategory,
-        model: modelConfig.model,
+        model: modelSelection.model,
         modelSource,
         systemPromptTokens: 0
       }
@@ -527,78 +434,30 @@ export class DelegateEngine {
         taskId: task.id,
         category: resolvedCategory,
         subagent_type: resolvedSubagentType,
-        model: modelConfig.model,
+        model: modelSelection.model,
         runInBackground: false
       }
     })
 
     try {
-      // 优先级:
-      // 1) 显式覆盖输入
-      // 2) 绑定模型自身凭据
-      // 3) 同 provider 下已配置模型凭据（用于 fallback chain / 系统默认兜底）
-      let apiKey: string = overrideApiKey || modelConfig.apiKey || ''
-      let baseURL: string | undefined = overrideBaseURL || modelConfig.baseURL
-      let runtimeResolvedModel: { provider: string; model: string } | null = null
-
-      if (!apiKey || !baseURL) {
-        const credentialedModel = await this.resolveCredentialedModel({
-          provider: modelConfig.provider,
-          preferredModel: modelConfig.model
-        })
-
-        if (credentialedModel) {
-          apiKey = apiKey || credentialedModel.apiKey
-          baseURL = baseURL || credentialedModel.baseURL
-
-          const canAdoptResolvedModel = !overrideModel && !modelFromBinding
-          if (canAdoptResolvedModel) {
-            modelConfig.provider = credentialedModel.provider
-            modelConfig.model = credentialedModel.modelName
-            runtimeResolvedModel = {
-              provider: credentialedModel.provider,
-              model: credentialedModel.modelName
-            }
-          }
-        }
-      }
+      const apiKey = (overrideApiKey || modelSelection.apiKey || '').trim()
+      const baseURL = overrideBaseURL || modelSelection.baseURL
 
       if (!apiKey) {
-        if (!overrideModel && modelFromBinding) {
-          throw new Error(
-            `当前绑定的模型「${modelConfig.model}」缺少 API Key。` +
-            `请到“设置 -> API Keys/模型”补全，或切换模型后重试。`
-          )
-        }
-        throw new Error(`No model configured for provider: ${modelConfig.provider}`)
+        throw new Error(
+          `MODEL_CREDENTIAL_MISSING: 模型「${modelSelection.model}」缺少 API Key。请在“设置 -> API Keys/模型”补全后重试。`
+        )
       }
 
-      if (runtimeResolvedModel) {
-        await this.prisma.task.update({
-          where: { id: task.id },
-          data: {
-            assignedModel: runtimeResolvedModel.model,
-            metadata: {
-              category: resolvedCategory,
-              subagent_type: resolvedSubagentType,
-              parentTaskId,
-              model: runtimeResolvedModel.model,
-              modelSource,
-              runtimeResolvedProvider: runtimeResolvedModel.provider,
-              ...(metadata || {})
-            }
-          }
-        })
-      }
-
-      const adapter = createLLMAdapter(modelConfig.provider, {
+      const adapter = createLLMAdapter(modelSelection.provider, {
         apiKey,
         baseURL
       })
 
-      const [agentBinding, categoryBinding] = await Promise.all([
+      const [agentBinding, categoryBinding, maxToolIterationsSetting] = await Promise.all([
         resolvedSubagentType ? this.bindingService.getAgentBinding(resolvedSubagentType) : Promise.resolve(null),
-        resolvedCategory ? this.bindingService.getCategoryBinding(resolvedCategory) : Promise.resolve(null)
+        resolvedCategory ? this.bindingService.getCategoryBinding(resolvedCategory) : Promise.resolve(null),
+        this.prisma.systemSetting.findUnique({ where: { key: SETTING_KEYS.MAX_TOOL_ITERATIONS } })
       ])
       const scopedToolNames = resolveScopedRuntimeToolNames({
         subagentType: resolvedSubagentType,
@@ -691,28 +550,33 @@ export class DelegateEngine {
         }
       ]
 
-      await this.safeAddRunLog(runId, {
-        timestamp: new Date().toISOString(),
-        level: 'info',
-        message: 'Sending delegate task prompt to LLM',
-        data: {
-          model: modelConfig.model,
-          temperature: modelConfig.temperature,
-          messageCount: messages.length,
-          useDynamicPrompt,
-          systemPromptTokens
-        }
-      })
-
+      const maxToolIterations = parseSettingInt(maxToolIterationsSetting?.value, 1, 1000)
+      const baseConfig = (modelSelection.config ?? {}) as LLMConfig
       const llmConfig: LLMConfig = {
-        model: modelConfig.model,
-        temperature: modelConfig.temperature,
+        ...baseConfig,
+        model: modelSelection.model,
+        temperature: modelSelection.temperature ?? baseConfig.temperature ?? 0.5,
+        maxToolIterations: maxToolIterations ?? baseConfig.maxToolIterations,
         workspaceDir,
         sessionId: resolvedSessionId,
         agentCode: resolvedSubagentType,
         tools: scopedToolDefinitions,
         abortSignal
       }
+
+      await this.safeAddRunLog(runId, {
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: 'Sending delegate task prompt to LLM',
+        data: {
+          model: modelSelection.model,
+          temperature: (modelSelection.temperature ?? 0.5),
+          messageCount: messages.length,
+          useDynamicPrompt,
+          systemPromptTokens,
+          maxToolIterations: llmConfig.maxToolIterations
+        }
+      })
       const invokeModel = async (inputMessages: Message[]) => {
         const invoke = async () =>
           await toolExecutionService.withAllowedTools(effectiveScopedToolNames, async () =>
@@ -756,11 +620,7 @@ export class DelegateEngine {
         truncatedOutput = truncateToTokenLimit(response.content, 50000).result
 
         if (!truncatedOutput.trim()) {
-          truncatedOutput = [
-            '模型返回了空文本输出。',
-            `任务描述：${description}`,
-            '请重试该任务并返回可执行结果。'
-          ].join('\n')
+          throw new Error('Delegate task returned empty output after recovery prompt')
         }
       }
 
@@ -812,7 +672,7 @@ export class DelegateEngine {
         output: truncatedOutput,
         success: true,
         agentType: resolvedSubagentType || resolvedCategory,
-        model: modelConfig.model,
+        model: modelSelection.model,
         modelSource,
         runId: runId || undefined,
         systemPromptTokens
@@ -890,7 +750,11 @@ export class DelegateEngine {
           message: 'Tool execution batch started',
           data: {
             toolCount: toolCalls.length,
-            tools: toolCalls.map(toolCall => toolCall.name)
+            tools: toolCalls.map(toolCall => toolCall.name),
+            toolResolutions: toolCalls.map(toolCall => ({
+              requestedToolName: toolCall.name,
+              resolvedToolName: toolExecutionService.resolveToolName(toolCall.name)
+            }))
           }
         })
       }
@@ -905,6 +769,7 @@ export class DelegateEngine {
             message: 'Tool execution completed',
             data: {
               toolName: output.toolCall.name,
+              resolvedToolName: toolExecutionService.resolveToolName(output.toolCall.name),
               toolCallId: output.toolCall.id,
               success: output.success,
               durationMs: output.durationMs,
@@ -979,111 +844,6 @@ export class DelegateEngine {
     }
   }
 
-  /**
-   * 获取数据库中所有配置的可用模型集合
-   * 用于 fallback chain 的可用性检查
-   */
-  private async getAvailableModelSet(): Promise<Set<string>> {
-    try {
-      const models = await this.prisma.model.findMany({
-        select: { provider: true, modelName: true }
-      })
-      const modelSet = new Set<string>()
-      for (const m of models) {
-        modelSet.add(`${m.provider}/${m.modelName}`)
-        modelSet.add(m.modelName)
-      }
-      return modelSet
-    } catch (error) {
-      this.logger.warn('Failed to fetch available models for fallback resolution', {
-        error: error instanceof Error ? error.message : String(error)
-      })
-      return new Set<string>()
-    }
-  }
-
-  private getProviderFromModel(_model: string): string {
-    return 'openai-compatible'
-  }
-
-  private parseModelSpecifier(spec: string): { provider: string; model: string } {
-    const trimmed = spec.trim()
-    const parts = trimmed.split('/')
-    if (parts.length >= 2) {
-      return { provider: parts[0], model: parts.slice(1).join('/') }
-    }
-    return { provider: this.getProviderFromModel(trimmed), model: trimmed }
-  }
-
-  private async getModelByProvider(provider: string) {
-    return await this.prisma.model.findFirst({
-      where: { provider },
-      include: { apiKeyRef: true },
-      orderBy: { createdAt: 'desc' }
-    })
-  }
-
-  private extractDecryptedApiKeyFromModel(model: {
-    apiKey?: string | null
-    apiKeyRef?: { encryptedKey: string; baseURL: string } | null
-  }): string {
-    const secureStorage = SecureStorageService.getInstance()
-    const decrypted = model.apiKeyRef?.encryptedKey
-      ? secureStorage.decrypt(model.apiKeyRef.encryptedKey)
-      : model.apiKey
-        ? secureStorage.decrypt(model.apiKey)
-        : null
-    return decrypted?.trim() || ''
-  }
-
-  private async resolveCredentialedModel(input: {
-    provider: string
-    preferredModel?: string
-  }): Promise<{ provider: string; modelName: string; apiKey: string; baseURL?: string } | null> {
-    const candidates: Array<{
-      provider: string
-      modelName: string
-      apiKey?: string | null
-      baseURL?: string | null
-      apiKeyRef?: { encryptedKey: string; baseURL: string } | null
-    }> = []
-
-    if (input.preferredModel?.trim()) {
-      const exact = await this.prisma.model.findFirst({
-        where: {
-          provider: input.provider,
-          modelName: input.preferredModel.trim()
-        },
-        include: { apiKeyRef: true },
-        orderBy: { createdAt: 'desc' }
-      })
-      if (exact) {
-        candidates.push(exact)
-      }
-    }
-
-    const providerLatest = await this.getModelByProvider(input.provider)
-    if (providerLatest) {
-      candidates.push(providerLatest)
-    }
-
-
-    for (const candidate of candidates) {
-      const apiKey = this.extractDecryptedApiKeyFromModel(candidate)
-      if (!apiKey) {
-        continue
-      }
-
-      return {
-        provider: candidate.provider,
-        modelName: candidate.modelName,
-        apiKey,
-        baseURL: candidate.apiKeyRef?.baseURL ?? candidate.baseURL ?? undefined
-      }
-    }
-
-    return null
-  }
 
   private async getOrCreateDefaultSession() {
     const existingSession = await this.prisma.session.findFirst({

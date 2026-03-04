@@ -9,6 +9,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   createdAt: Date | string | number
+  metadata?: Record<string, unknown>
   isStreaming?: boolean
   toolCalls?: StreamingToolCall[]
   error?: { message: string; code?: string }
@@ -24,6 +25,31 @@ export function MessageCard({ message }: MessageCardProps) {
   const hasError = !!message.error
 
   const timestamp = message.createdAt ? new Date(message.createdAt).toLocaleString() : ''
+  const contextInjectionSummary =
+    !isUser && message.metadata && typeof message.metadata === 'object'
+      ? ((message.metadata as Record<string, unknown>).contextInjectionSummary as
+          | Record<string, unknown>
+          | undefined)
+      : undefined
+
+  const summaryTitle =
+    typeof contextInjectionSummary?.title === 'string'
+      ? contextInjectionSummary.title
+      : '本次注入上下文摘要'
+  const summaryTotalCount =
+    typeof contextInjectionSummary?.totalCount === 'number' ? contextInjectionSummary.totalCount : 0
+  const summaryAcceptedCount =
+    typeof contextInjectionSummary?.acceptedCount === 'number'
+      ? contextInjectionSummary.acceptedCount
+      : 0
+  const summaryFilteredCount =
+    typeof contextInjectionSummary?.filteredCount === 'number'
+      ? contextInjectionSummary.filteredCount
+      : 0
+  const summaryTruncatedCount =
+    typeof contextInjectionSummary?.truncatedCount === 'number'
+      ? contextInjectionSummary.truncatedCount
+      : 0
 
   if (isSystem) {
     return (
@@ -94,6 +120,17 @@ export function MessageCard({ message }: MessageCardProps) {
               )}
             </div>
             <p className="mt-1 ml-6">{message.error?.message}</p>
+          </div>
+        )}
+
+        {/* Context injection summary */}
+        {!isUser && contextInjectionSummary && (
+          <div className="rounded-lg p-3 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-xs text-[var(--text-secondary)]">
+            <div className="font-medium text-[var(--text-primary)]">{summaryTitle}</div>
+            <div className="mt-1">
+              总计 {summaryTotalCount} · 接受 {summaryAcceptedCount} · 过滤 {summaryFilteredCount} · 截断{' '}
+              {summaryTruncatedCount}
+            </div>
           </div>
         )}
 

@@ -13,11 +13,18 @@ export default defineConfig({
       'dist/',
       'out/',
       '参考项目/**',
-      'tests/e2e/**'
+      'tests/e2e/**',
+      'experiments/**'
     ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
+      thresholds: {
+        lines: 20,
+        functions: 20,
+        branches: 10,
+        statements: 20
+      },
       exclude: [
         'node_modules/',
         'tests/',

@@ -1,4 +1,9 @@
-import { getAgentByCode } from '@/shared/agent-definitions'
+import {
+  getAgentByCode,
+  listOpenClawCapabilitiesByAgent,
+  listOpenClawCapabilitiesByCategory,
+  type OpenClawCapabilityId
+} from '@/shared/agent-definitions'
 
 const TOOL_ALIAS_MAP: Record<string, string[]> = {
   read: ['file_read'],
@@ -22,7 +27,8 @@ const TOOL_ALIAS_MAP: Record<string, string[]> = {
   lsp_find_references: ['lsp_find_references'],
   lsp_symbols: ['lsp_symbols'],
   context7: ['webfetch', 'websearch'],
-  github_search: ['websearch']
+  github_search: ['websearch'],
+  delegate_task: []
 }
 
 const CATEGORY_TOOL_PROFILES: Record<string, string[]> = {
@@ -34,6 +40,13 @@ const CATEGORY_TOOL_PROFILES: Record<string, string[]> = {
   guixu: ['read', 'write', 'edit', 'bash', 'glob', 'grep', 'webfetch'],
   tudi: ['read', 'write', 'edit', 'glob', 'grep'],
   dayu: ['read', 'write', 'edit', 'bash', 'glob', 'grep']
+}
+
+const CAPABILITY_TOOL_PROFILE: Record<OpenClawCapabilityId, string[]> = {
+  'oc.code.search': ['read', 'glob', 'grep'],
+  'oc.code.modify': ['write', 'edit'],
+  'oc.task.orchestrate': ['delegate_task'],
+  'oc.background.observe': ['bash', 'read', 'grep']
 }
 
 type ResolveToolScopeInput = {
@@ -53,6 +66,10 @@ function normalizeToolNames(toolNames: string[], availableToolNames?: Set<string
   )
 }
 
+function resolveCapabilityTools(capabilityIds: OpenClawCapabilityId[]): string[] {
+  return Array.from(new Set(capabilityIds.flatMap(id => CAPABILITY_TOOL_PROFILE[id] ?? [])))
+}
+
 export function resolveAgentRuntimeToolNames(
   agentCode: string,
   availableToolNames?: Set<string>
@@ -62,11 +79,12 @@ export function resolveAgentRuntimeToolNames(
     return undefined
   }
 
-  if (agentDefinition.tools.length === 0) {
-    return []
-  }
+  const capabilityTools = resolveCapabilityTools(
+    listOpenClawCapabilitiesByAgent(agentDefinition.code).map(capability => capability.id)
+  )
 
-  return normalizeToolNames(agentDefinition.tools, availableToolNames)
+  const mergedToolNames = Array.from(new Set([...agentDefinition.tools, ...capabilityTools]))
+  return normalizeToolNames(mergedToolNames, availableToolNames)
 }
 
 export function resolveCategoryRuntimeToolNames(
@@ -75,11 +93,16 @@ export function resolveCategoryRuntimeToolNames(
 ): string[] | undefined {
   const normalizedCategory = categoryCode.toLowerCase()
   const profile = CATEGORY_TOOL_PROFILES[normalizedCategory]
-  if (!profile) {
+  const capabilityTools = resolveCapabilityTools(
+    listOpenClawCapabilitiesByCategory(normalizedCategory).map(capability => capability.id)
+  )
+
+  if (!profile && capabilityTools.length === 0) {
     return undefined
   }
 
-  return normalizeToolNames(profile, availableToolNames)
+  const mergedProfile = Array.from(new Set([...(capabilityTools.length > 0 ? capabilityTools : []), ...(profile ?? [])]))
+  return normalizeToolNames(mergedProfile, availableToolNames)
 }
 
 export function resolveScopedRuntimeToolNames(

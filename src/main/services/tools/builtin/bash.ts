@@ -2,12 +2,7 @@ import { spawn, ChildProcess } from 'child_process'
 import path from 'path'
 import os from 'os'
 import type { Tool, ToolExecutionContext, ToolExecutionResult } from '../tool.interface'
-import {
-  backgroundTaskManager,
-  getTaskOutput,
-  cancelTask,
-  type BackgroundTask
-} from '../background'
+import { backgroundTaskManager, getTaskOutput, cancelTask } from '../background'
 
 // Constants
 const DEFAULT_TIMEOUT_MS = 120_000 // 120 seconds
@@ -71,13 +66,6 @@ interface BackgroundProcess {
 const backgroundProcesses = new Map<string, BackgroundProcess>()
 
 /**
- * Generate unique ID for background processes
- */
-function generateProcessId(): string {
-  return `bg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
-}
-
-/**
  * Check if command contains dangerous patterns
  */
 function isDangerousCommand(command: string): { dangerous: boolean; warning?: string } {
@@ -120,11 +108,6 @@ function getShell(): { shell: string; shellArgs: string[] } {
   const isWindows = os.platform() === 'win32'
 
   if (isWindows) {
-    // Try PowerShell first, fall back to cmd
-    const powershell = process.env.COMSPEC?.includes('powershell')
-      ? process.env.COMSPEC
-      : 'powershell.exe'
-
     return {
       shell: process.env.COMSPEC || 'cmd.exe',
       shellArgs: ['/c']
@@ -228,65 +211,6 @@ async function executeCommand(
       })
     })
   })
-}
-
-/**
- * Launch background process
- */
-function launchBackgroundProcess(
-  command: string,
-  cwd: string
-): BackgroundProcess {
-  const { shell, shellArgs } = getShell()
-  const id = generateProcessId()
-
-  const proc = spawn(shell, [...shellArgs, command], {
-    cwd,
-    env: { ...process.env },
-    stdio: ['pipe', 'pipe', 'pipe'],
-    detached: true,
-    windowsHide: true
-  })
-
-  const bgProcess: BackgroundProcess = {
-    id,
-    pid: proc.pid!,
-    command,
-    startTime: Date.now(),
-    process: proc,
-    stdout: '',
-    stderr: '',
-    exitCode: null,
-    status: 'running'
-  }
-
-  // Capture output
-  proc.stdout?.on('data', (data: Buffer) => {
-    bgProcess.stdout += data.toString()
-  })
-
-  proc.stderr?.on('data', (data: Buffer) => {
-    bgProcess.stderr += data.toString()
-  })
-
-  // Handle completion
-  proc.on('close', (code) => {
-    bgProcess.exitCode = code
-    bgProcess.status = code === 0 ? 'completed' : 'error'
-  })
-
-  proc.on('error', (err) => {
-    bgProcess.stderr += '\n' + err.message
-    bgProcess.status = 'error'
-    bgProcess.exitCode = 1
-  })
-
-  backgroundProcesses.set(id, bgProcess)
-
-  // Unref to allow parent process to exit
-  proc.unref()
-
-  return bgProcess
 }
 
 /**
@@ -497,7 +421,7 @@ Safety:
       }
 
       if (result.stdout) {
-        const { text, truncated } = truncateOutput(result.stdout, MAX_OUTPUT_BYTES)
+        const { text } = truncateOutput(result.stdout, MAX_OUTPUT_BYTES)
         output += text
       }
 

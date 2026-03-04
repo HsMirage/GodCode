@@ -7,7 +7,7 @@ test.describe('MVP1 End-to-End Tests', () => {
   })
 
   test('should display CodeAll branding', async ({ window }) => {
-    const branding = window.locator('text=CodeAll')
+    const branding = window.locator('text=CodeAll').first()
     await expect(branding).toBeVisible()
   })
 
@@ -21,3 +21,4 @@ test.describe('MVP1 End-to-End Tests', () => {
     await expect(textarea).toBeVisible()
   })
 })
+

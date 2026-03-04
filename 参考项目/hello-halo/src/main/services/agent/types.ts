@@ -19,6 +19,7 @@ export interface ApiCredentials {
   baseUrl: string
   apiKey: string
   model: string
+  displayModel?: string
   provider: 'anthropic' | 'openai' | 'oauth'
   /** Custom headers for OAuth providers */
   customHeaders?: Record<string, string>
@@ -170,11 +171,13 @@ export type V2SDKSession = {
 /**
  * Session configuration that requires session rebuild when changed
  * These are "process-level" parameters fixed at Claude Code subprocess startup
+ *
+ * Note: model changes are handled via credentialsGeneration in config.service
+ * (model is part of the aiSources signature), not through SessionConfig.
  */
 export interface SessionConfig {
   aiBrowserEnabled: boolean
-  // model is now dynamic, no rebuild needed
-  // thinkingEnabled is now dynamic, no rebuild needed
+  // thinkingEnabled is dynamic via setMaxThinkingTokens, no rebuild needed
 }
 
 /**

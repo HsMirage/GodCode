@@ -30,10 +30,23 @@ interface ProviderFormData {
   initialModels: string[]
 }
 
+type ModelApiProtocol = 'chat/completions' | 'responses'
+
 interface ModelFormData {
   modelName: string
   contextSize: number
   thinkingMode: boolean
+  apiProtocol: ModelApiProtocol
+}
+
+function normalizeApiProtocol(value: unknown): ModelApiProtocol {
+  if (value === 'chat/completions' || value === 'responses') {
+    return value
+  }
+
+  throw new Error(
+    `INVALID_API_PROTOCOL: 非法协议值「${String(value ?? '')}」。仅支持 chat/completions 或 responses。`
+  )
 }
 
 export function ProviderModelPanel() {
@@ -60,7 +73,8 @@ export function ProviderModelPanel() {
   const [modelForm, setModelForm] = useState<ModelFormData>({
     modelName: '',
     contextSize: 32,
-    thinkingMode: false
+    thinkingMode: false,
+    apiProtocol: 'responses'
   })
 
   // Load Data
@@ -147,7 +161,7 @@ export function ProviderModelPanel() {
             modelName: modelName.trim(),
             apiKeyId: result.id,
             baseURL: providerForm.baseURL,
-            config: {}
+            config: { apiProtocol: 'responses' }
           })
         }
       }
@@ -194,7 +208,12 @@ export function ProviderModelPanel() {
   const handleAddModel = (providerId: string) => {
     setAddingModelToProviderId(providerId)
     setEditingModelId(null)
-    setModelForm({ modelName: '', contextSize: 32, thinkingMode: false })
+    setModelForm({
+      modelName: '',
+      contextSize: 32,
+      thinkingMode: false,
+      apiProtocol: 'responses'
+    })
     // Ensure provider is expanded
     setExpandedProviders(prev => ({ ...prev, [providerId]: true }))
     setSelectedProviderId(providerId)
@@ -204,11 +223,18 @@ export function ProviderModelPanel() {
     const details = modelsById[model.id]
     setEditingModelId(model.id)
     setAddingModelToProviderId(null)
-    setModelForm({
-      modelName: model.modelName,
-      contextSize: Number(details?.contextSize ?? 32),
-      thinkingMode: Boolean(details?.config?.thinkingMode ?? false)
-    })
+
+    try {
+      setModelForm({
+        modelName: model.modelName,
+        contextSize: Number(details?.contextSize ?? 32),
+        thinkingMode: Boolean(details?.config?.thinkingMode ?? false),
+        apiProtocol: normalizeApiProtocol(details?.config?.apiProtocol)
+      })
+    } catch (error) {
+      alert(error instanceof Error ? error.message : String(error))
+      return
+    }
   }
 
   const handleSaveModel = async (providerId: string) => {
@@ -219,7 +245,8 @@ export function ProviderModelPanel() {
         const existing = modelsById[editingModelId]
         const nextConfig = {
           ...(existing?.config && typeof existing.config === 'object' ? existing.config : {}),
-          thinkingMode: modelForm.thinkingMode
+          thinkingMode: modelForm.thinkingMode,
+          apiProtocol: modelForm.apiProtocol
         }
         await window.codeall.invoke('model:update', {
           id: editingModelId,
@@ -240,7 +267,10 @@ export function ProviderModelPanel() {
           apiKeyId: provider.id,
           baseURL: provider.baseURL,
           contextSize: modelForm.contextSize,
-          config: { thinkingMode: modelForm.thinkingMode }
+          config: {
+            thinkingMode: modelForm.thinkingMode,
+            apiProtocol: modelForm.apiProtocol
+          }
         })
       }
       await loadProviders()
@@ -430,7 +460,7 @@ export function ProviderModelPanel() {
         <Bot className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-2" />
 
         <div className="flex-1 grid grid-cols-12 gap-3">
-          <div className="col-span-12 md:col-span-6">
+          <div className="col-span-12 md:col-span-5">
             <label className="block text-[10px] text-[var(--text-muted)] mb-1">模型名称</label>
             <input
               type="text"
@@ -448,7 +478,7 @@ export function ProviderModelPanel() {
             />
           </div>
 
-          <div className="col-span-12 md:col-span-3">
+          <div className="col-span-12 md:col-span-2">
             <label className="block text-[10px] text-[var(--text-muted)] mb-1">
               最大上下文 (K tokens)
             </label>
@@ -465,6 +495,24 @@ export function ProviderModelPanel() {
               className="w-full bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 focus:outline-none"
             />
             <p className="mt-1 text-[10px] text-[var(--text-muted)]">范围 1-2000</p>
+          </div>
+
+          <div className="col-span-12 md:col-span-2">
+            <label className="block text-[10px] text-[var(--text-muted)] mb-1">OpenAI 协议</label>
+            <select
+              value={modelForm.apiProtocol}
+              onChange={e =>
+                setModelForm({
+                  ...modelForm,
+                  apiProtocol: normalizeApiProtocol(e.target.value)
+                })
+              }
+              className="w-full bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 focus:outline-none"
+            >
+              <option value="chat/completions">chat/completions</option>
+              <option value="responses">responses</option>
+            </select>
+            <p className="mt-1 text-[10px] text-[var(--text-muted)]">用于 OpenAI 兼容接口</p>
           </div>
 
           <div className="col-span-12 md:col-span-3">

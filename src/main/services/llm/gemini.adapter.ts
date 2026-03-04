@@ -556,7 +556,6 @@ export class GeminiAdapter implements LLMAdapter {
           const decoder = new TextDecoder()
           let buffer = ''
           let accumulatedFunctionCalls: ToolCall[] = []
-          let assistantContent = ''
 
           while (true) {
             const { done, value } = await reader.read()
@@ -584,7 +583,6 @@ export class GeminiAdapter implements LLMAdapter {
                 // 提取文本内容
                 for (const part of candidate.content.parts) {
                   if (part.text) {
-                    assistantContent += part.text
                     yield { content: part.text, done: false, type: 'content' }
                   }
 
@@ -731,39 +729,4 @@ export class GeminiAdapter implements LLMAdapter {
   }
 }
 
-// ============= 模型列表 =============
-
-export const GEMINI_MODELS = [
-  {
-    id: 'gemini-1.5-pro',
-    name: 'Gemini 1.5 Pro',
-    contextWindow: 2097152,
-    maxOutputTokens: 8192
-  },
-  {
-    id: 'gemini-1.5-flash',
-    name: 'Gemini 1.5 Flash',
-    contextWindow: 1048576,
-    maxOutputTokens: 8192
-  },
-  {
-    id: 'gemini-1.5-flash-8b',
-    name: 'Gemini 1.5 Flash-8B',
-    contextWindow: 1048576,
-    maxOutputTokens: 8192
-  },
-  {
-    id: 'gemini-2.0-flash-exp',
-    name: 'Gemini 2.0 Flash (Experimental)',
-    contextWindow: 1048576,
-    maxOutputTokens: 8192
-  },
-  {
-    id: 'gemini-exp-1206',
-    name: 'Gemini Experimental 1206',
-    contextWindow: 2097152,
-    maxOutputTokens: 8192
-  }
-] as const
-
-export type GeminiModelId = (typeof GEMINI_MODELS)[number]['id']
+// 模型能力由数据库元数据驱动，不在运行时代码内硬编码 Gemini 模型目录。

@@ -9,6 +9,9 @@ vi.mock('openai', () => {
         completions: {
           create: vi.fn()
         }
+      },
+      responses: {
+        create: vi.fn()
       }
     }))
   }
@@ -40,6 +43,8 @@ describe('OpenAIAdapter', () => {
   let adapter: OpenAIAdapter
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockCreate: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockResponsesCreate: any
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -47,6 +52,7 @@ describe('OpenAIAdapter', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mockClient = (OpenAI as any).mock.results[0].value
     mockCreate = mockClient.chat.completions.create
+    mockResponsesCreate = mockClient.responses.create
   })
 
   it('should send message successfully', async () => {
@@ -66,7 +72,7 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      { model: 'gpt-4' }
+      { model: 'gpt-4', apiProtocol: 'chat/completions' }
     )
 
     expect(result.content).toBe('Hello')
@@ -94,7 +100,7 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      { model: 'gpt-4' }
+      { model: 'gpt-4', apiProtocol: 'chat/completions' }
     )
 
     expect(result.content).toContain('Recovered text from gateway')
@@ -117,16 +123,39 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      { model: 'gpt-4' }
+      { model: 'gpt-4', apiProtocol: 'chat/completions' }
     )
 
     expect(result.content).toBe('Success')
     expect(mockCreate).toHaveBeenCalledTimes(2)
   })
 
-  it('should not throw when OpenAI-compatible response is missing choices', async () => {
+  it('should throw when OpenAI-compatible response is missing choices and fallback text', async () => {
     mockCreate.mockResolvedValue({
       usage: { prompt_tokens: 10, completion_tokens: 0 }
+    })
+
+    await expect(
+      adapter.sendMessage(
+        [
+          {
+            role: 'user',
+            content: 'Hi',
+            id: '1',
+            sessionId: 's1',
+            createdAt: new Date(),
+            metadata: {}
+          }
+        ],
+        { model: 'gpt-4', apiProtocol: 'chat/completions' }
+      )
+    ).rejects.toThrow('missing choices[0]')
+  })
+
+  it('should extract choice-level text when message field is absent', async () => {
+    mockCreate.mockResolvedValue({
+      choices: [{ text: 'Recovered from choice.text', finish_reason: 'stop' }],
+      usage: { prompt_tokens: 8, completion_tokens: 4 }
     })
 
     const result = await adapter.sendMessage(
@@ -140,11 +169,10 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      { model: 'gpt-4' }
+      { model: 'gpt-4', apiProtocol: 'chat/completions' }
     )
 
-    expect(result.content).toBe('')
-    expect(result.usage.prompt_tokens).toBe(0)
+    expect(result.content).toContain('Recovered from choice.text')
   })
 
   it(
@@ -170,7 +198,7 @@ describe('OpenAIAdapter', () => {
             metadata: {}
           }
         ],
-        { model: 'gpt-4', maxRetries: 1 }
+        { model: 'gpt-4', apiProtocol: 'chat/completions', maxRetries: 1 }
       )
 
       expect(result.content).toBe('Recovered')
@@ -200,7 +228,7 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      { model: 'gpt-4' }
+      { model: 'gpt-4', apiProtocol: 'chat/completions' }
     )) {
       chunks.push(chunk)
     }
@@ -232,7 +260,7 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      { model: 'gpt-4' }
+      { model: 'gpt-4', apiProtocol: 'chat/completions' }
     )) {
       chunks.push(chunk)
     }
@@ -292,7 +320,7 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      { model: 'gpt-4' }
+      { model: 'gpt-4', apiProtocol: 'chat/completions' }
     )
 
     expect(result.content).toBe('Tool result processed')
@@ -349,12 +377,123 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      { model: 'gpt-4', maxToolIterations: 1 }
+      { model: 'gpt-4', apiProtocol: 'chat/completions', maxToolIterations: 1 }
     )
 
     expect(result.content).toContain('TOOL_EXECUTION_SUMMARY')
     expect(result.content).toContain('file_read')
     expect(result.content).toContain('SPEC: homepage, blacklist, search')
+  })
+
+  it('should execute responses protocol in sendMessage', async () => {
+    mockResponsesCreate.mockResolvedValueOnce({
+      id: 'resp_1',
+      output_text: 'Responses hello',
+      output: [],
+      usage: { input_tokens: 7, output_tokens: 5 }
+    })
+
+    const result = await adapter.sendMessage(
+      [
+        {
+          role: 'user',
+          content: 'Hi from responses',
+          id: '1',
+          sessionId: 's1',
+          createdAt: new Date(),
+          metadata: {}
+        }
+      ],
+      { model: 'gpt-4.1-mini', apiProtocol: 'responses' }
+    )
+
+    expect(result.content).toBe('Responses hello')
+    expect(result.usage.prompt_tokens).toBe(7)
+    expect(result.usage.completion_tokens).toBe(5)
+    expect(mockResponsesCreate).toHaveBeenCalledTimes(1)
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it('should normalize responses tool schema to strict required fields', async () => {
+    const { toolExecutionService } = await import('@/main/services/tools/tool-execution.service')
+
+    vi.mocked(toolExecutionService.getToolDefinitions).mockReturnValueOnce([
+      {
+        name: 'grep',
+        description: 'Search content',
+        parameters: {
+          type: 'object',
+          properties: {
+            pattern: { type: 'string' },
+            path: { type: 'string' }
+          },
+          required: ['pattern'],
+          additionalProperties: false
+        }
+      }
+    ])
+
+    mockResponsesCreate.mockResolvedValueOnce({
+      id: 'resp_schema_1',
+      output_text: 'ok',
+      output: [],
+      usage: { input_tokens: 1, output_tokens: 1 }
+    })
+
+    await adapter.sendMessage(
+      [
+        {
+          role: 'user',
+          content: 'Use grep',
+          id: '1',
+          sessionId: 's1',
+          createdAt: new Date(),
+          metadata: {}
+        }
+      ],
+      { model: 'gpt-4.1-mini', apiProtocol: 'responses' }
+    )
+
+    const firstRequest = vi.mocked(mockResponsesCreate).mock.calls[0]?.[0] as {
+      tools?: Array<{ parameters?: { required?: string[] } }>
+    }
+
+    expect(firstRequest.tools?.[0]?.parameters?.required).toEqual(['pattern', 'path'])
+  })
+
+  it('should execute responses protocol in streamMessage', async () => {
+    const responseStream = (async function* () {
+      yield { type: 'response.output_text.delta', delta: 'Hello ' }
+      yield { type: 'response.output_text.delta', delta: 'responses' }
+      yield {
+        type: 'response.completed',
+        response: { id: 'resp_2', output: [] }
+      }
+    })()
+
+    mockResponsesCreate.mockResolvedValueOnce(responseStream)
+
+    const chunks = []
+    for await (const chunk of adapter.streamMessage(
+      [
+        {
+          role: 'user',
+          content: 'Stream via responses',
+          id: '1',
+          sessionId: 's1',
+          createdAt: new Date(),
+          metadata: {}
+        }
+      ],
+      { model: 'gpt-4.1-mini', apiProtocol: 'responses' }
+    )) {
+      chunks.push(chunk)
+    }
+
+    expect(chunks.map(c => c.content).join('')).toContain('Hello responses')
+    expect(chunks[chunks.length - 1].done).toBe(true)
+    expect(mockResponsesCreate).toHaveBeenCalledTimes(1)
+    expect(mockCreate).not.toHaveBeenCalled()
   })
 
   it('should handle tool calls in streamMessage', async () => {
@@ -424,7 +563,7 @@ describe('OpenAIAdapter', () => {
           metadata: {}
         }
       ],
-      { model: 'gpt-4' }
+      { model: 'gpt-4', apiProtocol: 'chat/completions' }
     )) {
       chunks.push(chunk)
     }

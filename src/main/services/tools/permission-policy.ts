@@ -4,7 +4,14 @@
  * 定义工具的执行权限和安全级别
  */
 
+import { logger } from '@/shared/logger'
+import { DatabaseService } from '../database'
+import { SETTING_KEYS } from '../settings/schema-registry'
+import { toolRegistry } from './tool-registry'
+
 export type ToolPermissionLevel = 'auto' | 'confirm' | 'deny'
+export type PermissionTemplate = 'safe' | 'balanced' | 'full'
+export type PermissionConfigSource = 'default' | 'template' | 'custom' | 'fallback'
 
 export interface ToolPermissionConfig {
   /** 工具名称 */
@@ -16,6 +23,32 @@ export interface ToolPermissionConfig {
   /** 是否为危险操作 */
   dangerous?: boolean
 }
+
+export interface ToolExecutionPermissionPreview {
+  requestedName: string
+  resolvedName: string
+  template: PermissionTemplate
+  permission: ToolPermissionLevel
+  source: PermissionConfigSource
+  dangerous: boolean
+  highRisk: boolean
+  highRiskEnforced: boolean
+  requiresConfirmation: boolean
+  allowedByPolicy: boolean
+  allowedWithoutConfirmation: boolean
+  reason?: string
+  confirmReason?: string
+}
+
+export const PERMISSION_TEMPLATES = {
+  SAFE: 'safe',
+  BALANCED: 'balanced',
+  FULL: 'full'
+} as const
+
+const HIGH_RISK_CONFIRMATION_REASON = 'High-risk tool requires manual confirmation'
+
+const HIGH_RISK_TOOLS = new Set<string>(['bash', 'file_write'])
 
 /**
  * 默认工具权限配置
@@ -36,7 +69,7 @@ const TOOL_PERMISSIONS: Record<string, ToolPermissionConfig> = {
     name: 'file_write',
     permission: 'confirm',
     confirmReason: 'This tool will modify files in your workspace',
-    dangerous: false
+    dangerous: true
   },
   // Grep 搜索 - 自动允许
   grep: {
@@ -117,6 +150,77 @@ const TOOL_PERMISSIONS: Record<string, ToolPermissionConfig> = {
   }
 }
 
+const TEMPLATE_PERMISSION_OVERRIDES: Record<PermissionTemplate, Record<string, ToolPermissionConfig>> = {
+  safe: {
+    file_write: {
+      name: 'file_write',
+      permission: 'deny',
+      confirmReason: 'Safe template denies write operations',
+      dangerous: true
+    },
+    bash: {
+      name: 'bash',
+      permission: 'deny',
+      confirmReason: 'Safe template denies shell execution',
+      dangerous: true
+    },
+    browser_navigate: {
+      name: 'browser_navigate',
+      permission: 'deny',
+      confirmReason: 'Safe template denies active browser interaction'
+    },
+    browser_click: {
+      name: 'browser_click',
+      permission: 'deny',
+      confirmReason: 'Safe template denies active browser interaction'
+    },
+    browser_fill: {
+      name: 'browser_fill',
+      permission: 'deny',
+      confirmReason: 'Safe template denies active browser interaction'
+    },
+    webfetch: {
+      name: 'webfetch',
+      permission: 'confirm',
+      confirmReason: 'Safe template requires confirmation for remote fetch'
+    }
+  },
+  balanced: {},
+  full: {
+    browser_navigate: {
+      name: 'browser_navigate',
+      permission: 'auto'
+    },
+    browser_click: {
+      name: 'browser_click',
+      permission: 'auto'
+    },
+    browser_fill: {
+      name: 'browser_fill',
+      permission: 'auto'
+    }
+  }
+}
+
+function cloneConfig(config: ToolPermissionConfig): ToolPermissionConfig {
+  return {
+    ...config
+  }
+}
+
+function isPermissionTemplate(value: unknown): value is PermissionTemplate {
+  return value === 'safe' || value === 'balanced' || value === 'full'
+}
+
+export function parsePermissionTemplate(value: unknown): PermissionTemplate | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase()
+  return isPermissionTemplate(normalized) ? normalized : null
+}
+
 /**
  * 权限策略管理器
  */
@@ -124,51 +228,171 @@ export class PermissionPolicy {
   private allowList: Set<string> = new Set()
   private denyList: Set<string> = new Set()
   private customPermissions: Map<string, ToolPermissionConfig> = new Map()
+  private activeTemplate: PermissionTemplate = 'balanced'
+
+  private normalizeToolName(toolName: string): string {
+    return toolRegistry.resolveName(toolName.trim())
+  }
+
+  private isHighRiskTool(toolName: string): boolean {
+    return HIGH_RISK_TOOLS.has(toolName)
+  }
+
+  private resolvePermission(toolName: string): {
+    config: ToolPermissionConfig
+    source: PermissionConfigSource
+    highRiskEnforced: boolean
+  } {
+    const normalizedName = this.normalizeToolName(toolName)
+
+    let source: PermissionConfigSource = 'fallback'
+    let selected: ToolPermissionConfig = {
+      name: normalizedName,
+      permission: 'confirm',
+      confirmReason: 'Unknown tool - confirmation required'
+    }
+
+    const defaultConfig = TOOL_PERMISSIONS[normalizedName]
+    if (defaultConfig) {
+      selected = cloneConfig(defaultConfig)
+      source = 'default'
+    }
+
+    const templateOverride = TEMPLATE_PERMISSION_OVERRIDES[this.activeTemplate][normalizedName]
+    if (templateOverride) {
+      selected = {
+        ...selected,
+        ...cloneConfig(templateOverride),
+        name: normalizedName
+      }
+      source = 'template'
+    }
+
+    const customConfig = this.customPermissions.get(normalizedName)
+    if (customConfig) {
+      selected = {
+        ...selected,
+        ...cloneConfig(customConfig),
+        name: normalizedName
+      }
+      source = 'custom'
+    }
+
+    const highRiskEnforced = this.isHighRiskTool(normalizedName) && selected.permission === 'auto'
+    if (highRiskEnforced) {
+      selected = {
+        ...selected,
+        name: normalizedName,
+        permission: 'confirm',
+        confirmReason: selected.confirmReason ?? HIGH_RISK_CONFIRMATION_REASON,
+        dangerous: true
+      }
+    }
+
+    return {
+      config: selected,
+      source,
+      highRiskEnforced
+    }
+  }
+
+  private computeAllowDecision(
+    normalizedName: string,
+    permission: ToolPermissionLevel
+  ): { allowed: boolean; reason?: string } {
+    if (permission === 'deny') {
+      return {
+        allowed: false,
+        reason: 'Permission template or custom policy denies this tool'
+      }
+    }
+
+    if (this.denyList.has(normalizedName)) {
+      return {
+        allowed: false,
+        reason: 'Tool is blocked by deny list'
+      }
+    }
+
+    if (this.allowList.size > 0 && !this.allowList.has(normalizedName)) {
+      return {
+        allowed: false,
+        reason: 'Tool is not in allow list'
+      }
+    }
+
+    return {
+      allowed: true
+    }
+  }
 
   /**
    * 允许工具执行
    */
   allow(toolName: string): void {
-    this.allowList.add(toolName)
-    this.denyList.delete(toolName)
+    const normalizedName = this.normalizeToolName(toolName)
+    this.allowList.add(normalizedName)
+    this.denyList.delete(normalizedName)
   }
 
   /**
    * 拒绝工具执行
    */
   deny(toolName: string): void {
-    this.denyList.add(toolName)
-    this.allowList.delete(toolName)
+    const normalizedName = this.normalizeToolName(toolName)
+    this.denyList.add(normalizedName)
+    this.allowList.delete(normalizedName)
+  }
+
+  /**
+   * 应用权限模板
+   */
+  applyTemplate(template: PermissionTemplate): void {
+    this.activeTemplate = template
+  }
+
+  getActiveTemplate(): PermissionTemplate {
+    return this.activeTemplate
   }
 
   /**
    * 设置工具权限配置
    */
   setPermission(config: ToolPermissionConfig): void {
-    this.customPermissions.set(config.name, config)
+    const normalizedName = this.normalizeToolName(config.name)
+    this.customPermissions.set(normalizedName, {
+      ...config,
+      name: normalizedName
+    })
   }
 
   /**
    * 获取工具权限配置
    */
   getPermission(toolName: string): ToolPermissionConfig {
-    // 优先使用自定义配置
-    const custom = this.customPermissions.get(toolName)
-    if (custom) {
-      return custom
-    }
+    return this.resolvePermission(toolName).config
+  }
 
-    // 使用默认配置
-    const defaultConfig = TOOL_PERMISSIONS[toolName]
-    if (defaultConfig) {
-      return defaultConfig
-    }
+  getExecutionPreview(toolName: string, requestedName = toolName): ToolExecutionPermissionPreview {
+    const normalizedName = this.normalizeToolName(toolName)
+    const { config, source, highRiskEnforced } = this.resolvePermission(normalizedName)
+    const allowDecision = this.computeAllowDecision(normalizedName, config.permission)
+    const requiresConfirmation = config.permission === 'confirm'
 
-    // 未知工具默认需要确认
     return {
-      name: toolName,
-      permission: 'confirm',
-      confirmReason: 'Unknown tool - confirmation required'
+      requestedName,
+      resolvedName: normalizedName,
+      template: this.activeTemplate,
+      permission: config.permission,
+      source,
+      dangerous: config.dangerous ?? false,
+      highRisk: this.isHighRiskTool(normalizedName),
+      highRiskEnforced,
+      requiresConfirmation,
+      allowedByPolicy: allowDecision.allowed,
+      allowedWithoutConfirmation: allowDecision.allowed && !requiresConfirmation,
+      reason: allowDecision.reason,
+      confirmReason: config.confirmReason
     }
   }
 
@@ -176,9 +400,9 @@ export class PermissionPolicy {
    * 检查工具是否被允许执行
    */
   isAllowed(toolName: string): boolean {
-    if (this.denyList.has(toolName)) return false
-    if (this.allowList.size === 0) return true
-    return this.allowList.has(toolName)
+    const normalizedName = this.normalizeToolName(toolName)
+    const config = this.getPermission(normalizedName)
+    return this.computeAllowDecision(normalizedName, config.permission).allowed
   }
 
   /**
@@ -201,19 +425,23 @@ export class PermissionPolicy {
    * 获取所有工具权限配置
    */
   getAllPermissions(): ToolPermissionConfig[] {
-    const all = new Map<string, ToolPermissionConfig>()
+    const allNames = new Set<string>()
 
-    // 添加默认配置
-    for (const [name, config] of Object.entries(TOOL_PERMISSIONS)) {
-      all.set(name, config)
+    for (const name of Object.keys(TOOL_PERMISSIONS)) {
+      allNames.add(name)
     }
 
-    // 覆盖自定义配置
-    for (const [name, config] of this.customPermissions) {
-      all.set(name, config)
+    for (const name of Object.keys(TEMPLATE_PERMISSION_OVERRIDES[this.activeTemplate])) {
+      allNames.add(name)
     }
 
-    return Array.from(all.values())
+    for (const name of this.customPermissions.keys()) {
+      allNames.add(name)
+    }
+
+    return Array.from(allNames)
+      .sort((a, b) => a.localeCompare(b))
+      .map(name => this.getPermission(name))
   }
 
   /**
@@ -223,10 +451,36 @@ export class PermissionPolicy {
     this.allowList.clear()
     this.denyList.clear()
     this.customPermissions.clear()
+    this.activeTemplate = 'balanced'
   }
 }
 
 export const defaultPolicy = new PermissionPolicy()
+
+export async function initializePermissionTemplateFromSettings(): Promise<void> {
+  try {
+    const dbService = DatabaseService.getInstance()
+    await dbService.init()
+    const prisma = dbService.getClient()
+
+    const setting = await prisma.systemSetting.findUnique({
+      where: { key: SETTING_KEYS.PERMISSION_TEMPLATE }
+    })
+
+    const parsed = parsePermissionTemplate(setting?.value)
+    defaultPolicy.applyTemplate(parsed ?? 'balanced')
+
+    logger.info('[PermissionPolicy] Applied permission template from settings', {
+      template: defaultPolicy.getActiveTemplate(),
+      source: parsed ? 'stored' : 'default'
+    })
+  } catch (error) {
+    logger.warn('[PermissionPolicy] Failed to initialize permission template from settings', {
+      error: error instanceof Error ? error.message : String(error)
+    })
+    defaultPolicy.applyTemplate('balanced')
+  }
+}
 
 /**
  * 获取工具的安全等级描述

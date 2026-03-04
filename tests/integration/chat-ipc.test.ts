@@ -3,6 +3,10 @@ import type { IpcMainInvokeEvent } from 'electron'
 import { DatabaseService } from '../../src/main/services/database'
 import type { PrismaClient } from '@prisma/client'
 import fs from 'fs'
+import { EVENT_CHANNELS } from '../../src/shared/ipc-channels'
+import { loadBuiltinSkills } from '../../src/main/services/skills/loader'
+import { skillRegistry } from '../../src/main/services/skills/registry'
+import { hookManager } from '../../src/main/services/hooks'
 
 // Set E2E test mode BEFORE imports that read it
 process.env.CODEALL_E2E_TEST = '1'
@@ -123,6 +127,29 @@ const createDelegate = (modelName: string) => ({
       return { ...item, space }
     }
 
+    // agentBinding/categoryBinding include model relation in model selection service
+    if (include && (modelName === 'agentBinding' || modelName === 'categoryBinding') && include.model) {
+      const model = item.modelId ? mockStore.model.find((m: any) => m.id === item.modelId) || null : null
+      if (model && include.model.include?.apiKeyRef) {
+        return {
+          ...item,
+          model: {
+            ...model,
+            apiKeyRef: model.apiKeyRef ?? null
+          }
+        }
+      }
+      return { ...item, model }
+    }
+
+    // model include apiKeyRef relation in model selection service
+    if (include && modelName === 'model' && include.apiKeyRef) {
+      return {
+        ...item,
+        apiKeyRef: item.apiKeyRef ?? null
+      }
+    }
+
     return item
   }),
   findFirst: vi.fn(async ({ where, orderBy }: any) => {
@@ -223,6 +250,7 @@ vi.mock('@prisma/client', () => {
 })
 
 let lastLLMConfig: any = null
+let lastLLMMessages: any[] | null = null
 
 // Mock LLM factory so tests can assert on resolved model config without real network calls.
 vi.mock('@/main/services/llm/factory', () => ({
@@ -230,6 +258,7 @@ vi.mock('@/main/services/llm/factory', () => ({
     sendMessage: vi.fn(),
     streamMessage: async function* (messages: any[], config: any) {
       lastLLMConfig = config
+      lastLLMMessages = messages
       const lastUser = [...messages].reverse().find(m => m.role === 'user')?.content ?? ''
       let content = `[Mock Response] Received: "${String(lastUser).slice(0, 50)}"`
       if (String(lastUser).toLowerCase().includes('tool:')) {
@@ -339,6 +368,9 @@ describe('Chat IPC Integration - handleMessageSend', () => {
   })
 
   beforeEach(async () => {
+    skillRegistry.clear()
+    loadBuiltinSkills({ disabledBuiltins: new Set(['git-master', 'frontend-ui-ux']) })
+
     // Clear mock stores
     mockStore.space = []
     mockStore.model = []
@@ -350,6 +382,7 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     mockStore.artifact = []
     uuidCounter = 0
     lastLLMConfig = null
+    lastLLMMessages = null
     mockBoulderState.getState.mockClear()
     mockBoulderState.isSessionTracked.mockClear()
     mockBoulderState.updateState.mockClear()
@@ -382,7 +415,7 @@ describe('Chat IPC Integration - handleMessageSend', () => {
         modelName: 'test-default-model',
         apiKey: 'test-key',
         baseURL: null,
-        config: {}
+        config: { apiProtocol: 'chat/completions' }
       }
     })
     await prisma.systemSetting.create({
@@ -402,6 +435,106 @@ describe('Chat IPC Integration - handleMessageSend', () => {
       await prisma.message.deleteMany({ where: { sessionId } })
       await prisma.session.delete({ where: { id: sessionId } }).catch(() => {})
       await prisma.space.delete({ where: { id: spaceId } }).catch(() => {})
+    }
+  })
+
+  test('persists context injection summary metadata for assistant message', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    const originalHooks = hookManager.getAll().map(hook => ({ ...hook }))
+    hookManager.clear()
+    hookManager.registerMany(originalHooks)
+
+    hookManager.register({
+      id: 'test-context-injection-summary',
+      name: 'Test Context Injection Summary',
+      event: 'onMessageCreate',
+      priority: 1,
+      enabled: true,
+      callback: async () => ({
+        inject: {
+          type: 'custom',
+          source: 'test-suite',
+          priority: 1,
+          content: '## docs/notes.md\nline one\nline two'
+        }
+      })
+    })
+
+    try {
+      const result = await handleMessageSend(mockEvent, {
+        sessionId,
+        content: 'Please summarize injected context metadata',
+        agentCode: 'luban'
+      })
+
+      const summary = (result.metadata as any)?.contextInjectionSummary
+      expect(summary).toBeDefined()
+      expect(summary.title).toBe('本次注入上下文摘要')
+      expect(summary.totalCount).toBeGreaterThan(0)
+      expect(summary.acceptedCount).toBeGreaterThan(0)
+      expect(summary.items?.[0]?.source).toBe('test-suite')
+    } finally {
+      hookManager.clear()
+      hookManager.registerMany(originalHooks)
+    }
+  })
+
+  test('filters sensitive paths from injected context before LLM call by default', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    const originalHooks = hookManager.getAll().map(hook => ({ ...hook }))
+    hookManager.clear()
+    hookManager.registerMany(originalHooks)
+
+    hookManager.register({
+      id: 'test-sensitive-context-filtering',
+      name: 'Test Sensitive Context Filtering',
+      event: 'onMessageCreate',
+      priority: 1,
+      enabled: true,
+      callback: async () => ({
+        inject: {
+          type: 'custom',
+          source: 'test-sensitive',
+          priority: 1,
+          content:
+            '## docs/normal.md\nvisible-normal-line\n\n---\n\n## certs/private.key\nPRIVATE KEY SHOULD BE FILTERED\n\n---\n\n## .env\nAPI_KEY=SHOULD_BE_FILTERED\n\n---\n\n## notes/mixed.md\nline-before\n/tmp/certs/dev.pem\nline-after'
+        }
+      })
+    })
+
+    try {
+      await handleMessageSend(mockEvent, {
+        sessionId,
+        content: 'Please process context with sensitive paths',
+        agentCode: 'luban'
+      })
+
+      const systemMessages = (lastLLMMessages || []).filter((msg: any) => msg.role === 'system')
+      const injectedSystem = systemMessages.find(
+        (msg: any) => typeof msg?.content === 'string' && String(msg.content).includes('visible-normal-line')
+      )
+
+      expect(injectedSystem).toBeDefined()
+      const injectedContent = String(injectedSystem.content)
+      expect(injectedContent).toContain('visible-normal-line')
+      expect(injectedContent).toContain('line-before')
+      expect(injectedContent).toContain('line-after')
+      expect(injectedContent).not.toContain('PRIVATE KEY SHOULD BE FILTERED')
+      expect(injectedContent).not.toContain('API_KEY=SHOULD_BE_FILTERED')
+      expect(injectedContent).not.toContain('/tmp/certs/dev.pem')
+
+      const assistantMessage = [...mockStore.message]
+        .reverse()
+        .find((msg: any) => msg.role === 'assistant' && msg.sessionId === sessionId)
+      const summary = assistantMessage?.metadata?.contextInjectionSummary
+      expect(summary).toBeDefined()
+      expect(summary.filteredCount).toBeGreaterThan(0)
+      expect(summary.items.some((item: any) => item.filteredSensitive === true)).toBe(true)
+    } finally {
+      hookManager.clear()
+      hookManager.registerMany(originalHooks)
     }
   })
 
@@ -499,7 +632,7 @@ describe('Chat IPC Integration - handleMessageSend', () => {
         modelName: 'model-A',
         apiKey: 'key-A',
         baseURL: null,
-        config: {}
+        config: { apiProtocol: 'chat/completions' }
       }
     })
     const modelB = await prisma.model.create({
@@ -508,7 +641,7 @@ describe('Chat IPC Integration - handleMessageSend', () => {
         modelName: 'model-B',
         apiKey: 'key-B',
         baseURL: null,
-        config: {}
+        config: { apiProtocol: 'chat/completions' }
       }
     })
 
@@ -552,7 +685,7 @@ describe('Chat IPC Integration - handleMessageSend', () => {
         modelName: 'model-A2',
         apiKey: 'key-A2',
         baseURL: null,
-        config: {}
+        config: { apiProtocol: 'chat/completions' }
       }
     })
 
@@ -568,6 +701,212 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     expect(lastLLMConfig).toBeTruthy()
     expect(lastLLMConfig.model).toBe('model-A2')
     expect(lastLLMConfig.agentCode).toBe('luban')
+  })
+
+  test('falls back to system default when agent binding is enabled but modelId is empty', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    const systemDefaultModel = await prisma.model.create({
+      data: {
+        provider: 'openai-compatible',
+        modelName: 'fallback-default-model',
+        apiKey: 'fallback-key',
+        baseURL: 'https://api.example.com/v1',
+        config: { apiProtocol: 'responses' }
+      }
+    })
+
+    mockStore.systemSetting = []
+    await prisma.systemSetting.create({ data: { key: 'defaultModelId', value: systemDefaultModel.id } })
+
+    await prisma.agentBinding.create({
+      data: {
+        agentCode: 'luban',
+        agentName: '鲁班',
+        agentType: 'primary',
+        description: null,
+        modelId: null,
+        temperature: 0.55,
+        tools: [],
+        systemPrompt: null,
+        enabled: true
+      }
+    })
+
+    await handleMessageSend(mockEvent, {
+      sessionId,
+      content: 'Please use fallback default model',
+      agentCode: 'luban'
+    })
+
+    expect(lastLLMConfig).toBeTruthy()
+    expect(lastLLMConfig.model).toBe('fallback-default-model')
+    expect(lastLLMConfig.agentCode).toBe('luban')
+    expect(lastLLMConfig.apiProtocol).toBe('responses')
+  })
+
+  test('keeps responses protocol for repeated openai-compatible sends', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    const responsesModel = await prisma.model.create({
+      data: {
+        provider: 'openai-compatible',
+        modelName: 'responses-stability-model',
+        apiKey: 'responses-key',
+        baseURL: 'https://api.example.com/v1',
+        config: { apiProtocol: 'responses' }
+      }
+    })
+
+    mockStore.systemSetting = []
+    await prisma.systemSetting.create({ data: { key: 'defaultModelId', value: responsesModel.id } })
+
+    for (let i = 0; i < 20; i += 1) {
+      await handleMessageSend(mockEvent, {
+        sessionId,
+        content: `Repeated message #${i + 1}`,
+        agentCode: 'luban'
+      })
+
+      expect(lastLLMConfig).toBeTruthy()
+      expect(lastLLMConfig.model).toBe('responses-stability-model')
+      expect(lastLLMConfig.apiProtocol).toBe('responses')
+    }
+
+    const streamErrorCalls = ((mockEvent.sender.send as any).mock.calls as unknown[][]).filter(
+      call => call[0] === EVENT_CHANNELS.MESSAGE_STREAM_ERROR
+    )
+    expect(streamErrorCalls).toHaveLength(0)
+  })
+
+  test('still uses system default after agent binding reset (delete)', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    const defaultModel = await prisma.model.create({
+      data: {
+        provider: 'openai-compatible',
+        modelName: 'post-reset-default-model',
+        apiKey: 'post-reset-key',
+        baseURL: 'https://api.example.com/v1',
+        config: { apiProtocol: 'responses' }
+      }
+    })
+
+    const dedicatedModel = await prisma.model.create({
+      data: {
+        provider: 'openai-compatible',
+        modelName: 'agent-dedicated-model',
+        apiKey: 'dedicated-key',
+        baseURL: 'https://api.example.com/v1',
+        config: { apiProtocol: 'responses' }
+      }
+    })
+
+    mockStore.systemSetting = []
+    await prisma.systemSetting.create({ data: { key: 'defaultModelId', value: defaultModel.id } })
+
+    await prisma.agentBinding.create({
+      data: {
+        agentCode: 'luban',
+        agentName: '鲁班',
+        agentType: 'primary',
+        description: null,
+        modelId: dedicatedModel.id,
+        temperature: 0.42,
+        tools: [],
+        systemPrompt: null,
+        enabled: true
+      }
+    })
+
+    await handleMessageSend(mockEvent, {
+      sessionId,
+      content: 'before reset should use dedicated',
+      agentCode: 'luban'
+    })
+    expect(lastLLMConfig.model).toBe('agent-dedicated-model')
+
+    await prisma.agentBinding.deleteMany({ where: { agentCode: 'luban' } })
+
+    await handleMessageSend(mockEvent, {
+      sessionId,
+      content: 'after reset should use system default',
+      agentCode: 'luban'
+    })
+    expect(lastLLMConfig.model).toBe('post-reset-default-model')
+    expect(lastLLMConfig.apiProtocol).toBe('responses')
+  })
+
+  test('slash skill /review assembles runtime payload and stores skill metadata', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    const result = await handleMessageSend(mockEvent, {
+      sessionId,
+      content: '',
+      agentCode: 'luban',
+      skillCommand: {
+        command: '/review',
+        input: 'Please review src/main/services/skills/registry.ts',
+        rawInput: '/review Please review src/main/services/skills/registry.ts'
+      }
+    })
+
+    expect(result).toBeDefined()
+    expect(result.role).toBe('assistant')
+
+    const userMessage = mockStore.message.find((msg: any) => msg.role === 'user')
+    expect(userMessage).toBeDefined()
+    expect(String(userMessage.content)).toContain('You are a senior reviewer')
+    expect(String(userMessage.content)).toContain('Please review src/main/services/skills/registry.ts')
+
+    const userSkillMeta = (userMessage.metadata as any)?.skill
+    expect(userSkillMeta?.id).toBe('review')
+    expect(userSkillMeta?.command).toBe('/review')
+    expect(userSkillMeta?.input).toBe('Please review src/main/services/skills/registry.ts')
+
+    const assistantSkillMeta = (result.metadata as any)?.skill
+    expect(assistantSkillMeta?.id).toBe('review')
+    expect(assistantSkillMeta?.allowedTools).toEqual(['read', 'grep', 'glob', 'bash'])
+  })
+
+  test('slash skill command returns clear error when skill is missing', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    await expect(
+      handleMessageSend(mockEvent, {
+        sessionId,
+        content: '',
+        skillCommand: {
+          command: '/non-existent-skill',
+          rawInput: '/non-existent-skill run something'
+        }
+      })
+    ).rejects.toThrow(/未找到可执行的技能命令/)
+  })
+
+  test('slash skill command returns clear error when skill is disabled', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    const skill = skillRegistry.get('review')
+    expect(skill).toBeDefined()
+    skillRegistry.register(
+      {
+        ...skill!,
+        enabled: false
+      },
+      'builtin'
+    )
+
+    await expect(
+      handleMessageSend(mockEvent, {
+        sessionId,
+        content: '',
+        skillCommand: {
+          command: '/review',
+          rawInput: '/review'
+        }
+      })
+    ).rejects.toThrow(/技能已被禁用: review/)
   })
 
   test('fuxi handoff should capture .fuxi plan path', async () => {

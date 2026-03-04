@@ -8,7 +8,7 @@ import {
   listSpaces,
   createSpace,
   deleteSpace,
-  getSpace,
+  getSpaceWithPreferences,
   openSpaceFolder,
   updateSpace,
   updateSpacePreferences,
@@ -31,9 +31,11 @@ export function registerSpaceHandlers(): void {
   ipcMain.handle('space:get-halo', async () => {
     try {
       const space = getHaloSpace()
+      console.log('[SpaceIPC] space:get-halo response: id=%s', space?.id)
       return { success: true, data: space }
     } catch (error: unknown) {
       const err = error as Error
+      console.error('[SpaceIPC] space:get-halo error:', err.message)
       return { success: false, error: err.message }
     }
   })
@@ -42,9 +44,11 @@ export function registerSpaceHandlers(): void {
   ipcMain.handle('space:list', async () => {
     try {
       const spaces = listSpaces()
+      console.log('[SpaceIPC] space:list response: count=%d', spaces.length)
       return { success: true, data: spaces }
     } catch (error: unknown) {
       const err = error as Error
+      console.error('[SpaceIPC] space:list error:', err.message)
       return { success: false, error: err.message }
     }
   })
@@ -74,10 +78,10 @@ export function registerSpaceHandlers(): void {
     }
   })
 
-  // Get a specific space
+  // Get a specific space (with preferences for UI)
   ipcMain.handle('space:get', async (_event, spaceId: string) => {
     try {
-      const space = getSpace(spaceId)
+      const space = getSpaceWithPreferences(spaceId)
       return { success: true, data: space }
     } catch (error: unknown) {
       const err = error as Error

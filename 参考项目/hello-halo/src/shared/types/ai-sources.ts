@@ -18,6 +18,28 @@
 import { v4 as uuidv4 } from 'uuid'
 
 // ============================================================================
+// Localization Utilities
+// ============================================================================
+
+/**
+ * Localized text - either a plain string or an object keyed by locale code
+ */
+export type LocalizedText = string | Record<string, string>
+
+/**
+ * Resolve LocalizedText to a string for the given locale.
+ * Falls back: exact match -> prefix match -> 'en' -> first value.
+ */
+export function resolveLocalizedText(value: LocalizedText, locale: string): string {
+  if (typeof value === 'string') return value
+  if (value[locale]) return value[locale]
+  const prefix = locale.split('-')[0]
+  const match = Object.keys(value).find(k => k.startsWith(prefix))
+  if (match) return value[match]
+  return value['en'] || Object.values(value)[0] || ''
+}
+
+// ============================================================================
 // Core Enums and Constants
 // ============================================================================
 
@@ -40,8 +62,10 @@ export type BuiltinProviderId =
   | 'siliconflow'
   | 'aliyun'
   | 'moonshot'
+  | 'moonshot-global'
   | 'zhipu'
   | 'minimax'
+  | 'minimax-global'
   | 'yi'
   | 'stepfun'
   | 'openrouter'
@@ -96,6 +120,11 @@ export const AVAILABLE_MODELS: ModelOption[] = [
     description: 'great for complex reasoning and architecture decisions'
   },
   {
+    id: 'claude-sonnet-4-6',
+    name: 'Claude Sonnet 4.6',
+    description: 'Balanced performance and cost, suitable for most tasks'
+  },
+  {
     id: 'claude-sonnet-4-5-20250929',
     name: 'Claude Sonnet 4.5',
     description: 'Balanced performance and cost, suitable for most tasks'
@@ -107,7 +136,7 @@ export const AVAILABLE_MODELS: ModelOption[] = [
   }
 ]
 
-export const DEFAULT_MODEL = 'claude-opus-4-5-20251101'
+export const DEFAULT_MODEL = 'claude-sonnet-4-6'
 
 // ============================================================================
 // AI Source Configuration Types (v2)

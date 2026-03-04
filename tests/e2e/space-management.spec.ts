@@ -2,28 +2,25 @@ import { test, expect } from './fixtures/electron'
 
 test.describe('Space Management', () => {
   test('top navigation shows create space button', async ({ window }) => {
-    const createBtn = window.locator('button[title="Create New Space"]')
+    const createBtn = window.locator('button[title="New Space"]')
     await expect(createBtn).toBeVisible()
   })
 
-  test('clicking create space shows input form', async ({ window }) => {
-    const createBtn = window.locator('button[title="Create New Space"]')
+  test('clicking create space keeps sidebar visible', async ({ window }) => {
+    const createBtn = window.locator('button[title="New Space"]')
     await createBtn.click()
-    await window.waitForTimeout(500)
 
-    // The TopNavigation shows an inline input form when creating
-    const input = window.locator('input[placeholder="Space name..."]')
-    await expect(input).toBeVisible()
+    const spacesHeader = window.locator('h2:has-text("Spaces")')
+    await expect(spacesHeader).toBeVisible()
   })
 
-  test('can type space name', async ({ window }) => {
-    const createBtn = window.locator('button[title="Create New Space"]')
-    await createBtn.click()
-    await window.waitForTimeout(500)
+  test('can create an additional space entry', async ({ window }) => {
+    const initialCount = await window.locator('button[title="Rename space"]').count()
 
-    const input = window.locator('input[placeholder="Space name..."]')
-    await input.fill('Test Space')
-    await expect(input).toHaveValue('Test Space')
+    const createBtn = window.locator('button[title="New Space"]')
+    await createBtn.click()
+
+    await expect.poll(async () => window.locator('button[title="Rename space"]').count()).toBeGreaterThan(initialCount)
   })
 
   test('CodeAll branding is clickable', async ({ window }) => {
@@ -39,3 +36,4 @@ test.describe('Space Management', () => {
     await expect(settingsBtn).toBeVisible()
   })
 })
+

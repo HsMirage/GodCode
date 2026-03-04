@@ -106,11 +106,6 @@ export function ContentCanvas() {
     }
   }
 
-  const handleSaveActiveTab = async (forceOverwrite = false) => {
-    if (!activeTab?.id) return
-    await handleSaveTab(activeTab.id, forceOverwrite)
-  }
-
   const handleReloadFromDisk = () => {
     if (!activeTab?.id || !conflictState) return
     updateTabContent(activeTab.id, conflictState.currentContent)

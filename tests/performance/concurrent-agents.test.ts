@@ -117,6 +117,7 @@ const mockStore: any = {
   model: [],
   agentBinding: [],
   categoryBinding: [],
+  systemSetting: [],
   session: [],
   message: [],
   task: [],
@@ -211,6 +212,7 @@ vi.mock('@prisma/client', () => {
       model = createDelegate('model')
       agentBinding = createDelegate('agentBinding')
       categoryBinding = createDelegate('categoryBinding')
+      systemSetting = createDelegate('systemSetting')
       session = createDelegate('session')
       message = createDelegate('message')
       task = createDelegate('task')
@@ -286,13 +288,18 @@ describe('Performance: Concurrent Agent Execution', () => {
     })
     spaceId = space.id
 
-    await prisma.model.create({
+    const model = await prisma.model.create({
       data: {
         provider: 'openai-compatible',
         modelName: 'claude-3-5-sonnet',
         apiKey: 'test',
-        config: {}
+        baseURL: 'https://api.openai.com/v1',
+        config: { apiProtocol: 'chat/completions' }
       }
+    })
+
+    await prisma.systemSetting.create({
+      data: { key: 'defaultModelId', value: model.id }
     })
 
     const session = await prisma.session.create({

@@ -146,7 +146,9 @@ export class BoulderStateService {
       if (fs.existsSync(tempPath)) {
         try {
           fs.unlinkSync(tempPath)
-        } catch {}
+        } catch {
+          // ignore cleanup errors
+        }
       }
       throw error
     }

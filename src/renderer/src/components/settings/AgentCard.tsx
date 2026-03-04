@@ -3,8 +3,15 @@
  * 用于显示和编辑单个 Agent 的绑定配置
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Bot, ChevronDown, ChevronUp, RotateCcw, Power, PowerOff } from 'lucide-react'
+import {
+  AGENT_PRESET_DEFINITIONS,
+  getAgentByCode,
+  getAgentPresetById,
+  getAgentPresetMappedDefinition,
+  type AgentPresetId
+} from '@shared/agent-definitions'
 import type { AgentBindingData, UpdateAgentBindingInput } from '@renderer/types/binding'
 import type { Model } from '@renderer/types/domain'
 
@@ -27,6 +34,16 @@ export function AgentCard({ agent, models, providerNameByModelId, onUpdate, onRe
   const selectedProvider = selectedModel
     ? providerNameByModelId?.[selectedModel.id] ?? selectedModel.provider
     : null
+  const defaultAgentDefinition = getAgentByCode(agent.agentCode)
+  const availablePresets = AGENT_PRESET_DEFINITIONS.filter(preset => preset.mappedAgentCode === agent.agentCode)
+
+  useEffect(() => {
+    setLocalTemp(agent.temperature)
+  }, [agent.temperature])
+
+  useEffect(() => {
+    setSystemPrompt(agent.systemPrompt || '')
+  }, [agent.systemPrompt])
 
   const handleModelChange = async (modelId: string) => {
     setLoading(true)
@@ -72,11 +89,38 @@ export function AgentCard({ agent, models, providerNameByModelId, onUpdate, onRe
   }
 
   const handleReset = async () => {
-    if (!confirm('确定要重置此智能体的配置吗？')) return
     setLoading(true)
     try {
       await onReset(agent.agentCode)
-      setLocalTemp(agent.temperature)
+      if (defaultAgentDefinition) {
+        setLocalTemp(defaultAgentDefinition.defaultTemperature)
+      }
+      setShowSystemPrompt(false)
+      setSystemPrompt('')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleApplyPreset = async (presetId: AgentPresetId) => {
+    const preset = getAgentPresetById(presetId)
+    const mapped = getAgentPresetMappedDefinition(presetId)
+    const keywordSet = preset.recommendedModelKeywords.map(keyword => keyword.toLowerCase())
+
+    const matchedModel =
+      models.find(model => {
+        const candidate = `${model.modelName} ${providerNameByModelId?.[model.id] ?? model.provider}`.toLowerCase()
+        return keywordSet.some(keyword => candidate.includes(keyword))
+      }) ?? null
+
+    setLoading(true)
+    try {
+      await onUpdate(agent.agentCode, {
+        modelId: matchedModel?.id ?? null,
+        temperature: mapped.defaultTemperature,
+        tools: [...mapped.tools]
+      })
+      setLocalTemp(mapped.defaultTemperature)
     } finally {
       setLoading(false)
     }
@@ -167,6 +211,27 @@ export function AgentCard({ agent, models, providerNameByModelId, onUpdate, onRe
               ))}
             </select>
           </div>
+
+          {/* Preset quick switch */}
+          {availablePresets.length > 0 && (
+            <div className="space-y-1.5">
+              <label className="text-xs text-[var(--text-secondary)] font-medium">角色预设</label>
+              <div className="flex flex-wrap gap-2">
+                {availablePresets.map(preset => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleApplyPreset(preset.id)}
+                    disabled={loading}
+                    className="px-2.5 py-1.5 rounded-lg border border-[var(--border-primary)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-secondary)] hover:bg-[var(--bg-tertiary)] transition-colors disabled:opacity-50"
+                    title={preset.description}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Temperature slider */}
           <div className="space-y-1.5">

@@ -6,28 +6,15 @@
  * Supports inline title editing
  */
 
-import { useState, useRef, useEffect } from 'react'
-import { X } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Virtuoso } from 'react-virtuoso'
+import { X, EllipsisVertical, Pin, Pencil, Trash2 } from 'lucide-react'
 import type { ConversationMeta } from '../../types'
 import { useTranslation, getCurrentLanguage } from '../../i18n'
 import { useIsMobile } from '../../hooks/useIsMobile'
-import { useConversationTaskStatus } from '../../stores/chat.store'
+import { useChatStore, useAllConversationStatuses } from '../../stores/chat.store'
+import { useSpaceStore } from '../../stores/space.store'
 import { TaskStatusDot } from '../pulse/TaskStatusDot'
-
-interface ChatHistoryPanelProps {
-  conversations: ConversationMeta[]
-  currentConversationId: string | undefined
-  onSelect: (id: string) => void
-  onNew: () => void
-  onDelete?: (id: string) => void
-  onRename?: (id: string, newTitle: string) => void
-  onStar?: (id: string, starred: boolean) => void
-  spaceName: string
-  /** Callback to toggle sidebar visibility */
-  onToggleSidebar?: () => void
-  /** Whether sidebar is currently visible */
-  isSidebarVisible?: boolean
-}
 
 // Format relative time
 function formatRelativeTime(dateString: string, t: (key: string, options?: any) => string): string {
@@ -57,28 +44,34 @@ function getConversationPreview(conversation: ConversationMeta, t: (key: string,
   return conversation.messageCount > 0 ? t('Conversation content') : t('New conversation')
 }
 
-export function ChatHistoryPanel({
-  conversations,
-  currentConversationId,
-  onSelect,
-  onNew,
-  onDelete,
-  onRename,
-  onStar,
-  spaceName,
-  onToggleSidebar,
-  isSidebarVisible
-}: ChatHistoryPanelProps) {
+export function ChatHistoryPanel() {
   const { t } = useTranslation()
   const isMobile = useIsMobile()
+
+  // Subscribe to store data
+  const conversations = useChatStore(state => {
+    const spaceState = state.spaceStates.get(state.currentSpaceId ?? '')
+    return spaceState?.conversations ?? []
+  })
+  const currentConversationId = useChatStore(state => {
+    const spaceState = state.spaceStates.get(state.currentSpaceId ?? '')
+    return spaceState?.currentConversationId ?? undefined
+  })
+  const currentSpace = useSpaceStore(state => state.currentSpace)
+  const spaceName = currentSpace?.isTemp ? t('Halo Space') : (currentSpace?.name ?? '')
+
+  // Single batch subscription for all conversation statuses (replaces N individual hooks)
+  const conversationStatuses = useAllConversationStatuses()
   const [isExpanded, setIsExpanded] = useState(false)
   const [isAnimatingOut, setIsAnimatingOut] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [panelPosition, setPanelPosition] = useState({ top: 0, left: 0 })
   const panelRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const editInputRef = useRef<HTMLInputElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
 
   // Calculate panel position when expanded (desktop only)
   useEffect(() => {
@@ -131,8 +124,21 @@ export function ChatHistoryPanel({
     }
   }, [editingId])
 
+  // Close dropdown menu on outside click
+  useEffect(() => {
+    if (!menuOpenId) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpenId(null)
+      }
+    }
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [menuOpenId])
+
   const handleClose = () => {
-    // Cancel any editing
+    // Cancel any editing and close dropdown menu
+    setMenuOpenId(null)
     setEditingId(null)
     setEditingTitle('')
 
@@ -155,7 +161,7 @@ export function ChatHistoryPanel({
     // Don't select if we're editing
     if (editingId) return
 
-    onSelect(id)
+    useChatStore.getState().selectConversation(id)
     handleClose()
   }
 
@@ -168,8 +174,9 @@ export function ChatHistoryPanel({
 
   // Save edited title
   const handleSaveEdit = () => {
-    if (editingId && editingTitle.trim() && onRename) {
-      onRename(editingId, editingTitle.trim())
+    if (editingId && editingTitle.trim()) {
+      const spaceId = useSpaceStore.getState().currentSpace?.id
+      if (spaceId) useChatStore.getState().renameConversation(spaceId, editingId, editingTitle.trim())
     }
     setEditingId(null)
     setEditingTitle('')
@@ -192,8 +199,161 @@ export function ChatHistoryPanel({
     }
   }
 
-  // Shared conversation list content
-  const renderConversationList = () => (
+  // Render a single conversation item (used by Virtuoso)
+  const renderHistoryItem = useCallback((_index: number, conv: ConversationMeta) => (
+    <div
+      onClick={() => handleSelectConversation(conv.id)}
+      className={`
+        w-full px-4 py-3 text-left transition-all duration-150
+        hover:bg-white/5 group relative cursor-pointer
+        ${conv.id === currentConversationId ? 'bg-primary/10' : ''}
+        ${menuOpenId === conv.id ? 'z-50' : ''}
+      `}
+    >
+      {/* Selection indicator */}
+      {conv.id === currentConversationId && (
+        <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-r" />
+      )}
+
+      <div className="flex items-start justify-between gap-3 relative">
+        <div className="flex-1 min-w-0">
+          {/* Title / Preview - with edit mode */}
+          {editingId === conv.id ? (
+            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+              <input
+                ref={editInputRef}
+                type="text"
+                value={editingTitle}
+                onChange={(e) => setEditingTitle(e.target.value)}
+                onKeyDown={handleEditKeyDown}
+                onBlur={handleSaveEdit}
+                className="flex-1 text-sm font-medium bg-input border border-border rounded px-2 py-1 focus:outline-none focus:border-primary"
+                placeholder={t('Enter conversation title...')}
+              />
+              <button
+                onClick={handleSaveEdit}
+                className="p-1 hover:bg-primary/20 text-primary rounded transition-colors"
+                title={t('Save')}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+              <button
+                onClick={handleCancelEdit}
+                className="p-1 hover:bg-destructive/20 text-muted-foreground hover:text-destructive rounded transition-colors"
+                title={t('Cancel')}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <TaskStatusDot status={conversationStatuses.get(conv.id) ?? 'idle'} size="sm" />
+              <p className={`text-sm font-medium truncate ${
+                conv.id === currentConversationId ? 'text-primary' : 'text-foreground'
+              }`}>
+                {conv.title || getConversationPreview(conv, t)}
+              </p>
+            </div>
+          )}
+
+          {/* Meta info */}
+          {editingId !== conv.id && (
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-muted-foreground">
+                {formatRelativeTime(conv.updatedAt, t)}
+              </span>
+              {conv.messageCount > 0 && (
+                <>
+                  <span className="text-muted-foreground/30">·</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t('{{count}} messages', { count: conv.messageCount })}
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* More button (on hover) - absolutely positioned */}
+        {editingId !== conv.id && (
+          <>
+            <div className={`absolute right-0 top-[1px] ${isMobile ? 'block' : 'hidden group-hover:block'}`}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setMenuOpenId(menuOpenId === conv.id ? null : conv.id)
+                }}
+                className="px-2 py-1.5 rounded transition-colors bg-card/80 text-foreground/60 hover:text-foreground hover:bg-secondary"
+                title={t('More')}
+              >
+                <EllipsisVertical className="w-4 h-4" />
+              </button>
+            </div>
+            {menuOpenId === conv.id && (
+              <div className="absolute right-0 top-[1px]">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setMenuOpenId(null)
+                  }}
+                  className="px-2 py-1.5 rounded bg-secondary text-foreground"
+                  title={t('More')}
+                >
+                  <EllipsisVertical className="w-4 h-4" />
+                </button>
+                <div
+                  ref={menuRef}
+                  className="absolute right-0 top-full mt-1 z-[9999] min-w-[150px] bg-popover border border-border rounded-lg shadow-lg py-1"
+                >
+                  <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const spaceId = useSpaceStore.getState().currentSpace?.id
+                        if (spaceId) useChatStore.getState().toggleStarConversation(spaceId, conv.id, !conv.starred)
+                        setMenuOpenId(null)
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-secondary transition-colors"
+                    >
+                      <Pin className={`w-4 h-4 ${conv.starred ? 'text-primary' : ''}`} />
+                      <span>{conv.starred ? t('Unpin') : t('Pin')}</span>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        handleStartEdit(e, conv)
+                        setMenuOpenId(null)
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-secondary transition-colors"
+                    >
+                      <Pencil className="w-4 h-4" />
+                      <span>{t('Rename')}</span>
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        const spaceId = useSpaceStore.getState().currentSpace?.id
+                        if (spaceId) useChatStore.getState().deleteConversation(spaceId, conv.id)
+                        setMenuOpenId(null)
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>{t('Delete')}</span>
+                    </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  ), [editingId, editingTitle, currentConversationId, conversationStatuses, menuOpenId, isMobile, t])
+
+  // Shared conversation list content - virtualized
+  const renderConversationList = (height: string) => (
     <>
       {conversations.length === 0 ? (
         <div className="px-4 py-8 text-center">
@@ -206,151 +366,18 @@ export function ChatHistoryPanel({
           <p className="text-xs text-muted-foreground/60 mt-1">{t('Start a new conversation to create history')}</p>
         </div>
       ) : (
-        <div className="py-2">
-          {conversations.map((conv, index) => (
-            <div
-              key={conv.id}
-              onClick={() => handleSelectConversation(conv.id)}
-              className={`
-                w-full px-4 py-3 text-left transition-all duration-150
-                hover:bg-white/5 group relative cursor-pointer
-                ${conv.id === currentConversationId ? 'bg-primary/10' : ''}
-              `}
-              style={{
-                animationDelay: `${index * 30}ms`,
-                animation: !isAnimatingOut ? 'fade-in 0.2s ease-out forwards' : undefined
-              }}
-            >
-              {/* Selection indicator */}
-              {conv.id === currentConversationId && (
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-r" />
-              )}
-
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  {/* Title / Preview - with edit mode */}
-                  {editingId === conv.id ? (
-                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        ref={editInputRef}
-                        type="text"
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onKeyDown={handleEditKeyDown}
-                        onBlur={handleSaveEdit}
-                        className="flex-1 text-sm font-medium bg-input border border-border rounded px-2 py-1 focus:outline-none focus:border-primary"
-                        placeholder={t('Enter conversation title...')}
-                      />
-                      <button
-                        onClick={handleSaveEdit}
-                        className="p-1 hover:bg-primary/20 text-primary rounded transition-colors"
-                        title={t('Save')}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={handleCancelEdit}
-                        className="p-1 hover:bg-destructive/20 text-muted-foreground hover:text-destructive rounded transition-colors"
-                        title={t('Cancel')}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5">
-                      <HistoryItemStatusDot conversationId={conv.id} />
-                      <p className={`text-sm font-medium truncate ${
-                        conv.id === currentConversationId ? 'text-primary' : 'text-foreground'
-                      }`}>
-                        {conv.title || getConversationPreview(conv, t)}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Meta info */}
-                  {editingId !== conv.id && (
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-muted-foreground">
-                        {formatRelativeTime(conv.updatedAt, t)}
-                      </span>
-                      {conv.messageCount > 0 && (
-                        <>
-                          <span className="text-muted-foreground/30">·</span>
-                          <span className="text-xs text-muted-foreground">
-                            {t('{{count}} messages', { count: conv.messageCount })}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Action buttons (on hover for desktop, always visible on mobile) */}
-                {editingId !== conv.id && (
-                  <div className={`flex items-center gap-1 transition-all ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    {/* Star button */}
-                    {onStar && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onStar(conv.id, !conv.starred)
-                        }}
-                        className={`p-1.5 rounded transition-colors ${
-                          conv.starred
-                            ? 'text-amber-400'
-                            : 'text-muted-foreground/30 hover:text-amber-400'
-                        }`}
-                        title={conv.starred ? t('Unstar') : t('Star')}
-                      >
-                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill={conv.starred ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                        </svg>
-                      </button>
-                    )}
-
-                    {/* Edit button */}
-                    {onRename && (
-                      <button
-                        onClick={(e) => handleStartEdit(e, conv)}
-                        className="p-1.5 hover:bg-primary/10 text-muted-foreground hover:text-primary rounded transition-colors"
-                        title={t('Edit title')}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </button>
-                    )}
-
-                    {/* Delete button */}
-                    {onDelete && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onDelete(conv.id)
-                        }}
-                        className="p-1.5 hover:bg-destructive/10 text-muted-foreground hover:text-destructive rounded transition-colors"
-                        title={t('Delete conversation')}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          ))}
+        <div style={{ height }}>
+          <Virtuoso
+            data={conversations}
+            overscan={200}
+            itemContent={renderHistoryItem}
+          />
         </div>
       )}
     </>
   )
 
-  // Desktop footer with sidebar toggle
+  // Desktop footer
   const renderFooter = () => (
     <div className="px-4 py-2 border-t border-border/30 flex items-center justify-between">
       <span className="text-xs text-muted-foreground/60">
@@ -359,28 +386,6 @@ export function ChatHistoryPanel({
           : '\u00A0' /* Non-breaking space to maintain height */
         }
       </span>
-      {onToggleSidebar && !isMobile && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            onToggleSidebar()
-            handleClose()
-          }}
-          className={`
-            flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-colors
-            ${isSidebarVisible
-              ? 'bg-primary/20 text-primary'
-              : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
-            }
-          `}
-          title={t('Sidebar')}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h7" />
-          </svg>
-          <span>{t('Sidebar')}</span>
-        </button>
-      )}
     </div>
   )
 
@@ -450,7 +455,11 @@ export function ChatHistoryPanel({
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={() => { onNew(); handleClose() }}
+                    onClick={() => {
+                      const spaceId = useSpaceStore.getState().currentSpace?.id
+                      if (spaceId) useChatStore.getState().createConversation(spaceId)
+                      handleClose()
+                    }}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
                       bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors"
                   >
@@ -468,10 +477,8 @@ export function ChatHistoryPanel({
                 </div>
               </div>
 
-              {/* Conversation list - taller on mobile */}
-              <div className="overflow-auto" style={{ maxHeight: 'calc(70vh - 100px)' }}>
-                {renderConversationList()}
-              </div>
+              {/* Conversation list - taller on mobile (virtualized) */}
+              {renderConversationList('calc(70vh - 100px)')}
             </div>
           ) : (
             /* Desktop: Dropdown Panel */
@@ -498,7 +505,11 @@ export function ChatHistoryPanel({
                   </p>
                 </div>
                 <button
-                  onClick={() => { onNew(); handleClose() }}
+                  onClick={() => {
+                    const spaceId = useSpaceStore.getState().currentSpace?.id
+                    if (spaceId) useChatStore.getState().createConversation(spaceId)
+                    handleClose()
+                  }}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium
                     bg-primary/10 hover:bg-primary/20 text-primary rounded-lg transition-colors"
                 >
@@ -509,10 +520,8 @@ export function ChatHistoryPanel({
                 </button>
               </div>
 
-              {/* Conversation list */}
-              <div className="max-h-[320px] overflow-auto">
-                {renderConversationList()}
-              </div>
+              {/* Conversation list (virtualized) */}
+              {renderConversationList('320px')}
 
               {/* Footer */}
               {renderFooter()}
@@ -522,10 +531,4 @@ export function ChatHistoryPanel({
       )}
     </div>
   )
-}
-
-/** Extracted sub-component so useConversationTaskStatus hook is called per conversation */
-function HistoryItemStatusDot({ conversationId }: { conversationId: string }) {
-  const status = useConversationTaskStatus(conversationId)
-  return <TaskStatusDot status={status} size="sm" />
 }

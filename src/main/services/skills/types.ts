@@ -28,8 +28,18 @@ export interface SkillMetadata {
   license?: string
   /** Compatibility notes */
   compatibility?: string
+  /** Builtin skill pack name */
+  pack?: string
+  /** Builtin skill pack version */
+  packVersion?: string
+  /** Metadata schema version */
+  schemaVersion?: string
   /** Tags for categorization */
   tags?: string[]
+  /** Typical usage scenarios */
+  scenarios?: string[]
+  /** Operational risk level */
+  riskLevel?: 'low' | 'medium' | 'high'
   /** Custom metadata */
   [key: string]: unknown
 }
@@ -78,6 +88,62 @@ export interface Skill {
   builtin?: boolean
   /** Whether this skill is enabled */
   enabled?: boolean
+}
+
+/**
+ * Command palette item derived from a skill
+ */
+export interface SkillCommandItem {
+  /** Display label */
+  label: string
+  /** Slash command (always starts with /) */
+  command: string
+  /** Short description for command list */
+  description: string
+  /** Optional argument hint */
+  argsHint?: string
+}
+
+/**
+ * Structured slash-command invocation payload from UI
+ */
+export interface SkillCommandInvocation {
+  /** Slash command entered by the user */
+  command: string
+  /** User-provided input content that should be bound into the skill template */
+  input?: string
+  /** Raw slash command text before payload assembly */
+  rawInput?: string
+}
+
+/**
+ * Assembled runtime payload resolved from skill metadata and invocation
+ */
+export interface SkillRuntimePayload {
+  /** Resolved skill identifier */
+  id: string
+  /** Resolved skill display name */
+  name: string
+  /** Slash command used for invocation */
+  command: string
+  /** Original raw slash command text */
+  rawInput: string | null
+  /** User-provided input bound into the template */
+  input: string | null
+  /** Final rendered prompt used at runtime */
+  renderedPrompt: string
+  /** Original skill template */
+  template: string
+  /** Runtime tool allowlist from skill definition */
+  allowedTools: string[] | null
+  /** Preferred runtime agent from skill definition */
+  agent: string | null
+  /** Preferred runtime model from skill definition */
+  model: string | null
+  /** Whether the skill prefers subtask execution */
+  subtask: boolean | null
+  /** MCP configuration declared by the skill */
+  mcpConfig: SkillMcpConfig | null
 }
 
 /**

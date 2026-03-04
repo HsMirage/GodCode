@@ -15,12 +15,12 @@ test.describe('Chat Workflow', () => {
   })
 
   test('main layout is properly rendered', async ({ window }) => {
-    // Check that the main layout container exists
-    const mainLayout = window.locator('.h-screen')
+    // Check that the app sidebar header exists
+    const mainLayout = window.locator('h2:has-text("Spaces")')
     await expect(mainLayout).toBeVisible()
 
     // Check CodeAll branding
-    const branding = window.locator('text=CodeAll')
+    const branding = window.locator('text=CodeAll').first()
     await expect(branding).toBeVisible()
   })
 })

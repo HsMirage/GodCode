@@ -3,7 +3,8 @@ import type {
   HookContext,
   ToolExecutionInput,
   ToolExecutionOutput,
-  MessageInfo
+  MessageInfo,
+  MessageInjectionResult
 } from './types'
 
 const CONTINUATION_REMINDER = `[SYSTEM REMINDER - TODO CONTINUATION]

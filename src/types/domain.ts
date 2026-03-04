@@ -158,6 +158,8 @@ export interface Model {
     baseDelayMs?: number
     maxToolIterations?: number
     defaultMaxTokens?: number
+    /** Explicit OpenAI-compatible protocol selection. */
+    apiProtocol?: 'chat/completions' | 'responses'
     /** Provider-specific / capability toggle (e.g., Claude extended thinking). */
     thinkingMode?: boolean
   }

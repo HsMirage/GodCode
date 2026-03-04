@@ -73,7 +73,7 @@ export const listNetworkRequestsTool: BrowserTool = {
         type: 'array',
         description:
           'Filter requests to only return requests of the specified resource types. When omitted or empty, returns all requests.',
-        // @ts-ignore
+        // Schema enum tuple cast for runtime validator compatibility
         items: {
           type: 'string',
           enum: FILTERABLE_RESOURCE_TYPES as unknown as string[]

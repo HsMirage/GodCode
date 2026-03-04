@@ -1,5 +1,7 @@
 import type { Message } from '@/types/domain'
 
+export type LLMConfigApiProtocol = 'chat/completions' | 'responses'
+
 export interface LLMConfig {
   model?: string
   temperature?: number
@@ -35,6 +37,8 @@ export interface LLMConfig {
   maxToolIterations?: number
   /** Fallback max output tokens for providers that require it (e.g., Anthropic) */
   defaultMaxTokens?: number
+  /** Explicit OpenAI-compatible API protocol selection */
+  apiProtocol?: LLMConfigApiProtocol
 }
 
 export interface LLMResponse {

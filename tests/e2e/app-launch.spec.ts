@@ -17,14 +17,14 @@ test.describe('Application Launch', () => {
   })
 
   test('sidebar renders with sessions header', async ({ window }) => {
-    // Check sidebar sessions header exists
-    const sessionsHeader = window.locator('h2:has-text("Sessions")')
+    // Check sidebar spaces header exists
+    const sessionsHeader = window.locator('h2:has-text("Spaces")')
     await expect(sessionsHeader).toBeVisible()
   })
 
   test('main layout loads correctly', async ({ window }) => {
     // Check the main layout container exists
-    const mainLayout = window.locator('.h-screen').first()
+    const mainLayout = window.locator('h2:has-text("Spaces")').first()
     await expect(mainLayout).toBeVisible()
 
     // Check CodeAll branding
@@ -32,3 +32,4 @@ test.describe('Application Launch', () => {
     await expect(branding).toBeVisible()
   })
 })
+

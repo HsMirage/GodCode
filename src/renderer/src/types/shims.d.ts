@@ -4,6 +4,67 @@ declare module '../../types/domain' {
 
 import type { Space, Session, Message, Model, Task, Artifact } from '../../types/domain'
 
+type ModelConfigPayload = {
+  thinkingMode?: boolean
+  apiProtocol?: 'chat/completions' | 'responses'
+  [key: string]: unknown
+}
+
+type SkillCommandItem = {
+  label: string
+  command: string
+  description: string
+  argsHint?: string
+}
+
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: JsonValue }
+  | JsonValue[]
+
+type SettingValueType = 'string' | 'number' | 'boolean' | 'json'
+
+type SettingValueSource = 'stored' | 'default' | 'null'
+
+type SettingSchemaDescriptor = {
+  key: string
+  type: SettingValueType
+  scope: 'global' | 'space'
+  defaultValue?: string | number | boolean | JsonValue | null
+  nullable?: boolean
+  description?: string
+  validation?: {
+    min?: number
+    max?: number
+    integer?: boolean
+    minLength?: number
+    maxLength?: number
+    pattern?: string
+    enum?: Array<string | number | boolean>
+  }
+  defaultValueSerialized: string | null
+}
+
+type SettingResolvedResult = {
+  key: string
+  value: string | number | boolean | JsonValue | null
+  source: SettingValueSource
+  schema: SettingSchemaDescriptor
+  scopeSource?: {
+    scope: 'global' | 'space'
+    source: SettingValueSource
+  }
+}
+
+type SkillCommandInvocation = {
+  command: string
+  input?: string
+  rawInput?: string
+}
+
 interface CodeAllAPI {
   invoke(channel: 'ping'): Promise<string>
 
@@ -30,7 +91,7 @@ interface CodeAllAPI {
       apiKeyId?: string
       baseURL?: string | null
       contextSize?: number
-      config?: Record<string, unknown>
+      config?: ModelConfigPayload
     }
   ): Promise<Model>
   invoke(channel: 'model:list'): Promise<Model[]>
@@ -45,7 +106,7 @@ interface CodeAllAPI {
         apiKeyId?: string | null
         baseURL?: string | null
         contextSize?: number
-        config?: Record<string, unknown>
+        config?: ModelConfigPayload
       }
     }
   ): Promise<Model>
@@ -56,9 +117,10 @@ interface CodeAllAPI {
   invoke(channel: 'session:list', spaceId?: string): Promise<Session[]>
   invoke(
     channel: 'message:send',
-    data: { sessionId: string; content: string; agentCode?: string }
+    data: { sessionId: string; content: string; agentCode?: string; skillCommand?: SkillCommandInvocation }
   ): Promise<Message>
   invoke(channel: 'message:list', sessionId: string): Promise<Message[]>
+  invoke(channel: 'skill:command-items', input?: { query?: string }): Promise<SkillCommandItem[]>
   invoke(
     channel: 'message:abort',
     data: { sessionId: string }
@@ -110,6 +172,23 @@ interface CodeAllAPI {
       }
       chunks: Array<{ stream: 'stdout' | 'stderr'; data: string; timestamp: string }>
       nextIndex: number
+      outputMeta: {
+        total: number
+        stdout: number
+        stderr: number
+        truncated: boolean
+      }
+    }
+    error?: string
+  }>
+  invoke(channel: 'background-task:stats'): Promise<{
+    success: boolean
+    data?: {
+      total: number
+      running: number
+      completed: number
+      error: number
+      cancelled: number
     }
     error?: string
   }>
@@ -254,6 +333,27 @@ interface CodeAllAPI {
     }>
   >
 
+  invoke(channel: 'setting:get', key: string): Promise<string | null>
+  invoke(channel: 'setting:get', input: { key: string; spaceId?: string }): Promise<string | null>
+  invoke(
+    channel: 'setting:get-resolved',
+    key: string
+  ): Promise<SettingResolvedResult>
+  invoke(
+    channel: 'setting:get-resolved',
+    input: { key: string; spaceId?: string }
+  ): Promise<SettingResolvedResult>
+  invoke(
+    channel: 'setting:set',
+    input: { key: string; value: unknown; spaceId?: string }
+  ): Promise<{ key: string; value: string | null }>
+  invoke(channel: 'setting:get-all'): Promise<Record<string, string | null>>
+  invoke(
+    channel: 'setting:get-all',
+    input: { spaceId?: string }
+  ): Promise<Record<string, string | null>>
+  invoke(channel: 'setting:schema-list'): Promise<SettingSchemaDescriptor[]>
+
   // Fallback signature for channels without dedicated overloads.
   invoke(channel: string, ...args: unknown[]): Promise<unknown>
   on(
@@ -266,9 +366,41 @@ interface CodeAllAPI {
   invoke(channel: 'task-continuation:abort', sessionId: string): Promise<unknown>
   invoke(
     channel: 'task-continuation:set-todos',
-    sessionId: string,
-    todos: string[]
-  ): Promise<unknown>
+    input: {
+      sessionId: string
+      todos: Array<{
+        id: string
+        content: string
+        status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+        priority: 'high' | 'medium' | 'low'
+      }>
+    }
+  ): Promise<{ success: boolean }>
+  invoke(channel: 'task-continuation:get-config'): Promise<{
+    success: boolean
+    data?: {
+      countdownSeconds: number
+      idleDedupWindowMs: number
+      abortWindowMs: number
+    }
+    error?: string
+  }>
+  invoke(
+    channel: 'task-continuation:set-config',
+    config: Partial<{
+      countdownSeconds: number
+      idleDedupWindowMs: number
+      abortWindowMs: number
+    }>
+  ): Promise<{
+    success: boolean
+    data?: {
+      countdownSeconds: number
+      idleDedupWindowMs: number
+      abortWindowMs: number
+    }
+    error?: string
+  }>
 
   // Provider Cache Channels
   invoke(channel: 'provider-cache:get-stats'): Promise<unknown>
@@ -324,6 +456,42 @@ interface CodeAllAPI {
   on(
     channel: 'task:status-changed',
     callback: (data: { taskId: string; status: Task['status'] }) => void
+  ): () => void
+  on(
+    channel: 'hook-audit:appended',
+    callback: (data: {
+      record: {
+        id: string
+        timestamp: string | Date
+        strategy: {
+          hookId: string
+          hookName: string
+          event: string
+          priority: number
+          enabled: boolean
+        }
+        execution: {
+          sessionId: string
+          workspaceDir: string
+          userId?: string
+          tool?: string
+          callId?: string
+          messageId?: string
+          messageRole?: 'user' | 'assistant' | 'system'
+          currentTokens?: number
+          maxTokens?: number
+          usagePercentage?: number
+          filePath?: string
+          errorType?: 'not_found' | 'multiple_matches' | 'same_content' | 'unknown'
+        }
+        result: {
+          success: boolean
+          duration: number
+          error?: string
+          returnValuePreview?: string
+        }
+      }
+    }) => void
   ): () => void
   on(
     channel: 'background-task:started',
@@ -435,6 +603,125 @@ interface CodeAllAPI {
 
   // Workflow Observability Channels
   invoke(channel: 'workflow-observability:get', workflowTaskId: string): Promise<any>
+  invoke(channel: 'hook-governance:get'): Promise<{
+    initialized: boolean
+    stats: {
+      total: number
+      enabled: number
+      disabled: number
+      byEvent: Record<string, number>
+      totalExecutions: number
+      totalErrors: number
+    }
+    hooks: Array<{
+      id: string
+      name: string
+      event: string
+      enabled: boolean
+      priority: number
+      executionCount: number
+      errorCount: number
+    }>
+    recentExecutions: Array<{
+      id: string
+      timestamp: string | Date
+      strategy: {
+        hookId: string
+        hookName: string
+        event: string
+        priority: number
+        enabled: boolean
+      }
+      execution: {
+        sessionId: string
+        workspaceDir: string
+        userId?: string
+        tool?: string
+        callId?: string
+        messageId?: string
+        messageRole?: 'user' | 'assistant' | 'system'
+        currentTokens?: number
+        maxTokens?: number
+        usagePercentage?: number
+        filePath?: string
+        errorType?: 'not_found' | 'multiple_matches' | 'same_content' | 'unknown'
+      }
+      result: {
+        success: boolean
+        duration: number
+        status?: 'success' | 'error' | 'timeout' | 'circuit_open'
+        degraded?: boolean
+        error?: string
+        returnValuePreview?: string
+        circuitOpenUntil?: string | Date
+      }
+    }>
+  }>
+  invoke(
+    channel: 'hook-governance:set',
+    input: {
+      hooks: Array<{
+        id: string
+        enabled?: boolean
+        priority?: number
+      }>
+    }
+  ): Promise<{
+    success: boolean
+    updated: string[]
+    skipped: Array<{ id: string; reason: string }>
+    status: {
+      initialized: boolean
+      stats: {
+        total: number
+        enabled: number
+        disabled: number
+        byEvent: Record<string, number>
+        totalExecutions: number
+        totalErrors: number
+      }
+      hooks: Array<{
+        id: string
+        name: string
+        event: string
+        enabled: boolean
+        priority: number
+        executionCount: number
+        errorCount: number
+      }>
+      recentExecutions: Array<{
+        id: string
+        timestamp: string | Date
+        strategy: {
+          hookId: string
+          hookName: string
+          event: string
+          priority: number
+          enabled: boolean
+        }
+        execution: {
+          sessionId: string
+          workspaceDir: string
+          userId?: string
+          tool?: string
+          callId?: string
+          messageId?: string
+          messageRole?: 'user' | 'assistant' | 'system'
+          currentTokens?: number
+          maxTokens?: number
+          usagePercentage?: number
+          filePath?: string
+          errorType?: 'not_found' | 'multiple_matches' | 'same_content' | 'unknown'
+        }
+        result: {
+          success: boolean
+          duration: number
+          error?: string
+          returnValuePreview?: string
+        }
+      }>
+    }
+  }>
 
   // Enhanced Artifact Channels
   invoke(channel: 'artifact:get-diff', artifactId: string): Promise<string | null>

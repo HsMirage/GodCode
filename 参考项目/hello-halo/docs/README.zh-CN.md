@@ -117,6 +117,16 @@
   <img src="./assets/mobile_chat.jpg" width="45%" alt="移动端聊天">
 </p>
 
+AI 浏览器视频演示
+
+https://github.com/user-attachments/assets/2d4d2f3e-d27c-44b0-8f1d-9059c8372003
+
+---
+
+## 更多功能演示
+
+[![📹 点击播放](https://img.shields.io/badge/📹_点击播放-FB7299?style=for-the-badge&logo=bilibili&logoColor=white)](https://www.bilibili.com/video/BV1jEZYBaEcy/)
+
 ---
 
 ## 安装
@@ -243,11 +253,11 @@ npm run dev
 - [Issues](https://github.com/openkursar/hello-halo/issues) — Bug 报告与功能请求
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/915427da-1b61-4b91-a7a0-30e47f897eee" width="200" alt="微信群二维码">
+  <img src="https://github.com/user-attachments/assets/49f1040c-b858-4d43-841b-206310d3c33f" width="200" alt="微信群二维码">
 </p>
 
 <p align="center">
-  <em>如二维码过期，可加微信：helloddbb<strong>_</strong>（注意末尾有下划线，昵称"混沌数字"），备注"Halo"，将邀请入群</em>
+  <em>如二维码过期，可加微信：go2halo 备注"Halo"，将邀请入群</em>
 </p>
 
 <p align="center">

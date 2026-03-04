@@ -42,4 +42,17 @@ describe('sanitizeCompletionOutput', () => {
     expect(sanitizeCompletionOutput(b)).toBe('Validation complete.')
     expect(sanitizeCompletionOutput(a)).toBe(sanitizeCompletionOutput(b))
   })
+
+  it('keeps normal narrative lines that contain technical keywords', () => {
+    const input = [
+      '任务排查结论：',
+      '日志提到 recipient_name 只是字段说明，不是工具协议片段。',
+      '请继续查看 command 参数来源。'
+    ].join('\n')
+
+    const output = sanitizeCompletionOutput(input)
+
+    expect(output).toContain('recipient_name 只是字段说明')
+    expect(output).toContain('command 参数来源')
+  })
 })

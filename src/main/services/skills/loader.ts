@@ -16,6 +16,9 @@ import type { Skill, SkillSource } from './types'
 // Builtin skills
 import { gitMasterSkill } from './builtin/git-master'
 import { frontendUiUxSkill } from './builtin/frontend-ui-ux'
+import { reviewSkill } from './builtin/review'
+import { fixSkill } from './builtin/fix'
+import { explainSkill } from './builtin/explain'
 
 /**
  * Loader options
@@ -35,7 +38,13 @@ export interface SkillLoaderOptions {
 export function loadBuiltinSkills(options: SkillLoaderOptions = {}): void {
   const { disabledBuiltins = new Set() } = options
 
-  const builtinSkills: Skill[] = [gitMasterSkill, frontendUiUxSkill]
+  const builtinSkills: Skill[] = [
+    gitMasterSkill,
+    frontendUiUxSkill,
+    reviewSkill,
+    fixSkill,
+    explainSkill
+  ]
 
   for (const skill of builtinSkills) {
     if (disabledBuiltins.has(skill.id)) {

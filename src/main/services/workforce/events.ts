@@ -11,6 +11,9 @@
  * Modified by CodeAll project.
  */
 
+import { hookManager } from '@/main/services/hooks'
+import type { TaskLifecycleStatus } from '@/main/services/hooks'
+
 export interface WorkflowEvent {
   type:
     | 'task:assigned'
@@ -41,6 +44,30 @@ export class WorkflowEventEmitter {
     for (const callback of callbacks) {
       callback(event)
     }
+
+    const sessionId =
+      typeof event.data?.sessionId === 'string' && event.data.sessionId.trim().length > 0
+        ? event.data.sessionId
+        : event.workflowId
+
+    const workspaceDir =
+      typeof event.data?.workspaceDir === 'string' && event.data.workspaceDir.trim().length > 0
+        ? event.data.workspaceDir
+        : process.cwd()
+
+    void hookManager.emitTaskLifecycle(
+      {
+        sessionId,
+        workspaceDir
+      },
+      {
+        status: event.type as TaskLifecycleStatus,
+        workflowId: event.workflowId,
+        taskId: event.taskId,
+        timestamp: event.timestamp,
+        data: event.data
+      }
+    )
   }
 
   removeAllListeners(): void {

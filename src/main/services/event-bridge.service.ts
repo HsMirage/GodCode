@@ -2,6 +2,7 @@ import { BrowserWindow } from 'electron'
 import { EVENT_CHANNELS } from '../../shared/ipc-channels'
 import { workflowEvents, type WorkflowEvent } from './workforce/events'
 import { backgroundTaskManager, type BackgroundTask } from './tools/background'
+import { hookManager } from './hooks/manager'
 
 const WORKFLOW_EVENT_TYPES = [
   'task:assigned',
@@ -128,6 +129,18 @@ export function initEventBridge() {
     const payload = { task: normalizeBackgroundTask(task) }
     for (const win of getLiveWindows()) {
       win.webContents.send(EVENT_CHANNELS.BACKGROUND_TASK_CANCELLED, payload)
+    }
+  })
+
+  hookManager.onExecutionAuditAppended(record => {
+    const payload = {
+      record: {
+        ...record,
+        timestamp: record.timestamp.toISOString()
+      }
+    }
+    for (const win of getLiveWindows()) {
+      win.webContents.send(EVENT_CHANNELS.HOOK_AUDIT_APPENDED, payload)
     }
   })
 }

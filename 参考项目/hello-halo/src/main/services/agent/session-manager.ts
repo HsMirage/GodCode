@@ -30,6 +30,7 @@ import {
 } from './helpers'
 import { registerProcess, unregisterProcess, getCurrentInstanceId } from '../health'
 import { resolveCredentialsForSdk, buildBaseSdkOptions } from './sdk-config'
+import { createHaloAppsMcpServer } from '../../apps/conversation-mcp'
 
 // ============================================
 // Session Maps
@@ -221,6 +222,13 @@ function startSessionCleanup(): void {
       }
 
       // Check 2: Clean up idle sessions (not used for 30 minutes)
+      // Skip sessions with an in-flight request — they are not idle.
+      // activeSessions is the authoritative source for this, consistent with
+      // how invalidateAllSessions() and getOrCreateV2Session() defer cleanup.
+      if (activeSessions.has(convId)) {
+        info.lastUsedAt = now // keep the clock fresh so timeout resets after task ends
+        continue
+      }
       if (now - info.lastUsedAt > SESSION_IDLE_TIMEOUT_MS) {
         cleanupSession(convId, 'idle timeout (30 min)')
       }
@@ -520,6 +528,10 @@ export async function ensureSessionWarm(
   // Get enabled MCP servers
   const enabledMcpServers = getEnabledMcpServers(config.mcpServers || {})
 
+  // Build MCP servers config (must match sendMessage to avoid session rebuild)
+  const mcpServers: Record<string, any> = enabledMcpServers ? { ...enabledMcpServers } : {}
+  mcpServers['halo-apps'] = createHaloAppsMcpServer(spaceId)
+
   // Build SDK options using shared configuration
   const sdkOptions = buildBaseSdkOptions({
     credentials: resolvedCredentials,
@@ -531,7 +543,8 @@ export async function ensureSessionWarm(
     stderrHandler: (data: string) => {
       console.error(`[Agent][${conversationId}] CLI stderr (warm):`, data)
     },
-    mcpServers: enabledMcpServers
+    mcpServers: Object.keys(mcpServers).length > 0 ? mcpServers : null,
+    maxTurns: config.agent?.maxTurns
   })
 
   try {

@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { toast } from 'sonner'
 import { useUpdaterStore } from '../../store/updater.store'
-import { Download, AlertCircle, CheckCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle } from 'lucide-react'
 
 export function UpdateToast() {
   const { status, error, updateInfo } = useUpdaterStore()

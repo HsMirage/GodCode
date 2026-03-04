@@ -14,6 +14,7 @@ import { _electron as electron } from 'playwright'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
+import type { ChildProcess } from 'child_process'
 import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -47,6 +48,41 @@ interface ElectronFixtures {
 
 const IS_WSL = isWSL()
 
+async function closeElectronAppGracefully(app: ElectronApplication): Promise<void> {
+  const closeTimeoutMs = 10000
+  const processRef = app.process() as ChildProcess | undefined
+  let timeoutHandle: NodeJS.Timeout | null = null
+
+  try {
+    await Promise.race([
+      app.close(),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`[E2E] app.close() timed out after ${closeTimeoutMs}ms`))
+        }, closeTimeoutMs)
+      })
+    ])
+  } catch (error) {
+    console.warn('[E2E] Graceful close timed out, forcing process termination', error)
+
+    if (processRef && !processRef.killed) {
+      try {
+        processRef.kill('SIGKILL')
+      } catch (killError) {
+        console.warn('[E2E] Failed to force-kill Electron process', killError)
+      }
+    }
+
+    await new Promise<void>(resolve => {
+      setTimeout(resolve, 300)
+    })
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle)
+    }
+  }
+}
+
 export const test = base.extend<ElectronFixtures>({
   electronApp: async (
     // biome-ignore lint/correctness/noEmptyPattern: Playwright fixture requires this pattern
@@ -64,18 +100,27 @@ export const test = base.extend<ElectronFixtures>({
 
     console.log(`[E2E] Launching app from: ${PROJECT_ROOT}`)
 
+    const e2eSpaceDir = path.join(
+      os.tmpdir(),
+      `codeall-e2e-space-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    )
+
+    const launchEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      ELECTRON_DISABLE_GPU: '1',
+      CODEALL_E2E_TEST: '1',
+      CODEALL_E2E_SPACE_DIR: e2eSpaceDir,
+      NODE_ENV: 'test'
+    }
+    delete launchEnv.ELECTRON_RUN_AS_NODE
+
     const app = await electron.launch({
       args: [path.join(PROJECT_ROOT, 'out/main/index.js'), '--no-sandbox'],
-      env: {
-        ...process.env,
-        ELECTRON_DISABLE_GPU: '1',
-        CODEALL_E2E_TEST: '1',
-        NODE_ENV: 'test'
-      }
+      env: launchEnv
     })
 
     await use(app)
-    await app.close()
+    await closeElectronAppGracefully(app)
   },
 
   window: async ({ electronApp }, use) => {
@@ -90,8 +135,7 @@ export const test = base.extend<ElectronFixtures>({
     })
 
     await window.waitForLoadState('domcontentloaded')
-    // Wait longer for React to hydrate
-    await window.waitForTimeout(5000)
+    await waitForAppReady(window)
 
     // Debug: always log page content
     const html = await window.content()
@@ -111,8 +155,9 @@ export async function takeScreenshot(page: Page, name: string): Promise<void> {
 }
 
 export async function waitForAppReady(window: Page): Promise<void> {
-  // Wait for the main layout container to be visible
-  await window.waitForSelector('.h-screen', { timeout: 30000 })
+  // Wait for stable layout anchors that indicate the app shell is interactive
+  await window.waitForSelector('h2:has-text("Spaces")', { timeout: 30000 })
+  await window.waitForSelector('button[title="Settings"]', { timeout: 30000 })
 }
 
 export async function navigateTo(window: Page, destination: 'chat' | 'settings'): Promise<void> {
@@ -125,5 +170,5 @@ export async function navigateTo(window: Page, destination: 'chat' | 'settings')
     const brand = window.locator('text=CodeAll').first()
     await brand.click()
   }
-  await window.waitForTimeout(500)
+  await window.waitForLoadState('networkidle')
 }

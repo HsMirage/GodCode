@@ -29,8 +29,24 @@ describe('ToolExecutor', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(toolRegistry.resolveName).mockImplementation((name: string) => name)
+    vi.mocked(toolRegistry.suggestName).mockReturnValue(undefined)
     vi.mocked(toolRegistry.get).mockReturnValue(mockTool as any)
-    vi.mocked(defaultPolicy.isAllowed).mockReturnValue(true)
+    vi.mocked(defaultPolicy.getExecutionPreview).mockImplementation(
+      (toolName: string, requestedName?: string) => ({
+        requestedName: requestedName ?? toolName,
+        resolvedName: toolName,
+        template: 'balanced',
+        permission: 'auto',
+        source: 'default',
+        dangerous: false,
+        highRisk: false,
+        highRiskEnforced: false,
+        requiresConfirmation: false,
+        allowedByPolicy: true,
+        allowedWithoutConfirmation: true
+      })
+    )
 
     executor = new ToolExecutor()
   })
@@ -42,16 +58,57 @@ describe('ToolExecutor', () => {
 
     expect(result.success).toBe(true)
     expect(result.output).toBe('ok')
+    expect(result.metadata).toEqual(
+      expect.objectContaining({
+        permissionPreview: expect.objectContaining({
+          template: 'balanced',
+          allowedByPolicy: true
+        })
+      })
+    )
     expect(mockTool.execute).toHaveBeenCalled()
   })
 
+  it('should resolve alias names before policy check and execution', async () => {
+    vi.mocked(toolRegistry.resolveName).mockReturnValue('file_read')
+
+    await executor.execute('read', { arg1: 'val' }, {} as any)
+
+    expect(toolRegistry.resolveName).toHaveBeenCalledWith('read')
+    expect(defaultPolicy.getExecutionPreview).toHaveBeenCalledWith('file_read', 'read')
+    expect(toolRegistry.get).toHaveBeenCalledWith('file_read')
+  })
+
   it('should deny if policy forbids', async () => {
-    vi.mocked(defaultPolicy.isAllowed).mockReturnValue(false)
+    vi.mocked(defaultPolicy.getExecutionPreview).mockReturnValue({
+      requestedName: 'test-tool',
+      resolvedName: 'test-tool',
+      template: 'safe',
+      permission: 'deny',
+      source: 'template',
+      dangerous: true,
+      highRisk: true,
+      highRiskEnforced: false,
+      requiresConfirmation: false,
+      allowedByPolicy: false,
+      allowedWithoutConfirmation: false,
+      reason: 'Permission template or custom policy denies this tool',
+      confirmReason: 'Safe template denies write operations'
+    })
 
     const result = await executor.execute('test-tool', {}, {} as any)
 
     expect(result.success).toBe(false)
     expect(result.error).toContain('not allowed by policy')
+    expect(result.metadata).toEqual(
+      expect.objectContaining({
+        permissionPreview: expect.objectContaining({
+          template: 'safe',
+          permission: 'deny',
+          allowedByPolicy: false
+        })
+      })
+    )
     expect(mockTool.execute).not.toHaveBeenCalled()
   })
 
@@ -62,6 +119,16 @@ describe('ToolExecutor', () => {
 
     expect(result.success).toBe(false)
     expect(result.error).toContain('not found')
+  })
+
+  it('should include suggestion when tool is not found', async () => {
+    vi.mocked(toolRegistry.get).mockReturnValue(undefined)
+    vi.mocked(toolRegistry.suggestName).mockReturnValue('file_read')
+
+    const result = await executor.execute('read_file', {}, {} as any)
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain("Did you mean 'file_read'?")
   })
 
   it('should validate required parameters', async () => {

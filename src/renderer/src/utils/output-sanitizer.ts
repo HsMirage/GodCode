@@ -4,13 +4,13 @@ const WRAPPER_LINE_PATTERNS: RegExp[] = [
   /^to=functions\.[\w.-]+\b/i,
   /^to=multi_tool_use\.parallel\b/i,
   /^commentary\b/i,
-  /^recipient_name\b/i,
-  /^parameters\b/i,
-  /^run_in_background\b/i,
-  /^timeout\b/i,
-  /^description\b/i,
-  /^command\b/i,
-  /^cwd\b/i,
+  /^recipient_name\s*:/i,
+  /^parameters\s*:/i,
+  /^run_in_background\s*:/i,
+  /^timeout\s*:/i,
+  /^description\s*:/i,
+  /^command\s*:/i,
+  /^cwd\s*:/i,
   /^tool_use_error\b/i,
   /^inputvalidationerror\b/i,
   /^persisted-output\b/i,
@@ -59,9 +59,6 @@ export function sanitizeDisplayOutput(raw: string): string {
   const kept: string[] = []
   for (const line of normalized.split('\n')) {
     if (shouldDropLine(line)) {
-      continue
-    }
-    if (containsWrapperSignal(line)) {
       continue
     }
     kept.push(line)

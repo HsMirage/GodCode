@@ -1,7 +1,6 @@
 import { DatabaseService } from './database'
 import { SchemaVersionService } from './schema-version.service'
 import * as fs from 'fs'
-import * as path from 'path'
 
 export interface BackupMetadata {
   version: string | null

@@ -11,18 +11,16 @@
  * Modified by CodeAll project.
  */
 
+import { SETTING_KEYS, buildScopedSettingStorageKey } from '@/main/services/settings/schema-registry'
 import { DatabaseService } from '../database'
 import { WorkforceWorkerDispatcher, type WorkerDispatchInput } from './worker-dispatcher'
 import { Prisma } from '@prisma/client'
 import { LoggerService } from '../logger'
 import { createLLMAdapter } from '../llm/factory'
-import { DEFAULT_FALLBACK_CHAINS, type ModelSource } from '../llm/model-resolver'
+import { ModelSelectionService, type ModelSource } from '../llm/model-selection.service'
+import type { LLMConfig } from '../llm/adapter.interface'
 import type { Message } from '@/types/domain'
-import {
-  AGENT_DEFINITIONS,
-  CATEGORY_DEFINITIONS,
-  resolvePrimaryAgentRolePolicy
-} from '@/shared/agent-definitions'
+import { resolvePrimaryAgentRolePolicy } from '@/shared/agent-definitions'
 import { workflowEvents } from './events'
 import {
   classifyError,
@@ -42,7 +40,6 @@ import {
 } from './recovery-types'
 import { SecureStorageService } from '../secure-storage.service'
 import { BoulderStateService } from '../boulder-state.service'
-import { BindingService } from '../binding.service'
 import { sanitizeCompletionOutput } from './output-sanitizer'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -89,6 +86,17 @@ export interface WorkflowOptions {
   planPath?: string
   /** Abort signal propagated from session stop action */
   abortSignal?: AbortSignal
+  /** Optional runtime tool allowlist override propagated by router */
+  availableTools?: string[]
+  /** Optional runtime model override propagated by router */
+  overrideModelSpec?: string
+  /** Optional skill runtime payload propagated by router */
+  skillRuntime?: {
+    id: string
+    command: string
+    allowedTools: string[] | null
+    model: string | null
+  }
   /** Router-provided scoring rationale and selected strategy */
   routingContext?: {
     strategy?: string
@@ -309,18 +317,13 @@ interface DispatcherAttemptResult {
   modelAttemptTokens: Set<string>
 }
 
+interface WorkforceConcurrencySettings {
+  maxConcurrent: number
+  limits: Record<string, number>
+}
+
 const MAX_CONCURRENT = 3
-const CONCURRENCY_LIMITS: Record<string, number> = {
-  // provider/model key (highest priority)
-  'openai-compatible::gpt-4o-mini': 1,
-  'anthropic::claude-3-5-sonnet-20240620': 2,
-  // provider-only fallback key
-  'openai-compatible': 2,
-  anthropic: 2,
-  // role/category key
-  dayu: 2,
-  zhinv: 2,
-  // default guard
+const DEFAULT_WORKFORCE_CONCURRENCY_LIMITS: Record<string, number> = {
   default: MAX_CONCURRENT
 }
 const isStrictBindingEnabled = (): boolean =>
@@ -380,15 +383,6 @@ const ORCHESTRATOR_NO_EVIDENCE_REASON_PATTERN =
 const ORCHESTRATOR_RECOVERABLE_HALT_REASON_PATTERN =
   /(evidence_detected=no|output_preview|needs?\s+verify|verification failed|cannot verify|did not confirm|not a success confirmation|intent to start|server startup|启动成功|服务启动|未完成|部分完成|需验证|无法验证|证据不足|缺乏实现证据|仅显示探索|探索与分析|输出仅显示|依赖不满足|未提供代码变更|具体修复内容|missing|required|缺失|incomplete|未创建|未安装|no evidence|show no evidence|in-progress work|in-progress|rather than finalized|not finalized|without verified|cannot proceed|planning .* rather than)/i
 const CHECKPOINT_HALT_RECOVERY_MAX_ATTEMPTS = 3
-const ALLOWED_WORKER_MODEL_SPECS = new Set<string>([
-  ...AGENT_DEFINITIONS.flatMap(def =>
-    [def.defaultModel, ...def.fallbackModels.map(model => model.model)].map(modelName => modelName.trim())
-  ),
-  ...CATEGORY_DEFINITIONS.flatMap(def =>
-    [def.defaultModel, ...def.fallbackModels.map(model => model.model)].map(modelName => modelName.trim())
-  )
-])
-
 class TaskActionabilityError extends Error {
   reason: string
   output: string
@@ -404,7 +398,6 @@ export class WorkforceEngine {
   private _prisma: ReturnType<typeof DatabaseService.prototype.getClient> | null = null
   private logger = LoggerService.getInstance().getLogger()
   private workerDispatcher = new WorkforceWorkerDispatcher()
-  private bindingService = BindingService.getInstance()
 
   private get prisma() {
     if (!this._prisma) {
@@ -858,6 +851,82 @@ export class WorkforceEngine {
     }
   }
 
+  private splitCrossDomainExecutionTask(
+    task: SubTask,
+    existingIds: Set<string>,
+    source: 'decomposed' | 'plan'
+  ): SubTask[] {
+    const domainNeeds = this.inferExecutionDomainNeeds(task.description)
+    if (!domainNeeds.backend || !domainNeeds.frontend) {
+      return [task]
+    }
+
+    const normalizedAssignedAgent = this.resolveCanonicalSubagent(task.assignedAgent)
+    if (normalizedAssignedAgent && SPECIALIST_WORKERS.has(normalizedAssignedAgent)) {
+      return [task]
+    }
+
+    const normalizedAssignedCategory = this.resolveCanonicalCategory(task.assignedCategory)
+    if (normalizedAssignedCategory === 'cangjie' || normalizedAssignedCategory === 'maliang') {
+      return [task]
+    }
+
+    const baseDependencies = Array.from(new Set(task.dependencies.filter(Boolean)))
+    const backendTask: SubTask = {
+      id: this.allocateSyntheticTaskId(existingIds, `${task.id}-backend`),
+      description: '交付后端/API/数据库维度的完成度矩阵，并输出该维度按优先级排序的未完成项清单。',
+      dependencies: baseDependencies,
+      assignedCategory: 'dayu',
+      source: task.source || source,
+      workflowPhase: 'execution'
+    }
+
+    const frontendTask: SubTask = {
+      id: this.allocateSyntheticTaskId(existingIds, `${task.id}-frontend`),
+      description: '交付前端/UI/页面维度的完成度矩阵，并输出该维度按优先级排序的未完成项清单。',
+      dependencies: baseDependencies,
+      assignedCategory: 'zhinv',
+      source: task.source || source,
+      workflowPhase: 'execution'
+    }
+
+
+    return [backendTask, frontendTask]
+  }
+
+  private expandCrossDomainExecutionTasks(
+    tasks: SubTask[],
+    existingIds: Set<string>,
+    source: 'decomposed' | 'plan'
+  ): SubTask[] {
+    const expanded: SubTask[] = []
+    const replacementByOriginalId = new Map<string, string[]>()
+
+    for (const task of tasks) {
+      const splitTasks = this.splitCrossDomainExecutionTask(task, existingIds, source)
+      expanded.push(...splitTasks)
+      if (splitTasks.length > 1) {
+        replacementByOriginalId.set(task.id, splitTasks.map(item => item.id))
+      }
+    }
+
+    if (replacementByOriginalId.size === 0) {
+      return expanded
+    }
+
+    return expanded.map(task => {
+      const remappedDependencies = task.dependencies.flatMap(depId => {
+        const replacements = replacementByOriginalId.get(depId)
+        return replacements && replacements.length > 0 ? replacements : [depId]
+      })
+
+      return {
+        ...task,
+        dependencies: Array.from(new Set(remappedDependencies.filter(Boolean)))
+      }
+    })
+  }
+
   private createSyntheticExecutionTask(
     existingIds: Set<string>,
     baseId: string,
@@ -948,7 +1017,7 @@ export class WorkforceEngine {
     const preservedDiscoveryTasks: SubTask[] = []
     const preservedPlanReviewTasks: SubTask[] = []
     const preservedDeepReviewTasks: SubTask[] = []
-    const executionTasks: SubTask[] = []
+    const rawExecutionTasks: SubTask[] = []
 
     for (const task of normalizedTasks) {
       const assignedAgent = this.resolveCanonicalSubagent(task.assignedAgent)
@@ -962,7 +1031,7 @@ export class WorkforceEngine {
           !(requiresExecutionFlow && implementationLikeTask && !['chongming', 'leigong'].includes(assignedAgent))
 
         if (!keepSpecialist) {
-          executionTasks.push({
+          rawExecutionTasks.push({
             ...task,
             assignedAgent: undefined,
             assignedCategory: this.selectCategoryForTask(task, context.workflowCategory),
@@ -987,13 +1056,19 @@ export class WorkforceEngine {
         continue
       }
 
-      executionTasks.push({
+      rawExecutionTasks.push({
         ...task,
         assignedAgent,
         assignedCategory: assignedCategory || task.assignedCategory,
         workflowPhase: 'execution'
       })
     }
+
+    const executionTasks = this.expandCrossDomainExecutionTasks(
+      rawExecutionTasks,
+      existingIds,
+      context.source
+    )
 
     if (requiresExecutionFlow) {
       const declaredExecutionCategories = executionTasks.map(task => ({
@@ -1222,157 +1297,27 @@ export class WorkforceEngine {
   ): Promise<SubTask[]> {
     this.logger.info('Decomposing task', { input })
 
-    let selectedProvider: string | undefined
-    let selectedModel: string | undefined
-    let apiKey: string | undefined
-    let baseURL: string | undefined
-    let temperature = 0.3
     const resolvedCategory = this.resolveCanonicalCategory(opts.category)
 
-    // 1) Prefer the selected dialog agent's bound model (no global default needed).
-    if (opts.agentCode) {
-      const binding = await this.prisma.agentBinding.findUnique({
-        where: { agentCode: opts.agentCode },
-        include: { model: { include: { apiKeyRef: true } } }
-      })
-
-      if (binding?.enabled && binding.modelId && !binding.model) {
-        throw new Error(
-          `Agent「${opts.agentCode}」已绑定模型但模型记录不存在。请到“设置 -> Agent 绑定”重新选择模型。`
-        )
-      }
-
-      if (binding?.enabled && binding.model) {
-        const decryptedKey = binding.model.apiKeyRef?.encryptedKey
-          ? SecureStorageService.getInstance().decrypt(binding.model.apiKeyRef.encryptedKey)
-          : binding.model.apiKey
-            ? SecureStorageService.getInstance().decrypt(binding.model.apiKey)
-            : null
-
-        const key = decryptedKey?.trim() || ''
-        if (!key) {
-          throw new Error(
-            `Agent「${opts.agentCode}」已绑定模型「${binding.model.modelName}」但缺少 API Key。` +
-            `请到“设置 -> API Keys/模型”补全凭据，或到“设置 -> Agent 绑定”切换模型。`
-          )
-        }
-
-        selectedProvider = binding.model.provider
-        selectedModel = binding.model.modelName
-        apiKey = key
-        baseURL = binding.model.apiKeyRef?.baseURL ?? binding.model.baseURL ?? undefined
-        temperature = binding.temperature ?? temperature
-      }
-    }
-
-    // 2) Otherwise, try category-bound model if provided (e.g. routing categories).
-    if (!selectedProvider && resolvedCategory) {
-      const binding = await this.prisma.categoryBinding.findUnique({
-        where: { categoryCode: resolvedCategory },
-        include: { model: { include: { apiKeyRef: true } } }
-      })
-
-      if (binding?.enabled && binding.modelId && !binding.model) {
-        throw new Error(
-          `任务类别「${resolvedCategory}」已绑定模型但模型记录不存在。请到“设置 -> Agent 绑定 -> 任务类别”重新选择模型。`
-        )
-      }
-
-      if (binding?.enabled && binding.model) {
-        const decryptedKey = binding.model.apiKeyRef?.encryptedKey
-          ? SecureStorageService.getInstance().decrypt(binding.model.apiKeyRef.encryptedKey)
-          : binding.model.apiKey
-            ? SecureStorageService.getInstance().decrypt(binding.model.apiKey)
-            : null
-
-        const key = decryptedKey?.trim() || ''
-        if (!key) {
-          throw new Error(
-            `任务类别「${resolvedCategory}」已绑定模型「${binding.model.modelName}」但缺少 API Key。` +
-            `请到“设置 -> API Keys/模型”补全凭据，或到“设置 -> Agent 绑定 -> 任务类别”切换模型。`
-          )
-        }
-
-        selectedProvider = binding.model.provider
-        selectedModel = binding.model.modelName
-        apiKey = key
-        baseURL = binding.model.apiKeyRef?.baseURL ?? binding.model.baseURL ?? undefined
-        temperature = binding.temperature ?? temperature
-      }
-    }
-
-    // 3) Otherwise, use any connected provider (supports new ApiKeyRef storage).
-    if (!selectedProvider) {
-      type ModelRow = {
-        provider: string
-        modelName: string
-        apiKey: string | null
-        baseURL: string | null
-        apiKeyRef?: { encryptedKey: string; baseURL: string } | null
-      }
-
-      const models = await this.prisma.model.findMany({
-        where: {
-          OR: [{ apiKeyId: { not: null } }, { apiKey: { not: null } }]
-        },
-        include: { apiKeyRef: true },
-        orderBy: { createdAt: 'desc' }
-      })
-
-      // Only keep models with usable credentials (apiKeyRef preferred, legacy apiKey fallback).
-      const credentialed = (models as ModelRow[])
-        .map((m: ModelRow) => {
-          const key = m.apiKeyRef?.encryptedKey
-            ? SecureStorageService.getInstance().decrypt(m.apiKeyRef.encryptedKey)
-            : m.apiKey
-              ? SecureStorageService.getInstance().decrypt(m.apiKey)
-              : null
-          return { model: m, key: key?.trim() || '' }
-        })
-        .filter((x: { model: ModelRow; key: string }) => x.key.length > 0)
-
-      if (credentialed.length === 0) {
-        throw new Error('No model configured for task decomposition')
-      }
-
-      // Try to find a match in the orchestrator fallback chain (provider match only).
-      for (const entry of DEFAULT_FALLBACK_CHAINS.orchestrator) {
-        for (const provider of entry.providers) {
-          const found = credentialed.find(
-            (m: { model: ModelRow; key: string }) => m.model.provider === provider
-          )
-          if (found) {
-            selectedProvider = provider
-            selectedModel = entry.model
-            apiKey = found.key
-            baseURL = found.model.apiKeyRef?.baseURL ?? found.model.baseURL ?? undefined
-            break
-          }
-        }
-        if (selectedProvider) break
-      }
-
-      // Fallback to the most recently configured model.
-      if (!selectedProvider) {
-        const fallback = credentialed[0]
-        selectedProvider = fallback.model.provider
-        selectedModel = fallback.model.modelName
-        apiKey = fallback.key
-        baseURL = fallback.model.apiKeyRef?.baseURL ?? fallback.model.baseURL ?? undefined
-      }
-    }
+    const modelSelection = await ModelSelectionService.getInstance().resolveModelSelection({
+      agentCode: opts.agentCode,
+      categoryCode: resolvedCategory,
+      temperatureFallback: 0.3
+    })
 
     this.logger.info('Selected model for decomposition', {
-      provider: selectedProvider,
-      model: selectedModel,
-      baseURL,
+      provider: modelSelection.provider,
+      model: modelSelection.model,
+      baseURL: modelSelection.baseURL,
+      source: modelSelection.source,
+      protocol: modelSelection.protocol,
       viaAgent: opts.agentCode ?? null,
       viaCategory: resolvedCategory ?? null
     })
 
-    const adapter = createLLMAdapter(selectedProvider!, {
-      apiKey: apiKey || '',
-      baseURL
+    const adapter = createLLMAdapter(modelSelection.provider, {
+      apiKey: modelSelection.apiKey,
+      baseURL: modelSelection.baseURL
     })
 
     const workspaceName = opts.workspaceDir ? path.basename(opts.workspaceDir) : undefined
@@ -1460,15 +1405,21 @@ Only return the JSON, no other text.`
       }
     ]
 
-    const response = await adapter.sendMessage(messages, {
-      model: selectedModel ?? 'claude-3-5-sonnet-20240620',
-      temperature,
+    const globalMaxToolIterations = await this.resolveGlobalMaxToolIterations()
+    const baseConfig = (modelSelection.config ?? {}) as LLMConfig
+    const llmConfig: LLMConfig = {
+      ...baseConfig,
+      model: modelSelection.model,
+      temperature: modelSelection.temperature ?? baseConfig.temperature ?? 0.3,
+      maxToolIterations: globalMaxToolIterations ?? baseConfig.maxToolIterations,
       abortSignal: opts.abortSignal,
       workspaceDir: opts.workspaceDir,
       sessionId: opts.sessionId,
       // Task decomposition must stay pure planning; disable runtime tool execution.
       tools: []
-    })
+    }
+
+    const response = await adapter.sendMessage(messages, llmConfig)
 
     try {
       const jsonMatch = response.content.match(/\{[\s\S]*\}/)
@@ -1590,7 +1541,11 @@ Only return the JSON, no other text.`
   private emitWorkflowStage(
     workflowId: string,
     stage: WorkflowLifecycleStage,
-    metadata: Record<string, unknown> = {}
+    metadata: Record<string, unknown> = {},
+    context?: {
+      sessionId?: string
+      workspaceDir?: string
+    }
   ): void {
     workflowEvents.emit({
       type: 'workflow:stage',
@@ -1599,7 +1554,9 @@ Only return the JSON, no other text.`
       timestamp: new Date(),
       data: {
         stage,
-        ...metadata
+        ...metadata,
+        ...(context?.sessionId ? { sessionId: context.sessionId } : {}),
+        ...(context?.workspaceDir ? { workspaceDir: context.workspaceDir } : {})
       }
     })
   }
@@ -2472,6 +2429,20 @@ ${clippedContent}`)
     return undefined
   }
 
+  private isDelegateEmptyOutputFailure(output: string): boolean {
+    const normalized = output.trim().toLowerCase()
+    if (!normalized) {
+      return true
+    }
+
+    return (
+      normalized.includes('empty output') ||
+      normalized.includes('empty text output') ||
+      normalized.includes('空文本输出') ||
+      normalized.includes('回复为空')
+    )
+  }
+
   private normalizeOutputLineForHeuristics(text: string): string {
     return text
       .replace(/```[\s\S]*?```/g, ' ')
@@ -2581,12 +2552,20 @@ ${clippedContent}`)
       }
     }
 
+    const modelSelectionService = ModelSelectionService.getInstance()
+
     for (const categoryCode of categoriesToValidate) {
-      await this.bindingService.getCategoryModelConfig(categoryCode)
+      await modelSelectionService.resolveModelSelection({
+        categoryCode,
+        temperatureFallback: undefined
+      })
     }
 
     for (const agentCode of agentsToValidate) {
-      await this.bindingService.getAgentModelConfig(agentCode)
+      await modelSelectionService.resolveModelSelection({
+        agentCode,
+        temperatureFallback: undefined
+      })
     }
   }
 
@@ -3214,6 +3193,104 @@ ${clippedContent}`)
     return Boolean(decryptedKey?.trim())
   }
 
+  private parseSettingInt(value: string | null | undefined, min: number, max: number): number | null {
+    if (!value) return null
+    const parsed = Number.parseInt(value, 10)
+    if (!Number.isFinite(parsed)) return null
+    return Math.max(min, Math.min(max, Math.trunc(parsed)))
+  }
+
+  private async getSystemSettingValue(key: string, options?: { sessionId?: string }): Promise<string | undefined> {
+    const systemSettingClient = (this.prisma as unknown as {
+      systemSetting?: {
+        findUnique?: (args: { where: { key: string } }) => Promise<{ value?: string | null } | null>
+      }
+    }).systemSetting
+
+    const findUnique = systemSettingClient?.findUnique
+    if (typeof findUnique !== 'function') {
+      return undefined
+    }
+
+    const sessionId = options?.sessionId?.trim()
+    if (sessionId) {
+      const session = await this.prisma.session.findUnique({
+        where: { id: sessionId },
+        select: { spaceId: true }
+      })
+
+      const spaceId = session?.spaceId?.trim()
+      if (spaceId) {
+        const scopedKey = buildScopedSettingStorageKey(key, 'space', spaceId)
+        const scopedSetting = await findUnique({ where: { key: scopedKey } })
+        const scopedValue = scopedSetting?.value?.trim()
+        if (scopedValue) {
+          return scopedValue
+        }
+      }
+    }
+
+    const setting = await findUnique({ where: { key } })
+    const value = setting?.value?.trim()
+    return value || undefined
+  }
+
+  private async resolveGlobalMaxToolIterations(): Promise<number | undefined> {
+    const value = await this.getSystemSettingValue(SETTING_KEYS.MAX_TOOL_ITERATIONS)
+    return this.parseSettingInt(value, 1, 1000) ?? undefined
+  }
+
+  private parseConcurrencyLimits(value?: string): Record<string, number> | undefined {
+    if (!value) return undefined
+    try {
+      const parsed = JSON.parse(value)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return undefined
+      }
+
+      const result: Record<string, number> = {}
+      for (const [rawKey, rawLimit] of Object.entries(parsed)) {
+        const key = String(rawKey || '').trim()
+        if (!key) continue
+        const limit = this.parseSettingInt(String(rawLimit), 1, 1000)
+        if (limit !== null) {
+          result[key] = limit
+        }
+      }
+
+      return Object.keys(result).length > 0 ? result : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  private async resolveWorkforceConcurrencySettings(sessionId: string): Promise<WorkforceConcurrencySettings> {
+    const maxConcurrentSetting = await this.getSystemSettingValue(SETTING_KEYS.WORKFORCE_MAX_CONCURRENT, {
+      sessionId
+    })
+
+    const maxConcurrent = this.parseSettingInt(maxConcurrentSetting, 1, 128) ?? MAX_CONCURRENT
+
+    const limitsSetting = await this.getSystemSettingValue(SETTING_KEYS.WORKFORCE_CONCURRENCY_LIMITS, {
+      sessionId
+    })
+
+    const configuredLimits = this.parseConcurrencyLimits(limitsSetting)
+    const limits = {
+      ...DEFAULT_WORKFORCE_CONCURRENCY_LIMITS,
+      ...(configuredLimits || {})
+    }
+
+    if (typeof limits.default !== 'number') {
+      limits.default = maxConcurrent
+    }
+
+    return {
+      maxConcurrent,
+      limits
+    }
+  }
+
   private parseModelProviderAndName(spec?: string): { provider?: string; model?: string } {
     const normalized = spec?.trim()
     if (!normalized) {
@@ -3254,13 +3331,14 @@ ${clippedContent}`)
     return 'default'
   }
 
-  private getConcurrencyLimitForKey(key: string): number {
+  private getConcurrencyLimitForKey(key: string, limits: Record<string, number>): number {
     const trimmed = key.trim()
+    const defaultLimit = typeof limits.default === 'number' ? limits.default : MAX_CONCURRENT
     if (!trimmed) {
-      return CONCURRENCY_LIMITS.default
+      return defaultLimit
     }
 
-    return CONCURRENCY_LIMITS[trimmed] ?? CONCURRENCY_LIMITS.default
+    return limits[trimmed] ?? defaultLimit
   }
 
   private findNextFairTask(
@@ -3299,8 +3377,6 @@ ${clippedContent}`)
   }
 
   private resolveStrictBindingPreference(input: {
-    assignedAgent?: string
-    assignedCategory?: string
     fallbackModelSpec?: string
     attemptedModelTokens: Set<string>
   }): { modelSpec?: string; diagnostics?: string } {
@@ -3309,53 +3385,7 @@ ${clippedContent}`)
       return {}
     }
 
-    if (!isStrictBindingEnabled()) {
-      return { modelSpec: fallbackSpec }
-    }
-
-    const parsed = this.parseModelProviderAndName(fallbackSpec)
     const normalizedFallback = fallbackSpec.toLowerCase()
-
-    if (input.assignedAgent) {
-      const agentDef = AGENT_DEFINITIONS.find(def => def.code === input.assignedAgent)
-      const allowed = new Set(
-        [agentDef?.defaultModel, ...(agentDef?.fallbackModels || []).map(item => item.model)]
-          .filter(Boolean)
-          .map(model => String(model).trim().toLowerCase())
-      )
-
-      if (parsed.model && allowed.size > 0 && !allowed.has(parsed.model.toLowerCase())) {
-        const attempted = Array.from(input.attemptedModelTokens).slice(0, 5)
-        return {
-          diagnostics:
-            `Strict binding rejected fallback model "${fallbackSpec}" for agent "${input.assignedAgent}". ` +
-            `Allowed models: ${Array.from(allowed).join(', ') || '(none)'}. ` +
-            `Attempted models: ${attempted.join(', ') || '(none)'}. ` +
-            'Please update agent binding/fallback configuration in Settings -> Agent Bindings.'
-        }
-      }
-    }
-
-    if (input.assignedCategory) {
-      const categoryDef = CATEGORY_DEFINITIONS.find(def => def.code === input.assignedCategory)
-      const allowed = new Set(
-        [categoryDef?.defaultModel, ...(categoryDef?.fallbackModels || []).map(item => item.model)]
-          .filter(Boolean)
-          .map(model => String(model).trim().toLowerCase())
-      )
-
-      if (parsed.model && allowed.size > 0 && !allowed.has(parsed.model.toLowerCase())) {
-        const attempted = Array.from(input.attemptedModelTokens).slice(0, 5)
-        return {
-          diagnostics:
-            `Strict binding rejected fallback model "${fallbackSpec}" for category "${input.assignedCategory}". ` +
-            `Allowed models: ${Array.from(allowed).join(', ') || '(none)'}. ` +
-            `Attempted models: ${attempted.join(', ') || '(none)'}. ` +
-            'Please update category binding/fallback configuration in Settings -> Agent Bindings -> Categories.'
-        }
-      }
-    }
-
     if (input.attemptedModelTokens.has(normalizedFallback)) {
       return {
         diagnostics:
@@ -3379,10 +3409,6 @@ ${clippedContent}`)
       }
 
       const modelName = model.modelName.trim()
-      if (!ALLOWED_WORKER_MODEL_SPECS.has(modelName)) {
-        continue
-      }
-
       const modelSpec = `${model.provider}/${modelName}`
       const tokens = [modelName.toLowerCase(), modelSpec.toLowerCase()]
 
@@ -3404,6 +3430,7 @@ ${clippedContent}`)
     promptContract: TaskPromptContract
     workflowId: string
     taskId: string
+    concurrencyLimits: Record<string, number>
   }): Promise<DispatcherAttemptResult> {
     const attemptedModelTokens = new Set<string>()
     const fallbackTrail: string[] = []
@@ -3446,7 +3473,7 @@ ${clippedContent}`)
         category: input.assignedCategory,
         modelSpec: effectiveModelSpec
       })
-      const perKeyLimit = this.getConcurrencyLimitForKey(concurrencyKey)
+      const perKeyLimit = this.getConcurrencyLimitForKey(concurrencyKey, input.concurrencyLimits)
       delegateInput.metadata = {
         ...(delegateInput.metadata || {}),
         concurrencyKey,
@@ -3454,12 +3481,24 @@ ${clippedContent}`)
       }
 
       const result = await this.workerDispatcher.dispatch(delegateInput)
+      let rawOutput = typeof result.output === 'string' ? result.output : ''
+      let outputText = rawOutput.trim()
       if (!result.success) {
-        throw new Error(result.output || 'Delegate task returned unsuccessful status')
+        if (this.isDelegateEmptyOutputFailure(outputText)) {
+          this.logger.warn('Delegate task failed with empty output signal; entering recovery path', {
+            workflowId: input.workflowId,
+            taskId: input.taskId,
+            actionabilityRecoveryAttempt,
+            modelFallbackAttempt,
+            overrideModelSpec: overrideModelSpec || null
+          })
+          rawOutput = ''
+          outputText = ''
+        } else {
+          throw new Error(result.output || 'Delegate task returned unsuccessful status')
+        }
       }
 
-      const rawOutput = typeof result.output === 'string' ? result.output : ''
-      const outputText = rawOutput.trim()
       if (result.model?.trim()) {
         attemptedModelTokens.add(result.model.trim().toLowerCase())
       }
@@ -3522,23 +3561,17 @@ ${clippedContent}`)
       if (this.canAttemptModelFallback(unactionableReason, modelFallbackAttempt)) {
         const fallbackModelSpec = await this.pickAlternativeModelSpec(attemptedModelTokens)
         const strictResolution = this.resolveStrictBindingPreference({
-          assignedAgent: input.assignedAgent,
-          assignedCategory: input.assignedCategory,
           fallbackModelSpec,
           attemptedModelTokens
         })
 
-        if (isStrictBindingEnabled() && !strictResolution.modelSpec) {
+        if (!strictResolution.modelSpec) {
           const attempted = Array.from(attemptedModelTokens).slice(0, 5)
-          const scope = input.assignedCategory
-            ? `category "${input.assignedCategory}"`
-            : `agent "${input.assignedAgent || 'luban'}"`
           throw new Error(
             strictResolution.diagnostics ||
-            `Strict binding rejected fallback model for ${scope}. ` +
             `No compatible fallback model is available. ` +
             `Attempted models: ${attempted.join(', ') || '(none)'}. ` +
-            'Please update binding/fallback configuration in Settings.'
+            'Please configure additional runnable models in Settings.'
           )
         }
 
@@ -3626,6 +3659,7 @@ ${clippedContent}`)
     }
     const retryService = enableRetry ? getTaskRetryService(retryConfig) : null
     const recoveryMode = this.normalizeRecoveryConfig(recoveryConfig)
+    const concurrencySettings = await this.resolveWorkforceConcurrencySettings(resolvedSessionId)
     const taskRetryStates = new Map<string, RetryState>()
     const recoveryState = this.createInitialRecoveryState(recoveryMode)
     const taskRecoveryAttempts = new Map<string, number>()
@@ -3669,6 +3703,14 @@ ${clippedContent}`)
 
     this.logger.info('Executing workflow', { workflowId: workflow.id, input, enableRetry })
 
+    const dispatchSkillRuntime = resolvedOptions.skillRuntime
+      ? {
+          ...resolvedOptions.skillRuntime,
+          allowedTools: resolvedOptions.availableTools ?? resolvedOptions.skillRuntime.allowedTools,
+          model: resolvedOptions.overrideModelSpec || resolvedOptions.skillRuntime.model
+        }
+      : undefined
+
     try {
       const workspaceDir = await this.resolveWorkspaceDirForSession(resolvedSessionId)
       this.logger.info('[workforce] Resolved session workspace context', {
@@ -3681,7 +3723,12 @@ ${clippedContent}`)
       const taskResolution = await this.resolveWorkflowTasks(
         input,
         resolvedSessionId,
-        normalizedOptions,
+        {
+          ...normalizedOptions,
+          availableTools: resolvedOptions.availableTools,
+          overrideModelSpec: resolvedOptions.overrideModelSpec,
+          skillRuntime: dispatchSkillRuntime
+        },
         workspaceDir
       )
       throwIfAborted()
@@ -3755,7 +3802,9 @@ ${clippedContent}`)
             reason: params.reason,
             persistedTaskId: params.persistedTaskId,
             reportedTaskIds: params.reportedTaskIds,
-            readyTaskIds: params.readyTaskIds
+            readyTaskIds: params.readyTaskIds,
+            sessionId: resolvedSessionId,
+            workspaceDir
           }
         })
       }
@@ -3786,7 +3835,10 @@ ${clippedContent}`)
           ...metadata
         }
         lifecycleTimeline.push({ stage, timestamp, details })
-        this.emitWorkflowStage(workflow.id, stage, details)
+        this.emitWorkflowStage(workflow.id, stage, details, {
+          sessionId: resolvedSessionId,
+          workspaceDir
+        })
       }
 
       recordStageTransition('plan', {
@@ -3859,7 +3911,9 @@ ${clippedContent}`)
           timestamp: new Date(assignedEventTimestamp),
           data: {
             description: task.description,
-            assignedAgent: assignedTarget
+            assignedAgent: assignedTarget,
+            sessionId: resolvedSessionId,
+            workspaceDir
           }
         })
 
@@ -3881,7 +3935,12 @@ ${clippedContent}`)
           workflowId: workflow.id,
           taskId: task.id,
           timestamp: new Date(startedEventTimestamp),
-          data: { description: task.description, assignedAgent: assignedTarget }
+          data: {
+            description: task.description,
+            assignedAgent: assignedTarget,
+            sessionId: resolvedSessionId,
+            workspaceDir
+          }
         })
 
         const taskOperation = async (recoveryAttempt = 0) => {
@@ -3948,6 +4007,9 @@ ${clippedContent}`)
             checkpointRecoveryReason,
             recoveryAttempt,
             routingContext: resolvedOptions.routingContext || null,
+            skill: resolvedOptions.skillRuntime || null,
+            skillToolScope: resolvedOptions.availableTools || null,
+            skillModelOverride: resolvedOptions.overrideModelSpec || null,
             runtimeBindingSnapshot
           }
 
@@ -3965,7 +4027,8 @@ ${clippedContent}`)
             basePrompt,
             promptContract,
             workflowId: workflow.id,
-            taskId: task.id
+            taskId: task.id,
+            concurrencyLimits: concurrencySettings.limits
           })
 
           if (attemptResult.result.taskId) {
@@ -4103,9 +4166,12 @@ ${clippedContent}`)
                     orchestratorCheckpoints,
                     orchestratorParticipation: orchestratorCheckpoints.length > 0,
                     routingContext: resolvedOptions.routingContext || null,
+                    skill: resolvedOptions.skillRuntime || null,
+                    skillToolScope: resolvedOptions.availableTools || null,
+                    skillModelOverride: resolvedOptions.overrideModelSpec || null,
                     scheduling: {
-                      maxConcurrent: MAX_CONCURRENT,
-                      concurrencyLimits: CONCURRENCY_LIMITS,
+                      maxConcurrent: concurrencySettings.maxConcurrent,
+                      concurrencyLimits: concurrencySettings.limits,
                       strictBindingEnabled: isStrictBindingEnabled()
                     }
                   }
@@ -4131,9 +4197,12 @@ ${clippedContent}`)
                     orchestratorCheckpoints,
                     orchestratorParticipation: orchestratorCheckpoints.length > 0,
                     routingContext: resolvedOptions.routingContext || null,
+                    skill: resolvedOptions.skillRuntime || null,
+                    skillToolScope: resolvedOptions.availableTools || null,
+                    skillModelOverride: resolvedOptions.overrideModelSpec || null,
                     scheduling: {
-                      maxConcurrent: MAX_CONCURRENT,
-                      concurrencyLimits: CONCURRENCY_LIMITS,
+                      maxConcurrent: concurrencySettings.maxConcurrent,
+                      concurrencyLimits: concurrencySettings.limits,
                       strictBindingEnabled: isStrictBindingEnabled()
                     }
                   }
@@ -4187,6 +4256,9 @@ ${clippedContent}`)
                     planName: taskResolution.planName,
                     referencedMarkdownFiles: taskResolution.referencedMarkdownFiles || [],
                     routingContext: resolvedOptions.routingContext || null,
+                    skill: dispatchSkillRuntime || null,
+                    skillToolScope: resolvedOptions.availableTools || null,
+                    skillModelOverride: resolvedOptions.overrideModelSpec || null,
                     recoveryContext: {
                       sourceError: primaryErrorMessage,
                       failureClass,
@@ -4207,7 +4279,8 @@ ${clippedContent}`)
                 basePrompt,
                 promptContract,
                 workflowId: workflow.id,
-                taskId: task.id
+                taskId: task.id,
+                concurrencyLimits: concurrencySettings.limits
               })
 
               recoveryState.phase = 'validate'
@@ -4296,8 +4369,8 @@ ${clippedContent}`)
                         orchestratorParticipation: orchestratorCheckpoints.length > 0,
                         routingContext: resolvedOptions.routingContext || null,
                         scheduling: {
-                          maxConcurrent: MAX_CONCURRENT,
-                          concurrencyLimits: CONCURRENCY_LIMITS,
+                          maxConcurrent: concurrencySettings.maxConcurrent,
+                          concurrencyLimits: concurrencySettings.limits,
                           strictBindingEnabled: isStrictBindingEnabled()
                         },
                         retryState: {
@@ -4445,6 +4518,8 @@ ${clippedContent}`)
             data: {
               description: task.description,
               assignedAgent: assignedTarget,
+              sessionId: resolvedSessionId,
+              workspaceDir,
               persistedTaskId: result.taskId,
               output: sanitizedTaskOutput,
               model: result.model,
@@ -4494,6 +4569,8 @@ ${clippedContent}`)
             data: {
               description: task.description,
               assignedAgent: assignedTarget,
+              sessionId: resolvedSessionId,
+              workspaceDir,
               error: errorMessage,
               retryState
             }
@@ -4510,13 +4587,13 @@ ${clippedContent}`)
 
       recordStageTransition('dispatch', {
         checkpointEnabled,
-        maxConcurrent: MAX_CONCURRENT,
+        maxConcurrent: concurrencySettings.maxConcurrent,
         routingContext: resolvedOptions.routingContext || null,
-        concurrencyLimits: CONCURRENCY_LIMITS,
+        concurrencyLimits: concurrencySettings.limits,
         strictBindingEnabled: isStrictBindingEnabled()
       })
 
-      workflowLoop: while (true) {
+      workflowLoop: for (;;) {
         while (completed.size < subtasks.length) {
           throwIfAborted()
           const ready = subtasks.filter(
@@ -4535,7 +4612,7 @@ ${clippedContent}`)
           }
 
           let dispatchCandidates = ready
-          const availableSlots = Math.max(MAX_CONCURRENT - inProgress.size, 0)
+          const availableSlots = Math.max(concurrencySettings.maxConcurrent - inProgress.size, 0)
           const keyResolver = (candidate: SubTask) => {
             const execution = executions.get(candidate.id)
             return (
@@ -4700,7 +4777,7 @@ ${clippedContent}`)
 
             const key = keyResolver(next)
             const inUse = inProgressByConcurrencyKey.get(key) || 0
-            const limit = this.getConcurrencyLimitForKey(key)
+            const limit = this.getConcurrencyLimitForKey(key, concurrencySettings.limits)
             if (inUse < limit) {
               batch.push({ task: next, key })
               inProgressByConcurrencyKey.set(key, inUse + 1)
@@ -4889,11 +4966,14 @@ ${clippedContent}`)
             orchestratorCheckpoints,
             orchestratorParticipation: orchestratorCheckpoints.length > 0,
             routingContext: resolvedOptions.routingContext || null,
+            skill: dispatchSkillRuntime || null,
+            skillToolScope: resolvedOptions.availableTools || null,
+            skillModelOverride: resolvedOptions.overrideModelSpec || null,
             recoveryMode,
             recoveryState: observability.recoveryState,
             scheduling: {
-              maxConcurrent: MAX_CONCURRENT,
-              concurrencyLimits: CONCURRENCY_LIMITS,
+              maxConcurrent: concurrencySettings.maxConcurrent,
+              concurrencyLimits: concurrencySettings.limits,
               strictBindingEnabled: isStrictBindingEnabled()
             },
             correlation: observability.correlation,
@@ -4942,7 +5022,12 @@ ${clippedContent}`)
         workflowId: workflow.id,
         taskId: workflow.id,
         timestamp: new Date(),
-        data: { success: true, taskCount: subtasks.length }
+        data: {
+          success: true,
+          taskCount: subtasks.length,
+          sessionId: resolvedSessionId,
+          workspaceDir
+        }
       })
 
       return {
@@ -5006,7 +5091,10 @@ ${clippedContent}`)
             orchestratorCheckpointEnabled: checkpointEnabled,
             orchestratorCheckpoints,
             orchestratorParticipation: orchestratorCheckpoints.length > 0,
-            cancelledByUser: cancelled,
+            routingContext: resolvedOptions.routingContext || null,
+            skill: dispatchSkillRuntime || null,
+            skillToolScope: resolvedOptions.availableTools || null,
+            skillModelOverride: resolvedOptions.overrideModelSpec || null,
             recoveryMode,
             recoveryState: observability.recoveryState,
             correlation: observability.correlation,

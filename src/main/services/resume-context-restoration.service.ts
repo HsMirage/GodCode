@@ -1,5 +1,5 @@
 import { BoulderStateService } from './boulder-state.service'
-import { PlanFileService, PlanTask } from './plan-file.service'
+import { PlanTask } from './plan-file.service'
 import { SessionIdleDetectionService } from './session-idle-detection.service'
 import { SessionSnapshot, SessionStateRecoveryService } from './session-state-recovery.service'
 import { TodoIncompleteDetectionService } from './todo-incomplete-detection.service'

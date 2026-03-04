@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
 import { Fragment } from 'react'
-import { useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 
 // Define IPC response types locally since they might not be in shared types yet
@@ -21,7 +20,6 @@ export function SessionRecoveryPrompt() {
   const [isOpen, setIsOpen] = useState(false)
   const [recoveryInfo, setRecoveryInfo] = useState<RecoveryInfo | null>(null)
   const [isRecovering, setIsRecovering] = useState(false)
-  const navigate = useNavigate()
 
   useEffect(() => {
     const checkRecovery = async () => {

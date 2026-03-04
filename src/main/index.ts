@@ -10,8 +10,9 @@ import { browserViewManager } from './services/browser-view.service'
 import { initEventBridge } from './services/event-bridge.service'
 import { sessionContinuityService } from './services/session-continuity.service'
 import { hookManager } from './services/hooks/manager'
-import { initializeDefaultHooks } from './services/hooks'
+import { initializeDefaultHooks, restorePersistedHookGovernance } from './services/hooks'
 import { logger } from '../shared/logger'
+import { initializePermissionTemplateFromSettings } from './services/tools/permission-policy'
 
 // Chromium on some Windows environments emits a misleading stderr line like:
 //   ERROR:network_change_notifier_win.cc(...) WSALookupServiceBegin failed with: 0
@@ -101,6 +102,12 @@ if (!gotTheLock) {
         logger.info('Database initialization started')
         await db.init()
         logger.info('Database initialization completed')
+
+        await initializePermissionTemplateFromSettings()
+        logger.info('Permission template initialized from settings')
+
+        await restorePersistedHookGovernance()
+        logger.info('Hook governance config restored from persistence')
 
         // Initialize default agent and category bindings
         const bindingService = BindingService.getInstance()

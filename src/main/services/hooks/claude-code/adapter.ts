@@ -7,7 +7,6 @@
 import { spawn } from 'child_process'
 import type {
   ClaudeCodeHooksConfig,
-  ClaudeCodeHookEvent,
   ClaudeCodeMatcherGroup,
   ClaudeCodeHookHandler,
   ClaudeCodeHookInput,
@@ -16,15 +15,7 @@ import type {
   PostToolUseInput
 } from './types'
 import { expandCommandEnv, type EnvExpanderOptions } from './env-expander'
-import type {
-  HookEventType,
-  HookContext,
-  ToolExecutionInput,
-  ToolExecutionOutput,
-  HookConfig,
-  OnToolStartCallback,
-  OnToolEndCallback
-} from '../types'
+import type { HookConfig, OnToolStartCallback, OnToolEndCallback } from '../types'
 
 /**
  * 适配器选项

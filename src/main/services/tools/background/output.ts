@@ -267,11 +267,11 @@ export function setupOutputListeners(): void {
     appendOutput(taskId, stream, data)
   })
 
-  backgroundTaskManager.on('task:completed', (task: BackgroundTask) => {
+  backgroundTaskManager.on('task:completed', (_task: BackgroundTask) => {
     // Keep buffer for a while after completion for retrieval
   })
 
-  backgroundTaskManager.on('task:error', (task: BackgroundTask) => {
+  backgroundTaskManager.on('task:error', (_task: BackgroundTask) => {
     // Keep buffer for debugging
   })
 }

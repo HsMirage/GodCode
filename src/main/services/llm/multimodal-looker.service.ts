@@ -5,7 +5,8 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { ChatCompletionContentPart } from 'openai/resources/chat/completions'
 import type { ContentBlockParam, MessageParam as AnthropicMessageParam } from '@anthropic-ai/sdk/resources/messages/messages'
 import { LoggerService } from '@/main/services/logger'
-import { BindingService } from '@/main/services/binding.service'
+import { ModelSelectionService } from '@/main/services/llm/model-selection.service'
+import type { LLMConfigApiProtocol } from '@/main/services/llm/adapter.interface'
 import { normalizeOpenAICompatibleBaseURL } from './openai-base-url'
 
 const MULTIMODAL_LOOKER_AGENT_CODE = 'multimodal-looker'
@@ -125,7 +126,6 @@ function normalizeProvider(provider: string): string {
 export class MultimodalLookerService {
   private static instance: MultimodalLookerService
   private readonly logger = LoggerService.getInstance().getLogger()
-  private readonly bindingService = BindingService.getInstance()
 
   static getInstance(): MultimodalLookerService {
     if (!MultimodalLookerService.instance) {
@@ -151,48 +151,43 @@ export class MultimodalLookerService {
       throw new Error("Provide only one of 'file_path' or 'image_data'")
     }
 
-    const modelConfig = await this.bindingService.getAgentModelConfig(MULTIMODAL_LOOKER_AGENT_CODE)
-    if (!modelConfig) {
-      throw new Error(
-        `Agent「${MULTIMODAL_LOOKER_AGENT_CODE}」未配置可用模型。请到“设置 -> Agent 绑定”中启用并绑定模型。`
-      )
-    }
+    const modelSelection = await ModelSelectionService.getInstance().resolveModelSelection({
+      agentCode: MULTIMODAL_LOOKER_AGENT_CODE,
+      temperatureFallback: 0.2
+    })
 
     const media = hasFilePath
       ? await this.prepareFileMedia(input.filePath as string, input.workspaceDir)
       : this.prepareInlineMedia(input.imageData as string)
 
-    const provider = normalizeProvider(modelConfig.provider)
+    const provider = normalizeProvider(modelSelection.provider)
+    const model = modelSelection.model
+    const apiKey = modelSelection.apiKey
+    const baseURL = modelSelection.baseURL
+    const temperature = modelSelection.temperature ?? 0.2
     const prompt = buildExtractionPrompt(goal)
 
     this.logger.info('[look_at] invoking multimodal-looker', {
       provider,
-      model: modelConfig.model,
+      model,
       mimeType: media.mimeType
     })
 
     if (provider === 'anthropic' || provider === 'claude') {
       const content = await this.extractWithAnthropic(
-        modelConfig.model,
-        modelConfig.apiKey || '',
-        modelConfig.baseURL,
-        modelConfig.temperature,
+        model,
+        apiKey,
+        baseURL,
+        temperature,
         prompt,
         media
       )
-      return { content, provider, model: modelConfig.model }
+      return { content, provider, model }
     }
 
     if (provider === 'gemini' || provider === 'google' || provider === 'google-gemini') {
-      const content = await this.extractWithGemini(
-        modelConfig.model,
-        modelConfig.apiKey || '',
-        modelConfig.baseURL,
-        modelConfig.temperature,
-        prompt,
-        media
-      )
-      return { content, provider, model: modelConfig.model }
+      const content = await this.extractWithGemini(model, apiKey, baseURL, temperature, prompt, media)
+      return { content, provider, model }
     }
 
     if (
@@ -203,19 +198,27 @@ export class MultimodalLookerService {
       provider === 'azure-openai' ||
       provider === 'azure'
     ) {
+      const protocol = modelSelection.protocol
+      if (protocol !== 'chat/completions' && protocol !== 'responses') {
+        throw new Error(
+          `MODEL_PROTOCOL_NOT_CONFIGURED: 模型「${model}」缺少 apiProtocol 配置。请在“设置 -> 模型”中将协议设置为 chat/completions 或 responses。`
+        )
+      }
+
       const content = await this.extractWithOpenAICompatible(
         provider,
-        modelConfig.model,
-        modelConfig.apiKey || '',
-        modelConfig.baseURL,
-        modelConfig.temperature,
+        model,
+        apiKey,
+        baseURL,
+        temperature,
         prompt,
-        media
+        media,
+        protocol
       )
-      return { content, provider, model: modelConfig.model }
+      return { content, provider, model }
     }
 
-    throw new Error(`Unsupported provider for look_at: ${modelConfig.provider}`)
+    throw new Error(`Unsupported provider for look_at: ${modelSelection.provider}`)
   }
 
   private async prepareFileMedia(filePath: string, workspaceDir: string): Promise<PreparedMedia> {
@@ -268,7 +271,8 @@ export class MultimodalLookerService {
     baseURL: string | undefined,
     temperature: number,
     prompt: string,
-    media: PreparedMedia
+    media: PreparedMedia,
+    protocol: LLMConfigApiProtocol
   ): Promise<string> {
     if (!isImageMimeType(media.mimeType)) {
       throw new Error(
@@ -302,46 +306,112 @@ export class MultimodalLookerService {
       }
     ]
 
-    const response = await client.chat.completions.create({
+    if (protocol === 'chat/completions') {
+      const response = await client.chat.completions.create({
+        model,
+        temperature,
+        max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are a multimodal extraction assistant. Return only the extracted content relevant to the goal.'
+          },
+          {
+            role: 'user',
+            content: userContent
+          }
+        ]
+      })
+
+      const rawContent = response.choices[0]?.message?.content as unknown
+      if (!rawContent) {
+        throw new Error('No response content from model')
+      }
+
+      if (typeof rawContent === 'string') {
+        return rawContent.trim()
+      }
+
+      if (Array.isArray(rawContent)) {
+        const text = rawContent
+          .map((part: unknown) =>
+            typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : ''
+          )
+          .join('')
+          .trim()
+        if (!text) {
+          throw new Error('No response content from model')
+        }
+        return text
+      }
+
+      throw new Error('Unsupported response content format from model')
+    }
+
+    const response = await client.responses.create({
       model,
       temperature,
-      max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
-      messages: [
+      max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      input: [
         {
           role: 'system',
-          content:
-            'You are a multimodal extraction assistant. Return only the extracted content relevant to the goal.'
+          content: [
+            {
+              type: 'input_text',
+              text:
+                'You are a multimodal extraction assistant. Return only the extracted content relevant to the goal.'
+            }
+          ],
+          type: 'message'
         },
         {
           role: 'user',
-          content: userContent
+          content: [
+            { type: 'input_text', text: prompt },
+            {
+              type: 'input_image',
+              image_url: `data:${media.mimeType};base64,${media.base64Data}`,
+              detail: 'auto'
+            }
+          ],
+          type: 'message'
         }
       ]
     })
 
-    const rawContent = response.choices[0]?.message?.content as unknown
-    if (!rawContent) {
+    const outputText = (response.output_text || '').trim()
+    if (outputText) {
+      return outputText
+    }
+
+    const outputItems = Array.isArray((response as { output?: unknown }).output)
+      ? (response as { output: unknown[] }).output
+      : []
+
+    const fallbackText = outputItems
+      .map(item => {
+        if (!item || typeof item !== 'object') return ''
+        const record = item as { type?: string; content?: unknown }
+        if (record.type !== 'message' || !Array.isArray(record.content)) return ''
+        return record.content
+          .map(part => {
+            if (!part || typeof part !== 'object') return ''
+            const partRecord = part as { type?: string; text?: unknown }
+            return partRecord.type === 'output_text' && typeof partRecord.text === 'string'
+              ? partRecord.text
+              : ''
+          })
+          .join('')
+      })
+      .join('')
+      .trim()
+
+    if (!fallbackText) {
       throw new Error('No response content from model')
     }
 
-    if (typeof rawContent === 'string') {
-      return rawContent.trim()
-    }
-
-    if (Array.isArray(rawContent)) {
-      const text = rawContent
-        .map((part: unknown) =>
-          typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : ''
-        )
-        .join('')
-        .trim()
-      if (!text) {
-        throw new Error('No response content from model')
-      }
-      return text
-    }
-
-    throw new Error('Unsupported response content format from model')
+    return fallbackText
   }
 
   private async extractWithAnthropic(

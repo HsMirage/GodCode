@@ -1,4 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+const { emitTaskLifecycleMock } = vi.hoisted(() => ({
+  emitTaskLifecycleMock: vi.fn()
+}))
+
+vi.mock('@/main/services/hooks', () => ({
+  hookManager: {
+    emitTaskLifecycle: emitTaskLifecycleMock
+  }
+}))
+
 import { WorkflowEventEmitter, type WorkflowEvent } from '@/main/services/workforce/events'
 
 describe('WorkflowEventEmitter', () => {
@@ -6,6 +17,8 @@ describe('WorkflowEventEmitter', () => {
 
   beforeEach(() => {
     emitter = new WorkflowEventEmitter()
+    emitTaskLifecycleMock.mockReset()
+    emitTaskLifecycleMock.mockResolvedValue(undefined)
   })
 
   it('should register and trigger listeners', () => {
@@ -126,5 +139,39 @@ describe('WorkflowEventEmitter', () => {
     }
 
     expect(() => emitter.emit(event)).not.toThrow()
+  })
+
+  it('should forward workflow events to hookManager task lifecycle dispatch', async () => {
+    const now = new Date('2026-03-04T10:00:00.000Z')
+    const event: WorkflowEvent = {
+      type: 'task:started',
+      workflowId: 'wf-forward-1',
+      taskId: 'task-forward-1',
+      timestamp: now,
+      data: {
+        sessionId: 'session-forward-1',
+        workspaceDir: '/tmp/workspace-forward-1',
+        custom: 'value'
+      }
+    }
+
+    emitter.emit(event)
+
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(emitTaskLifecycleMock).toHaveBeenCalledTimes(1)
+    expect(emitTaskLifecycleMock).toHaveBeenCalledWith(
+      {
+        sessionId: 'session-forward-1',
+        workspaceDir: '/tmp/workspace-forward-1'
+      },
+      {
+        status: 'task:started',
+        workflowId: 'wf-forward-1',
+        taskId: 'task-forward-1',
+        timestamp: now,
+        data: event.data
+      }
+    )
   })
 })

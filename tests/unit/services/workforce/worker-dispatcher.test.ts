@@ -83,7 +83,7 @@ describe('WorkforceWorkerDispatcher', () => {
         prompt: 'Do A',
         category: 'dayu',
         parentTaskId: 'workflow-1',
-        metadata: { concurrencyKey: 'openai-compatible::gpt-4o-mini' }
+        metadata: { concurrencyKey: 'openai-compatible', concurrencyLimit: 2 }
       }),
       dispatcher.dispatch({
         sessionId: 'session-1',
@@ -91,11 +91,19 @@ describe('WorkforceWorkerDispatcher', () => {
         prompt: 'Do B',
         category: 'dayu',
         parentTaskId: 'workflow-1',
-        metadata: { concurrencyKey: 'openai-compatible::gpt-4o-mini' }
+        metadata: { concurrencyKey: 'openai-compatible', concurrencyLimit: 2 }
+      }),
+      dispatcher.dispatch({
+        sessionId: 'session-1',
+        description: 'Task C',
+        prompt: 'Do C',
+        category: 'dayu',
+        parentTaskId: 'workflow-1',
+        metadata: { concurrencyKey: 'openai-compatible', concurrencyLimit: 2 }
       })
     ])
 
-    expect(maxInFlight).toBe(1)
+    expect(maxInFlight).toBe(2)
   })
 
   it('dispatches queued tasks in FIFO order for same concurrency key', async () => {
@@ -115,7 +123,7 @@ describe('WorkforceWorkerDispatcher', () => {
         prompt: 'Do 1',
         category: 'dayu',
         parentTaskId: 'workflow-1',
-        metadata: { concurrencyKey: 'openai-compatible::gpt-4o-mini' }
+        metadata: { concurrencyKey: 'openai-compatible', concurrencyLimit: 2 }
       }),
       dispatcher.dispatch({
         sessionId: 'session-1',
@@ -123,7 +131,7 @@ describe('WorkforceWorkerDispatcher', () => {
         prompt: 'Do 2',
         category: 'dayu',
         parentTaskId: 'workflow-1',
-        metadata: { concurrencyKey: 'openai-compatible::gpt-4o-mini' }
+        metadata: { concurrencyKey: 'openai-compatible', concurrencyLimit: 2 }
       }),
       dispatcher.dispatch({
         sessionId: 'session-1',
@@ -131,7 +139,7 @@ describe('WorkforceWorkerDispatcher', () => {
         prompt: 'Do 3',
         category: 'dayu',
         parentTaskId: 'workflow-1',
-        metadata: { concurrencyKey: 'openai-compatible::gpt-4o-mini' }
+        metadata: { concurrencyKey: 'openai-compatible', concurrencyLimit: 2 }
       })
     ])
 

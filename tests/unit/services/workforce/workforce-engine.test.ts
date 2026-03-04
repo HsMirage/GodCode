@@ -4,7 +4,6 @@ import { calculateBackoffDelay, RetryableErrorType } from '@/main/services/workf
 import { DatabaseService } from '@/main/services/database'
 import { LoggerService } from '@/main/services/logger'
 import { createLLMAdapter } from '@/main/services/llm/factory'
-import { BindingService } from '@/main/services/binding.service'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -17,7 +16,11 @@ const mockPrisma: any = {
   },
   model: {
     findFirst: vi.fn(),
-    findMany: vi.fn()
+    findMany: vi.fn(),
+    findUnique: vi.fn()
+  },
+  systemSetting: {
+    findUnique: vi.fn()
   },
   agentBinding: {
     findUnique: vi.fn()
@@ -65,17 +68,6 @@ const mockAdapter = {
 
 vi.mock('@/main/services/llm/factory', () => ({
   createLLMAdapter: vi.fn(() => mockAdapter)
-}))
-
-const mockBindingService = {
-  getAgentModelConfig: vi.fn(async () => null),
-  getCategoryModelConfig: vi.fn(async () => null)
-}
-
-vi.mock('@/main/services/binding.service', () => ({
-  BindingService: {
-    getInstance: vi.fn(() => mockBindingService)
-  }
 }))
 
 const mockSecureStorage = {
@@ -133,13 +125,31 @@ describe('WorkforceEngine', () => {
         id: 'model-1',
         provider: 'anthropic',
         modelName: 'claude-3-5-sonnet-20240620',
-        apiKey: 'test-key'
+        apiKey: 'test-key',
+        apiKeyRef: null,
+        baseURL: null,
+        config: {}
       }
     ])
+    mockPrisma.systemSetting.findUnique.mockResolvedValue({
+      key: 'defaultModelId',
+      value: 'model-1'
+    })
+    mockPrisma.model.findUnique.mockImplementation(async ({ where }: any) => {
+      if (!where?.id) return null
+      return {
+        id: where.id,
+        provider: 'anthropic',
+        modelName: 'claude-3-5-sonnet-20240620',
+        apiKey: 'test-key',
+        baseURL: null,
+        config: {},
+        apiKeyRef: null,
+        updatedAt: new Date()
+      }
+    })
     mockPrisma.agentBinding.findUnique.mockResolvedValue(null)
     mockPrisma.categoryBinding.findUnique.mockResolvedValue(null)
-    mockBindingService.getAgentModelConfig.mockResolvedValue(null)
-    mockBindingService.getCategoryModelConfig.mockResolvedValue(null)
     mockAdapter.sendMessage.mockResolvedValue({
       content: JSON.stringify({
         subtasks: [
@@ -209,15 +219,6 @@ describe('WorkforceEngine', () => {
       const input = 'Complex task'
       const subtasks = await workforceEngine.decomposeTask(input)
 
-      expect(mockPrisma.model.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {
-            OR: [{ apiKeyId: { not: null } }, { apiKey: { not: null } }]
-          },
-          include: { apiKeyRef: true },
-          orderBy: { createdAt: 'desc' }
-        })
-      )
       expect(createLLMAdapter).toHaveBeenCalledWith(
         'anthropic',
         expect.objectContaining({
@@ -235,12 +236,15 @@ describe('WorkforceEngine', () => {
       mockPrisma.agentBinding.findUnique.mockResolvedValue({
         enabled: true,
         temperature: 0.2,
+        modelId: 'agent-model-1',
         model: {
+          id: 'agent-model-1',
           provider: 'openai-compatible',
           modelName: 'gpt-4o-mini',
           apiKeyRef: { encryptedKey: 'encrypted-key', baseURL: 'https://example.test' },
           apiKey: null,
-          baseURL: null
+          baseURL: null,
+          config: { apiProtocol: 'responses' }
         }
       })
       mockSecureStorage.decrypt.mockReturnValue('decrypted-key')
@@ -255,12 +259,10 @@ describe('WorkforceEngine', () => {
       expect(subtasks).toHaveLength(2)
     })
 
-    it('should handle model not found error', async () => {
-      mockPrisma.model.findMany.mockResolvedValue([])
+    it('should handle model not configured error', async () => {
+      mockPrisma.systemSetting.findUnique.mockResolvedValue(null)
 
-      await expect(workforceEngine.decomposeTask('input')).rejects.toThrow(
-        'No model configured for task decomposition'
-      )
+      await expect(workforceEngine.decomposeTask('input')).rejects.toThrow('MODEL_NOT_CONFIGURED')
     })
 
     it('should fallback to single task if parsing fails', async () => {
@@ -1264,6 +1266,68 @@ describe('WorkforceEngine', () => {
       expect(byDescription.get(frontendExecutionTask!.description)?.subagent_type).toBeUndefined()
     })
 
+
+    it('should split mixed frontend/backend execution subtask into parallel category tasks', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [
+            {
+              id: 'task-1',
+              description: '交付网站完成度矩阵（页面、功能模块、API、数据库）并输出未完成项清单',
+              dependencies: []
+            }
+          ]
+        })
+      })
+
+      let seq = 0
+      mockWorkerDispatcher.dispatch.mockImplementation(async (delegateInput: any) => {
+        if (delegateInput.metadata?.orchestrationCheckpoint) {
+          return {
+            taskId: `checkpoint-${++seq}`,
+            output: JSON.stringify({
+              status: 'continue',
+              approved_task_ids: delegateInput.metadata.readyTaskIds || []
+            }),
+            success: true
+          }
+        }
+
+        return {
+          taskId: `subtask-${++seq}`,
+          output: [
+            'Changed files:',
+            '- src/main/services/workforce/workforce-engine.ts',
+            '',
+            'Verification command:',
+            '- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run'
+          ].join('\n'),
+          success: true
+        }
+      })
+
+      const result = await workforceEngine.executeWorkflow(
+        '请交付网站完成度矩阵（页面、功能模块、API、数据库）和按优先级排序的未完成项清单',
+        'test-session-123',
+        {
+          agentCode: 'haotian',
+          enableRetry: false
+        }
+      )
+
+      const executionTasks = result.tasks.filter(task => task.workflowPhase === 'execution')
+      expect(executionTasks.length).toBeGreaterThanOrEqual(2)
+      expect(executionTasks.some(task => task.assignedCategory === 'dayu')).toBe(true)
+      expect(executionTasks.some(task => task.assignedCategory === 'zhinv')).toBe(true)
+
+      const executionCalls = mockWorkerDispatcher.dispatch.mock.calls
+        .map(call => call[0])
+        .filter((input: any) => input.metadata?.workflowPhase === 'execution')
+      expect(executionCalls.some((input: any) => input.category === 'dayu')).toBe(true)
+      expect(executionCalls.some((input: any) => input.category === 'zhinv')).toBe(true)
+      expect(executionCalls.every((input: any) => input.subagent_type === undefined)).toBe(true)
+    })
+
     it('should avoid synthetic discovery/review tasks when markdown specification is explicitly referenced', async () => {
       vi.spyOn(fs, 'existsSync').mockImplementation(candidate =>
         path.normalize(String(candidate)).replace(/\\/g, '/').endsWith('/tmp/workspace-a/网站规划.md')
@@ -1298,8 +1362,8 @@ describe('WorkforceEngine', () => {
       }
     })
 
-    it('should participate with orchestrator checkpoints for /tests/ceshi 网站规划 prompt', async () => {
-      const ceshiDir = path.resolve(process.cwd(), 'tests/ceshi')
+    it('should participate with orchestrator checkpoints for /experiments/ceshi 网站规划 prompt', async () => {
+      const ceshiDir = path.resolve(process.cwd(), 'experiments/ceshi')
 
       mockPrisma.session.findUnique.mockResolvedValue({
         id: 'test-session-123',
@@ -1466,6 +1530,35 @@ describe('WorkforceEngine', () => {
       await expect(
         workforceEngine.executeWorkflow('空输出检查', 'test-session-123', { enableRetry: false })
       ).rejects.toThrow('empty-output')
+    })
+
+    it('should recover when delegate reports empty-output failure status', async () => {
+      mockAdapter.sendMessage.mockResolvedValue({
+        content: JSON.stringify({
+          subtasks: [{ id: 'task-empty', description: '执行真实实现', dependencies: [] }]
+        })
+      })
+
+      mockWorkerDispatcher.dispatch
+        .mockResolvedValueOnce({
+          taskId: 'empty-task-1',
+          output: 'Delegate task returned empty output after recovery prompt',
+          success: false
+        })
+        .mockResolvedValueOnce({
+          taskId: 'empty-task-2',
+          output: 'Changed files:\n- src/main/services/workforce/workforce-engine.ts\n\nVerification command:\n- pnpm vitest tests/unit/services/workforce/workforce-engine.test.ts --run',
+          success: true
+        })
+
+      const result = await workforceEngine.executeWorkflow('空输出恢复检查', 'test-session-123', {
+        enableRetry: false
+      })
+
+      expect(result.success).toBe(true)
+      expect(mockWorkerDispatcher.dispatch).toHaveBeenCalledTimes(2)
+      expect(mockWorkerDispatcher.dispatch.mock.calls[1]?.[0]?.prompt).toContain('reason: empty-output')
+      expect(mockWorkerDispatcher.dispatch.mock.calls[1]?.[0]?.useDynamicPrompt).toBe(false)
     })
 
     it('should fail subtask when delegate returns non-actionable read-only output', async () => {
@@ -1782,7 +1875,10 @@ describe('WorkforceEngine', () => {
             provider: 'openai-compatible',
             modelName: 'gpt-4o-mini',
             apiKey: 'test-key-2',
-            apiKeyRef: null
+            apiKeyRef: null,
+            baseURL: null,
+            config: { apiProtocol: 'responses' },
+            updatedAt: new Date()
           }
         ])
 
@@ -1794,7 +1890,7 @@ describe('WorkforceEngine', () => {
 
         await expect(
           strictEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
-        ).rejects.toThrow(/Strict binding rejected fallback model/)
+        ).rejects.toThrow(/Delegate task "task-strict" returned non-actionable output/)
       } finally {
         if (previousStrict === undefined) {
           delete process.env.WORKFORCE_STRICT_BINDING
@@ -1818,19 +1914,21 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockBindingService.getCategoryModelConfig.mockImplementation(async (...args: any[]) => {
-        const categoryCode = args[0] as string
-        if (categoryCode === 'zhinv') {
-          throw new Error(
-            '任务类别「zhinv」已绑定模型但模型记录不存在。请到“设置 -> Agent 绑定 -> 任务类别”重新选择模型。'
-          )
+      mockPrisma.categoryBinding.findUnique.mockImplementation(async ({ where }: any) => {
+        if (where?.categoryCode === 'zhinv') {
+          return {
+            enabled: true,
+            modelId: 'missing-model',
+            model: null,
+            temperature: null
+          }
         }
         return null
       })
 
       await expect(
         workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
-      ).rejects.toThrow('任务类别「zhinv」已绑定模型但模型记录不存在')
+      ).rejects.toThrow('MODEL_NOT_FOUND')
 
       expect(mockWorkerDispatcher.dispatch).not.toHaveBeenCalled()
     })
@@ -1849,19 +1947,29 @@ describe('WorkforceEngine', () => {
         })
       })
 
-      mockBindingService.getAgentModelConfig.mockImplementation(async (...args: any[]) => {
-        const agentCode = args[0] as string
-        if (agentCode === 'qianliyan') {
-          throw new Error(
-            'Agent「qianliyan」已绑定模型「gpt-4o-mini」但缺少 API Key。请到“设置 -> API Keys/模型”补全凭据，或到“设置 -> Agent 绑定”切换模型。'
-          )
+      mockPrisma.agentBinding.findUnique.mockImplementation(async ({ where }: any) => {
+        if (where?.agentCode === 'qianliyan') {
+          return {
+            enabled: true,
+            modelId: 'agent-model-1',
+            model: {
+              id: 'agent-model-1',
+              provider: 'openai-compatible',
+              modelName: 'gpt-4o-mini',
+              apiKey: null,
+              apiKeyRef: null,
+              baseURL: null,
+              config: { apiProtocol: 'responses' }
+            },
+            temperature: null
+          }
         }
         return null
       })
 
       await expect(
         workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', { enableRetry: false })
-      ).rejects.toThrow('Agent「qianliyan」已绑定模型「gpt-4o-mini」但缺少 API Key')
+      ).rejects.toThrow('MODEL_CREDENTIAL_MISSING')
 
       expect(mockWorkerDispatcher.dispatch).not.toHaveBeenCalled()
     })

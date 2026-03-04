@@ -3,7 +3,10 @@ import {
   AGENT_DEFINITIONS,
   resolvePrimaryAgentRolePolicy,
   listPrimaryAgentRoleAliases,
-  getAgentByCode
+  getAgentByCode,
+  getAgentPresetById,
+  getAgentPresetMappedDefinition,
+  listAgentPresets
 } from '@/shared/agent-definitions'
 
 describe('primary agent role mapping', () => {
@@ -67,5 +70,37 @@ describe('primary agent role mapping', () => {
   it('should set fuxi defaultStrategy to workforce', () => {
     const fuxi = getAgentByCode('fuxi')
     expect(fuxi?.defaultStrategy).toBe('workforce')
+  })
+
+  it('maps presets to existing agent definitions and returns safe copies', () => {
+    const plannerPreset = getAgentPresetById('planner')
+    expect(plannerPreset.mappedAgentCode).toBe('fuxi')
+
+    const mappedPlannerAgent = getAgentPresetMappedDefinition('planner')
+    expect(mappedPlannerAgent.code).toBe('fuxi')
+
+    const presets = listAgentPresets()
+    expect(presets.length).toBeGreaterThanOrEqual(5)
+
+    const planner = presets.find(preset => preset.id === 'planner')
+    expect(planner).toBeDefined()
+    expect(planner?.recommendedModelKeywords.length).toBeGreaterThan(0)
+
+    const originalKeyword = planner?.recommendedModelKeywords[0]
+    if (!originalKeyword) {
+      throw new Error('Planner preset should define at least one recommended keyword')
+    }
+
+    planner?.recommendedModelKeywords.splice(0, 1, 'mutated-keyword')
+
+    const plannerReloaded = getAgentPresetById('planner')
+    expect(plannerReloaded.recommendedModelKeywords[0]).toBe(originalKeyword)
+  })
+
+  it('ensures each preset points to a valid mapped agent', () => {
+    for (const preset of listAgentPresets()) {
+      const mappedAgent = getAgentByCode(preset.mappedAgentCode)
+      expect(mappedAgent, `Preset ${preset.id} maps to unknown agent`).toBeDefined()
+    }
   })
 })

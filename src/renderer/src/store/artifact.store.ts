@@ -15,7 +15,7 @@ interface ArtifactState {
   deleteArtifact: (artifact: Artifact) => Promise<void>
 }
 
-export const useArtifactStore = create<ArtifactState>((set, get) => ({
+export const useArtifactStore = create<ArtifactState>((set, _get) => ({
   artifacts: [],
   selectedArtifact: null,
   isLoading: false,

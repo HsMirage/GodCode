@@ -6,18 +6,32 @@
 
 import type { HookConfig, HookContext, ContextOverflowInfo } from './types'
 
-// 上下文窗口限制配置
-const CONTEXT_LIMITS: Record<string, number> = {
-  'claude-3-opus': 200_000,
-  'claude-3-sonnet': 200_000,
-  'claude-3-haiku': 200_000,
-  'claude-3.5-sonnet': 200_000,
-  'claude-3.5-haiku': 200_000,
-  'gpt-4': 128_000,
-  'gpt-4-turbo': 128_000,
-  'gpt-4o': 128_000,
-  'gpt-4o-mini': 128_000,
+export interface ContextLimitModelMetadata {
+  contextWindow?: number
+  provider?: string
+  config?: Record<string, unknown>
+}
+
+// 上下文窗口限制配置（provider 级，避免绑定具体模型名）
+const DEFAULT_CONTEXT_LIMITS: Record<string, number> = {
+  anthropic: 200_000,
+  openai: 128_000,
+  'openai-compatible': 128_000,
+  'azure-openai': 128_000,
+  gemini: 1_048_576,
   default: 128_000
+}
+
+function normalizeProviderFromModelId(modelId: string): string {
+  const normalized = modelId.trim().toLowerCase()
+  if (!normalized) return ''
+
+  const slashIndex = normalized.indexOf('/')
+  if (slashIndex > 0) {
+    return normalized.slice(0, slashIndex)
+  }
+
+  return ''
 }
 
 // 警告阈值（使用率百分比）
@@ -49,7 +63,6 @@ export function createContextWindowMonitorHook(options?: {
 }): HookConfig<'onContextOverflow'> {
   const warningThreshold = options?.warningThreshold ?? WARNING_THRESHOLD
   const criticalThreshold = options?.criticalThreshold ?? CRITICAL_THRESHOLD
-  const limits = { ...CONTEXT_LIMITS, ...options?.customLimits }
 
   return {
     id: 'context-window-monitor',
@@ -106,20 +119,44 @@ export function createContextWindowMonitorHook(options?: {
 /**
  * 获取模型的上下文限制
  */
-export function getContextLimit(modelId: string): number {
-  // 尝试精确匹配
-  if (CONTEXT_LIMITS[modelId]) {
-    return CONTEXT_LIMITS[modelId]
+export function getContextLimit(
+  modelId: string,
+  customLimits?: Record<string, number>,
+  modelMetadata?: ContextLimitModelMetadata
+): number {
+  const mergedLimits = {
+    ...DEFAULT_CONTEXT_LIMITS,
+    ...(customLimits || {})
   }
 
-  // 尝试前缀匹配
-  for (const [prefix, limit] of Object.entries(CONTEXT_LIMITS)) {
-    if (modelId.startsWith(prefix)) {
-      return limit
+  const metadataContextWindow = modelMetadata?.contextWindow
+  if (typeof metadataContextWindow === 'number' && Number.isFinite(metadataContextWindow)) {
+    const normalized = Math.trunc(metadataContextWindow)
+    if (normalized > 0) {
+      return normalized
     }
   }
 
-  return CONTEXT_LIMITS.default
+  const configContextWindow = modelMetadata?.config?.contextWindow
+  if (typeof configContextWindow === 'number' && Number.isFinite(configContextWindow)) {
+    const normalized = Math.trunc(configContextWindow)
+    if (normalized > 0) {
+      return normalized
+    }
+  }
+
+  const providerFromMetadata =
+    typeof modelMetadata?.provider === 'string' ? modelMetadata.provider.trim().toLowerCase() : ''
+  if (providerFromMetadata && typeof mergedLimits[providerFromMetadata] === 'number') {
+    return mergedLimits[providerFromMetadata]
+  }
+
+  const providerFromModelId = normalizeProviderFromModelId(modelId)
+  if (providerFromModelId && typeof mergedLimits[providerFromModelId] === 'number') {
+    return mergedLimits[providerFromModelId]
+  }
+
+  return mergedLimits.default ?? DEFAULT_CONTEXT_LIMITS.default
 }
 
 /**
@@ -128,9 +165,11 @@ export function getContextLimit(modelId: string): number {
 export function calculateContextUsage(
   modelId: string,
   inputTokens: number,
-  cacheReadTokens = 0
+  cacheReadTokens = 0,
+  customLimits?: Record<string, number>,
+  modelMetadata?: ContextLimitModelMetadata
 ): ContextOverflowInfo {
-  const maxTokens = getContextLimit(modelId)
+  const maxTokens = getContextLimit(modelId, customLimits, modelMetadata)
   const currentTokens = inputTokens + cacheReadTokens
   const usagePercentage = currentTokens / maxTokens
 

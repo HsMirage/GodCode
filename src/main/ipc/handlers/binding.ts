@@ -8,12 +8,15 @@ import {
   type UpdateAgentBindingInput,
   type UpdateCategoryBindingInput
 } from '../../services/binding.service'
+import { DatabaseService } from '../../services/database'
 
 const bindingService = BindingService.getInstance()
 
 // ========== Agent Binding Handlers ==========
 
 export async function handleAgentBindingList(_event: IpcMainInvokeEvent) {
+  const db = DatabaseService.getInstance()
+  await db.init()
   return await bindingService.listAgentBindings()
 }
 
@@ -39,6 +42,8 @@ export async function handleAgentBindingReset(event: IpcMainInvokeEvent, agentCo
 // ========== Category Binding Handlers ==========
 
 export async function handleCategoryBindingList(_event: IpcMainInvokeEvent) {
+  const db = DatabaseService.getInstance()
+  await db.init()
   return await bindingService.listCategoryBindings()
 }
 

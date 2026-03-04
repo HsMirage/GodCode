@@ -1,7 +1,7 @@
 import type { Tool, ToolExecutionContext, ToolExecutionResult } from './tool.interface'
 import type { BrowserTool, BrowserToolContext, ToolResult } from '../ai-browser/types'
 import { toolRegistry } from './tool-registry'
-import { defaultPolicy } from './permission-policy'
+import { defaultPolicy, type ToolExecutionPermissionPreview } from './permission-policy'
 import { LoggerService } from '../logger'
 import { hookManager } from '../hooks'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -41,6 +41,8 @@ export interface ToolCall {
 export interface ToolExecutionOutput {
   /** The tool call that was executed */
   toolCall: ToolCall
+  /** Permission preview evaluated before execution */
+  permissionPreview?: ToolExecutionPermissionPreview
   /** The execution result */
   result: ToolExecutionResult | ToolResult
   /** Whether execution succeeded */
@@ -96,8 +98,16 @@ export class ToolExecutionService {
       return operation()
     }
 
-    const normalized = new Set(toolNames.map(name => name.trim()).filter(Boolean))
+    const normalized = new Set(
+      toolNames
+        .map(name => toolRegistry.resolveName(name.trim()))
+        .filter(Boolean)
+    )
     return this.toolScopeStorage.run({ allowedToolNames: normalized }, operation)
+  }
+
+  resolveToolName(toolName: string): string {
+    return toolRegistry.resolveName(toolName)
   }
 
   private getToolName(tool: UnifiedTool): string {
@@ -152,7 +162,11 @@ export class ToolExecutionService {
     const explicitAllowlist =
       allowedToolNames === undefined
         ? null
-        : new Set(allowedToolNames.map(name => name.trim()).filter(Boolean))
+        : new Set(
+            allowedToolNames
+              .map(name => toolRegistry.resolveName(name.trim()))
+              .filter(Boolean)
+          )
 
     return this.getAllTools()
       .filter(tool => {
@@ -216,7 +230,8 @@ export class ToolExecutionService {
             parameters: {
               type: 'object',
               properties,
-              required: required.length > 0 ? required : undefined
+              required: required.length > 0 ? required : undefined,
+              additionalProperties: false
             }
           }
         }
@@ -233,58 +248,101 @@ export class ToolExecutionService {
   ): Promise<ToolExecutionOutput> {
     const timeoutMs = config?.timeoutMs ?? this.defaultConfig.timeoutMs
     const startTime = Date.now()
+    const requestedName = toolCall.name
+    const resolvedName = toolRegistry.resolveName(requestedName)
+    const permissionPreview = defaultPolicy.getExecutionPreview(resolvedName, requestedName)
 
-    if (!this.isToolAllowedInCurrentScope(toolCall.name)) {
-      this.logger.warn('Tool execution denied by scoped allowlist', { toolName: toolCall.name })
+    if (resolvedName !== requestedName) {
+      this.logger.info('Tool alias resolved', {
+        requestedToolName: requestedName,
+        resolvedToolName: resolvedName
+      })
+    }
+
+    this.logger.info('Tool permission preview evaluated', {
+      requestedToolName: requestedName,
+      resolvedToolName: resolvedName,
+      template: permissionPreview.template,
+      permission: permissionPreview.permission,
+      allowedByPolicy: permissionPreview.allowedByPolicy,
+      requiresConfirmation: permissionPreview.requiresConfirmation,
+      highRisk: permissionPreview.highRisk,
+      highRiskEnforced: permissionPreview.highRiskEnforced
+    })
+
+    if (!this.isToolAllowedInCurrentScope(resolvedName)) {
+      this.logger.warn('Tool execution denied by scoped allowlist', {
+        toolName: resolvedName,
+        requestedToolName: requestedName
+      })
       return {
         toolCall,
+        permissionPreview,
         result: {
           success: false,
           output: '',
-          error: `Tool '${toolCall.name}' is not enabled for this agent`
+          error: `Tool '${requestedName}' is not enabled for this agent`
         },
         success: false,
-        error: `Tool '${toolCall.name}' is not enabled for this agent`,
+        error: `Tool '${requestedName}' is not enabled for this agent`,
         durationMs: Date.now() - startTime
       }
     }
 
-    if (!defaultPolicy.isAllowed(toolCall.name)) {
-      this.logger.warn('Tool execution denied by policy', { toolName: toolCall.name })
+    if (!permissionPreview.allowedByPolicy) {
+      this.logger.warn('Tool execution denied by policy', {
+        toolName: resolvedName,
+        requestedToolName: requestedName,
+        reason: permissionPreview.reason,
+        template: permissionPreview.template,
+        permission: permissionPreview.permission
+      })
       return {
         toolCall,
+        permissionPreview,
         result: {
           success: false,
           output: '',
-          error: `Tool '${toolCall.name}' is not allowed by policy`
+          error: `Tool '${requestedName}' is not allowed by policy`
         },
         success: false,
-        error: `Tool '${toolCall.name}' is not allowed by policy`,
+        error: `Tool '${requestedName}' is not allowed by policy`,
         durationMs: Date.now() - startTime
       }
     }
 
-    const browserTool = this.browserTools.get(toolCall.name)
-    const registryTool = toolRegistry.get(toolCall.name)
+    const browserTool = this.browserTools.get(resolvedName)
+    const registryTool = toolRegistry.get(resolvedName)
     const tool = browserTool || registryTool
 
     if (!tool) {
-      this.logger.error('Tool not found', { toolName: toolCall.name })
+      const suggestion = toolRegistry.suggestName(requestedName)
+      const suggestionSuffix = suggestion ? ` Did you mean '${suggestion}'?` : ''
+      this.logger.error('Tool not found', {
+        toolName: resolvedName,
+        requestedToolName: requestedName,
+        suggestion
+      })
       return {
         toolCall,
+        permissionPreview,
         result: {
           success: false,
           output: '',
-          error: `Tool '${toolCall.name}' not found`
+          error: `Tool '${requestedName}' not found.${suggestionSuffix}`
         },
         success: false,
-        error: `Tool '${toolCall.name}' not found`,
+        error: `Tool '${requestedName}' not found.${suggestionSuffix}`,
         durationMs: Date.now() - startTime
       }
     }
 
     try {
-      this.logger.info('Executing tool', { toolName: toolCall.name, arguments: toolCall.arguments })
+      this.logger.info('Executing tool', {
+        toolName: resolvedName,
+        requestedToolName: requestedName,
+        arguments: toolCall.arguments
+      })
 
       const result = await this.executeWithTimeout(tool, toolCall.arguments, context, timeoutMs)
 
@@ -293,13 +351,15 @@ export class ToolExecutionService {
       const errorMsg = success ? undefined : 'error' in result ? result.error : undefined
 
       this.logger.info('Tool execution completed', {
-        toolName: toolCall.name,
+        toolName: resolvedName,
+        requestedToolName: requestedName,
         success,
         durationMs
       })
 
       return {
         toolCall,
+        permissionPreview,
         result,
         success,
         error: errorMsg,
@@ -310,13 +370,15 @@ export class ToolExecutionService {
       const durationMs = Date.now() - startTime
 
       this.logger.error('Tool execution failed', {
-        toolName: toolCall.name,
+        toolName: resolvedName,
+        requestedToolName: requestedName,
         error: errorMessage,
         durationMs
       })
 
       return {
         toolCall,
+        permissionPreview,
         result: {
           success: false,
           output: '',

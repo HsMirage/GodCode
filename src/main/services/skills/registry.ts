@@ -5,18 +5,21 @@
  */
 
 import { logger } from '@/shared/logger'
-import type { Skill, SkillRegistration, SkillSource, SkillTrigger } from './types'
+import type { Skill, SkillCommandItem, SkillRegistration, SkillSource } from './types'
 
 class SkillRegistry {
   private skills: Map<string, SkillRegistration> = new Map()
   private commandIndex: Map<string, string> = new Map() // command -> skillId
   private keywordIndex: Map<string, Set<string>> = new Map() // keyword -> skillIds
+  private registrationOrder: string[] = []
 
   /**
    * Register a skill
    */
   register(skill: Skill, source: SkillSource = 'user'): void {
     if (this.skills.has(skill.id)) {
+      this.removeFromIndexes(this.skills.get(skill.id)!.skill)
+      this.registrationOrder = this.registrationOrder.filter((id) => id !== skill.id)
       logger.warn(`Skill "${skill.id}" is already registered, overwriting`, { source })
     }
 
@@ -27,6 +30,7 @@ class SkillRegistry {
     }
 
     this.skills.set(skill.id, registration)
+    this.registrationOrder.push(skill.id)
     this.indexTriggers(skill)
 
     logger.info(`Registered skill: ${skill.id}`, {
@@ -48,6 +52,7 @@ class SkillRegistry {
     // Remove from indexes
     this.removeFromIndexes(registration.skill)
     this.skills.delete(skillId)
+    this.registrationOrder = this.registrationOrder.filter((id) => id !== skillId)
 
     logger.info(`Unregistered skill: ${skillId}`)
     return true
@@ -89,8 +94,7 @@ class SkillRegistry {
    * Find skill by command (e.g., "/commit")
    */
   findByCommand(command: string): Skill | undefined {
-    const normalizedCommand = command.startsWith('/') ? command.slice(1) : command
-    const skillId = this.commandIndex.get(normalizedCommand)
+    const skillId = this.commandIndex.get(this.normalizeCommand(command))
     return skillId ? this.get(skillId) : undefined
   }
 
@@ -103,7 +107,7 @@ class SkillRegistry {
 
     // Check command prefix
     if (input.startsWith('/')) {
-      const command = input.slice(1).split(/\s/)[0]
+      const command = this.normalizeCommand(input.slice(1).split(/\s/)[0])
       const skillId = this.commandIndex.get(command)
       if (skillId) {
         matches.add(skillId)
@@ -136,6 +140,64 @@ class SkillRegistry {
   }
 
   /**
+   * Get command palette items for enabled command-capable skills.
+   * Supports slash-prefix queries and keyword queries with deterministic ordering.
+   */
+  getCommandItems(query = ''): SkillCommandItem[] {
+    const normalizedQuery = query.trim().toLowerCase()
+    const isSlashQuery = normalizedQuery.startsWith('/')
+    const queryToken = isSlashQuery ? normalizedQuery.slice(1).split(/\s/)[0] : normalizedQuery
+
+    const registrations = this.registrationOrder
+      .map((skillId) => this.skills.get(skillId))
+      .filter((registration): registration is SkillRegistration => !!registration)
+      .filter((registration) => registration.skill.enabled !== false)
+      .filter((registration) => !!registration.skill.triggers?.command)
+
+    const indexed = registrations.map((registration, index) => {
+      const skill = registration.skill
+      const command = this.normalizeCommand(skill.triggers?.command || '')
+      const keywords = (skill.triggers?.keywords || []).map((k) => k.toLowerCase())
+      const haystack = [
+        skill.name.toLowerCase(),
+        command,
+        skill.description.toLowerCase(),
+        ...keywords
+      ]
+
+      let score = 0
+      if (!normalizedQuery) {
+        score = 1
+      } else if (isSlashQuery && command.startsWith(queryToken)) {
+        score = command === queryToken ? 4 : 3
+      } else if (!isSlashQuery && haystack.some((item) => item.includes(queryToken))) {
+        score = command === queryToken ? 4 : 2
+      }
+
+      return {
+        index,
+        score,
+        item: {
+          label: skill.name,
+          command: `/${command}`,
+          description: skill.description,
+          argsHint: skill.argumentHint
+        } as SkillCommandItem
+      }
+    })
+
+    return indexed
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score
+        if (a.index !== b.index) return a.index - b.index
+        return a.item.command.localeCompare(b.item.command)
+      })
+      .map((entry) => entry.item)
+  }
+
+
+  /**
    * Check if a skill is registered
    */
   has(skillId: string): boolean {
@@ -156,6 +218,7 @@ class SkillRegistry {
     this.skills.clear()
     this.commandIndex.clear()
     this.keywordIndex.clear()
+    this.registrationOrder = []
     logger.info('Cleared all skills from registry')
   }
 
@@ -168,7 +231,7 @@ class SkillRegistry {
 
     // Index command
     if (triggers.command) {
-      const cmd = triggers.command.startsWith('/') ? triggers.command.slice(1) : triggers.command
+      const cmd = this.normalizeCommand(triggers.command)
       this.commandIndex.set(cmd, skill.id)
     }
 
@@ -191,7 +254,7 @@ class SkillRegistry {
 
     // Remove from command index
     if (triggers.command) {
-      const cmd = triggers.command.startsWith('/') ? triggers.command.slice(1) : triggers.command
+      const cmd = this.normalizeCommand(triggers.command)
       if (this.commandIndex.get(cmd) === skill.id) {
         this.commandIndex.delete(cmd)
       }
@@ -209,6 +272,11 @@ class SkillRegistry {
         }
       }
     }
+  }
+
+  private normalizeCommand(command: string): string {
+    const normalized = command.startsWith('/') ? command.slice(1) : command
+    return normalized.trim().toLowerCase()
   }
 }
 

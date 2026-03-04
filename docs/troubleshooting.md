@@ -66,6 +66,35 @@ CodeAll uses an embedded PostgreSQL database powered by Prisma.
    pnpm prisma generate
    ```
 
+## 5. Hook Reliability (Timeout / Circuit Breaker)
+
+### Symptom: Hook occasionally times out or is skipped with circuit-open status
+
+CodeAll’s unified hook entry includes reliability protections:
+
+- **Timeout control**: a single hook call is capped (default 2000ms).
+- **Graceful degradation**: timeout or hook error is recorded, but the main pipeline continues.
+- **Circuit breaker**: repeated failures for the same hook (default threshold 3) open a cooldown window (default 30s), during which executions are skipped.
+
+**How to diagnose quickly:**
+
+1. Open **Settings > Hook治理 > 最近执行证据链**.
+2. Check `result.status`:
+   - `success`: hook executed normally
+   - `error`: hook callback threw
+   - `timeout`: hook exceeded timeout cap
+   - `circuit_open`: hook skipped during cooldown
+3. Check `degraded`:
+   - `true` indicates reliability fallback was applied (main chain preserved)
+4. If `circuit_open` appears, inspect `circuitOpenUntil` to know when retries resume.
+
+**Recommended follow-up:**
+
+- Reduce expensive work in hook callbacks.
+- Move external/network-heavy operations out of inline hook path.
+- Add targeted tests for hook callback latency and failure handling.
+
 ---
 
 _Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-opencode)_
+

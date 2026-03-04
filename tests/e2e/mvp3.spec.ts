@@ -3,7 +3,7 @@ import { test, expect } from './fixtures/electron'
 test.describe('MVP3 E2E Tests', () => {
   test('Scenario 1: Main Layout Elements', async ({ window }) => {
     // Check main layout is visible
-    const mainLayout = window.locator('.h-screen').first()
+    const mainLayout = window.locator('h2:has-text("Spaces")').first()
     await expect(mainLayout).toBeVisible()
 
     // Check CodeAll branding
@@ -16,22 +16,21 @@ test.describe('MVP3 E2E Tests', () => {
     const textarea = window.locator('textarea')
     await expect(textarea).toBeVisible()
 
-    // Check sidebar sessions header - use specific selector
-    const sessionsHeader = window.locator('h2:has-text("Sessions")')
+    // Check sidebar spaces header
+    const sessionsHeader = window.locator('h2:has-text("Spaces")')
     await expect(sessionsHeader).toBeVisible()
   })
 
   test('Scenario 3: Space Creation UI', async ({ window }) => {
-    const createBtn = window.locator('button[title="Create New Space"]')
+    const createBtn = window.locator('button[title="New Space"]')
     await expect(createBtn).toBeVisible()
 
-    // Click to show input
+    // Click create space (opens selector in normal mode; uses temp dir in e2e)
     await createBtn.click()
-    await window.waitForTimeout(500)
 
-    // Check input appears
-    const input = window.locator('input[placeholder="Space name..."]')
-    await expect(input).toBeVisible()
+    // Ensure sidebar remains interactive after creation
+    const spacesHeader = window.locator('h2:has-text("Spaces")')
+    await expect(spacesHeader).toBeVisible()
   })
 
   test('Scenario 4: Settings Access', async ({ window }) => {
@@ -40,6 +39,7 @@ test.describe('MVP3 E2E Tests', () => {
 
     // Click settings
     await settingsBtn.click()
-    await window.waitForTimeout(500)
+    await expect(window.locator('text=API服务商').first()).toBeVisible()
   })
 })
+

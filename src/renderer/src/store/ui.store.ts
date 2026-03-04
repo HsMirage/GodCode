@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+const MAX_SLASH_COMMAND_MRU = 20
+
 export interface OperationLogAudit {
   viewId?: string
   opId?: string
@@ -37,6 +39,10 @@ interface UIState {
   sidebarWidth: number
   chatWidth: number
   artifactWidth: number
+
+  // Slash Command MRU
+  slashCommandMru: string[]
+  recordSlashCommandUse: (command: string) => void
 
   // Panel States
   isTaskPanelOpen: boolean
@@ -137,8 +143,24 @@ export const useUIStore = create<UIState>()(
         viewId: null,
         lastHandoffAt: null
       },
+      slashCommandMru: [],
+      recordSlashCommandUse: command =>
+        set(state => {
+          const normalized = command.trim()
+          if (!normalized) {
+            return state
+          }
+
+          const deduped = [
+            normalized,
+            ...state.slashCommandMru.filter(existing => existing !== normalized)
+          ].slice(0, MAX_SLASH_COMMAND_MRU)
+
+          return { slashCommandMru: deduped }
+        }),
 
       toggleSidebar: () => set(state => ({ showSidebar: !state.showSidebar })),
+
       toggleArtifactRail: () => set(state => ({ showArtifactRail: !state.showArtifactRail })),
       toggleContentCanvas: () => set(state => ({ showContentCanvas: !state.showContentCanvas })),
       setView: view =>
@@ -264,7 +286,8 @@ export const useUIStore = create<UIState>()(
         isBrowserPanelOpen: state.isBrowserPanelOpen,
         taskPanelWidth: state.taskPanelWidth,
         browserPanelWidth: state.browserPanelWidth,
-        sidebarWidth: state.sidebarWidth
+        sidebarWidth: state.sidebarWidth,
+        slashCommandMru: state.slashCommandMru
       })
     }
   )

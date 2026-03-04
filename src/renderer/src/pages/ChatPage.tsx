@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { MessageList } from '../components/chat/MessageList'
-import { MessageInput } from '../components/chat/MessageInput'
+import { MessageInput, type MessageInputSendPayload } from '../components/chat/MessageInput'
 import { TypingIndicator } from '../components/chat/TypingIndicator'
 import { WorkflowView } from '../components/workflow/WorkflowView'
 import { ContentCanvas } from '../components/canvas/ContentCanvas'
@@ -163,6 +163,10 @@ export function ChatPage() {
               id: msg.id,
               role: msg.role as 'user' | 'assistant',
               content: msg.content,
+              metadata:
+                msg.metadata && typeof msg.metadata === 'object'
+                  ? (msg.metadata as Record<string, unknown>)
+                  : undefined,
               createdAt: msg.createdAt || new Date().toISOString()
             }))
         )
@@ -241,7 +245,8 @@ export function ChatPage() {
     }
   }, [])
 
-  const handleSend = async (content: string, agentCode?: string) => {
+  const handleSend = async (payload: MessageInputSendPayload, agentCode?: string) => {
+    const { content, skillCommand } = payload
     if (!currentSessionId || !currentSpaceId || !window.codeall) return false
 
     const userMessage: Message = {
@@ -266,11 +271,53 @@ export function ChatPage() {
     }
 
     try {
-      await window.codeall.invoke('message:send', {
+      const assistantMessage = await window.codeall.invoke('message:send', {
         sessionId: currentSessionId,
         content,
-        agentCode
+        agentCode,
+        skillCommand
       })
+
+      if (assistantMessage && typeof assistantMessage === 'object') {
+        const persistedAssistant = assistantMessage as {
+          id?: string
+          role?: string
+          content?: string
+          createdAt?: string
+          metadata?: unknown
+        }
+
+        if (persistedAssistant.role === 'assistant' && typeof persistedAssistant.content === 'string') {
+          setMessages(prev => {
+            const reverseIndex = [...prev]
+              .reverse()
+              .findIndex(
+                message =>
+                  message.role === 'assistant' &&
+                  message.content === persistedAssistant.content &&
+                  !message.metadata
+              )
+
+            if (reverseIndex < 0) {
+              return prev
+            }
+
+            const messageIndex = prev.length - 1 - reverseIndex
+            const next = [...prev]
+            next[messageIndex] = {
+              ...next[messageIndex],
+              id: persistedAssistant.id || next[messageIndex].id,
+              createdAt: persistedAssistant.createdAt || next[messageIndex].createdAt,
+              metadata:
+                persistedAssistant.metadata && typeof persistedAssistant.metadata === 'object'
+                  ? (persistedAssistant.metadata as Record<string, unknown>)
+                  : next[messageIndex].metadata
+            }
+            return next
+          })
+        }
+      }
+
       return true
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -290,6 +337,10 @@ export function ChatPage() {
                 id: msg.id,
                 role: msg.role as 'user' | 'assistant',
                 content: msg.content,
+                metadata:
+                  msg.metadata && typeof msg.metadata === 'object'
+                    ? (msg.metadata as Record<string, unknown>)
+                    : undefined,
                 createdAt: msg.createdAt || new Date().toISOString()
               }))
           )
@@ -344,9 +395,15 @@ export function ChatPage() {
       >
         <header className="flex shrink-0 items-center justify-between mb-2">
           <div>
-            <h1 className="text-xl font-semibold">{viewMode === 'chat' ? '对话' : '流程图'}</h1>
+            <h1 className="text-xl font-semibold">
+              {viewMode === 'chat' ? '对话' : viewMode === 'workflow' ? '流程图' : '代理'}
+            </h1>
             <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              {viewMode === 'chat' ? '与 AI 助手进行交互' : '查看任务执行流程'}
+              {viewMode === 'chat'
+                ? '与 AI 助手进行交互'
+                : viewMode === 'workflow'
+                  ? '查看任务执行流程'
+                  : '查看代理分工与执行状态'}
             </p>
           </div>
 

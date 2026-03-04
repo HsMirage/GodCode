@@ -7,6 +7,7 @@
  * - onMessageCreate: 消息创建时
  * - onContextOverflow: 上下文窗口溢出时
  * - onEditError: 编辑工具错误时
+ * - onTaskLifecycle: 任务生命周期事件（task/workflow）
  */
 
 // ============= 事件类型 =============
@@ -17,6 +18,16 @@ export type HookEventType =
   | 'onMessageCreate'
   | 'onContextOverflow'
   | 'onEditError'
+  | 'onTaskLifecycle'
+
+export type TaskLifecycleStatus =
+  | 'task:assigned'
+  | 'task:started'
+  | 'task:completed'
+  | 'task:failed'
+  | 'workflow:stage'
+  | 'workflow:checkpoint'
+  | 'workflow:completed'
 
 // ============= 上下文类型 =============
 
@@ -84,6 +95,17 @@ export interface EditErrorInfo {
   newString?: string
 }
 
+/**
+ * 任务生命周期事件信息
+ */
+export interface TaskLifecycleInfo {
+  status: TaskLifecycleStatus
+  workflowId: string
+  taskId: string
+  timestamp: Date
+  data?: Record<string, unknown>
+}
+
 // ============= 回调签名 =============
 
 /**
@@ -106,10 +128,17 @@ export type OnToolEndCallback = (
 /**
  * 消息创建回调
  */
+export interface MessageInjectionResult {
+  type?: string
+  source?: string
+  priority?: number
+  content: string
+}
+
 export type OnMessageCreateCallback = (
   context: HookContext,
   message: MessageInfo
-) => Promise<void | { modifiedContent?: string; inject?: string }>
+) => Promise<void | { modifiedContent?: string; inject?: string | MessageInjectionResult }>
 
 /**
  * 上下文溢出回调
@@ -127,6 +156,14 @@ export type OnEditErrorCallback = (
   error: EditErrorInfo
 ) => Promise<void | { recovery?: string; injection?: string }>
 
+/**
+ * 任务生命周期回调
+ */
+export type OnTaskLifecycleCallback = (
+  context: HookContext,
+  info: TaskLifecycleInfo
+) => Promise<void>
+
 // ============= Hook 配置 =============
 
 /**
@@ -138,6 +175,7 @@ export interface HookCallbackMap {
   onMessageCreate: OnMessageCreateCallback
   onContextOverflow: OnContextOverflowCallback
   onEditError: OnEditErrorCallback
+  onTaskLifecycle: OnTaskLifecycleCallback
 }
 
 /**
@@ -195,12 +233,17 @@ export type HookFactory = (input: HookFactoryInput) => HookConfig | HookConfig[]
 /**
  * Hook 执行结果
  */
+export type HookExecutionStatus = 'success' | 'error' | 'timeout' | 'circuit_open'
+
 export interface HookExecutionResult {
   hookId: string
   success: boolean
   duration: number
+  status?: HookExecutionStatus
+  degraded?: boolean
   error?: string
   returnValue?: unknown
+  circuitOpenUntil?: Date
 }
 
 /**
@@ -210,4 +253,48 @@ export interface EventEmitResult {
   event: HookEventType
   hookResults: HookExecutionResult[]
   aggregatedReturn?: unknown
+}
+
+export interface HookExecutionStrategySnapshot {
+  hookId: string
+  hookName: string
+  event: HookEventType
+  priority: number
+  enabled: boolean
+}
+
+export interface HookExecutionContextSnapshot {
+  sessionId: string
+  workspaceDir: string
+  userId?: string
+  tool?: string
+  callId?: string
+  messageId?: string
+  messageRole?: MessageInfo['role']
+  currentTokens?: number
+  maxTokens?: number
+  usagePercentage?: number
+  filePath?: string
+  errorType?: EditErrorInfo['errorType']
+  workflowId?: string
+  taskId?: string
+  taskStatus?: TaskLifecycleStatus
+}
+
+export interface HookExecutionOutcome {
+  success: boolean
+  duration: number
+  status?: HookExecutionStatus
+  degraded?: boolean
+  error?: string
+  returnValuePreview?: string
+  circuitOpenUntil?: Date
+}
+
+export interface HookExecutionAuditRecord {
+  id: string
+  timestamp: Date
+  strategy: HookExecutionStrategySnapshot
+  execution: HookExecutionContextSnapshot
+  result: HookExecutionOutcome
 }

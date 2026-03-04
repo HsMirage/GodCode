@@ -21,6 +21,7 @@ const ALLOWED_CHANNELS = [
   'session:get-or-create-default',
   'message:send',
   'message:list',
+  'skill:command-items',
   'message:stream',
   'message:abort',
   'message:stream-chunk',
@@ -35,6 +36,7 @@ const ALLOWED_CHANNELS = [
   'background-task:list',
   'background-task:get-output',
   'background-task:cancel',
+  'background-task:stats',
   'artifact:get',
   'artifact:list',
   'artifact:download',
@@ -96,6 +98,7 @@ const ALLOWED_CHANNELS = [
   'task:status-changed',
   'message:stream-error',
   'message:stream-usage',
+  'hook-audit:appended',
   'background-task:started',
   'background-task:output',
   'background-task:completed',
@@ -108,6 +111,8 @@ const ALLOWED_CHANNELS = [
   'agent-run:get-logs',
   // Workflow Observability Operations
   'workflow-observability:get',
+  'hook-governance:get',
+  'hook-governance:set',
   // Enhanced Artifact Operations
   'artifact:get-diff',
   'artifact:accept',
@@ -117,6 +122,8 @@ const ALLOWED_CHANNELS = [
   'task-continuation:get-status',
   'task-continuation:abort',
   'task-continuation:set-todos',
+  'task-continuation:get-config',
+  'task-continuation:set-config',
   // Provider Cache Operations
   'provider-cache:get-stats',
   'provider-cache:is-connected',

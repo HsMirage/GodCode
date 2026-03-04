@@ -71,6 +71,27 @@ describe('TaskContinuationService', () => {
       expect(service.shouldContinue(sessionId)).toBe(false)
     })
 
+    it('should return false if session was recently aborted', () => {
+      service.setTodos(sessionId, [
+        { id: '1', content: 'test', status: 'pending', priority: 'medium' }
+      ])
+      vi.setSystemTime(1_000)
+      service.markAborted(sessionId)
+
+      expect(service.shouldContinue(sessionId)).toBe(false)
+    })
+
+    it('should allow continuation again after abort window expires', () => {
+      service.setTodos(sessionId, [
+        { id: '1', content: 'test', status: 'pending', priority: 'medium' }
+      ])
+      vi.setSystemTime(1_000)
+      service.markAborted(sessionId)
+
+      vi.setSystemTime(5_000)
+      expect(service.shouldContinue(sessionId)).toBe(true)
+    })
+
     it('should return true if there are incomplete todos', () => {
       service.setTodos(sessionId, [
         { id: '1', content: 'test', status: 'pending', priority: 'medium' }

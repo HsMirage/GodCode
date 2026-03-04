@@ -602,7 +602,7 @@ describe('DelegateEngine', () => {
       )
     })
 
-    it('should synthesize fallback output when model keeps returning empty content', async () => {
+    it('should fail when model keeps returning empty content after recovery prompt', async () => {
       mocks.mockAdapter.sendMessage
         .mockResolvedValueOnce({
           content: '',
@@ -620,9 +620,17 @@ describe('DelegateEngine', () => {
         sessionId: 'test-session-123'
       })
 
-      expect(result.success).toBe(true)
-      expect(result.output).toContain('模型返回了空文本输出')
-      expect(result.output.trim().length).toBeGreaterThan(0)
+      expect(result.success).toBe(false)
+      expect(result.output).toContain('empty output after recovery prompt')
+      expect(mocks.mockPrisma.task.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'task-1' },
+          data: expect.objectContaining({
+            status: 'failed',
+            output: expect.stringContaining('Error: Delegate task returned empty output after recovery prompt')
+          })
+        })
+      )
     })
 
     it('should handle model not found error', async () => {

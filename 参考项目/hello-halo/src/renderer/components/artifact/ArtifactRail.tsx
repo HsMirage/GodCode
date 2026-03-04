@@ -14,6 +14,7 @@ import { ArtifactTree } from './ArtifactTree'
 import { api } from '../../api'
 import type { Artifact, ArtifactViewMode, ArtifactChangeEvent } from '../../types'
 import { useIsGenerating } from '../../stores/chat.store'
+import { useSpaceStore } from '../../stores/space.store'
 import { useOnboardingStore } from '../../stores/onboarding.store'
 import { useCanvasLifecycle } from '../../hooks/useCanvasLifecycle'
 import { useCanvasStore } from '../../stores/canvas.store'
@@ -29,18 +30,19 @@ const isWebMode = api.isRemoteMode()
 const VIEW_MODE_STORAGE_KEY = 'halo:artifact-view-mode'
 
 // Width constraints (in pixels) - Desktop only
-const MIN_WIDTH = 180
+const MIN_WIDTH = 200
 const MAX_WIDTH = 400
-const DEFAULT_WIDTH = 240
+const DEFAULT_WIDTH = 300
 const COLLAPSED_WIDTH = 48
+const clampWidth = (v: number) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, v))
 
 interface ArtifactRailProps {
-  spaceId: string
-  isTemp: boolean
-  onOpenFolder: () => void
   // External control props for Canvas integration
   externalExpanded?: boolean        // Controlled expanded state from parent
   onExpandedChange?: (expanded: boolean) => void  // Callback when user toggles
+  // Width persistence
+  initialWidth?: number             // Persisted width from config
+  onWidthChange?: (width: number) => void  // Callback when user finishes resizing
 }
 
 // Load initial view mode from storage
@@ -87,13 +89,24 @@ function normalizeArtifactFromEvent(item: unknown, fallbackSpaceId: string): Art
 }
 
 export function ArtifactRail({
-  spaceId,
-  isTemp,
-  onOpenFolder,
   externalExpanded,
-  onExpandedChange
+  onExpandedChange,
+  initialWidth,
+  onWidthChange
 }: ArtifactRailProps) {
   const { t } = useTranslation()
+
+  // Self-subscribe to space data
+  const currentSpace = useSpaceStore(state => state.currentSpace)
+  const spaceId = currentSpace?.id ?? ''
+  const isTemp = currentSpace?.isTemp ?? false
+
+  const handleOpenFolder = useCallback(() => {
+    if (spaceId) {
+      useSpaceStore.getState().openSpaceFolder(spaceId)
+    }
+  }, [spaceId])
+
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   // Use external control if provided, otherwise internal state
   const isControlled = externalExpanded !== undefined
@@ -101,11 +114,23 @@ export function ArtifactRail({
   const isExpanded = isControlled ? externalExpanded : internalExpanded
 
   const [isLoading, setIsLoading] = useState(false)
-  const [width, setWidth] = useState(DEFAULT_WIDTH)
+  const [width, setWidth] = useState(initialWidth != null ? clampWidth(initialWidth) : DEFAULT_WIDTH)
+  const widthRef = useRef(width)
   const [isDragging, setIsDragging] = useState(false)
+
+  // Sync width when initialWidth arrives from async config load
+  useEffect(() => {
+    if (initialWidth !== undefined && !isDragging) {
+      const clamped = clampWidth(initialWidth)
+      setWidth(clamped)
+      widthRef.current = clamped
+    }
+  }, [initialWidth, isDragging])
   const [viewMode, setViewMode] = useState<ArtifactViewMode>(getInitialViewMode)
   const [mobileOverlayOpen, setMobileOverlayOpen] = useState(false)
   const railRef = useRef<HTMLDivElement>(null)
+  const onWidthChangeRef = useRef(onWidthChange)
+  onWidthChangeRef.current = onWidthChange
   const isGenerating = useIsGenerating()
   const { isActive: isOnboarding, currentStep, completeOnboarding } = useOnboardingStore()
   const isMobile = useIsMobile()
@@ -181,10 +206,12 @@ export function ArtifactRail({
       const newWidth = window.innerWidth - e.clientX
       const clampedWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, newWidth))
       setWidth(clampedWidth)
+      widthRef.current = clampedWidth
     }
 
     const handleMouseUp = () => {
       setIsDragging(false)
+      onWidthChangeRef.current?.(widthRef.current)
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -372,7 +399,7 @@ export function ArtifactRail({
         <div className="flex items-center gap-2">
           {/* Open folder button */}
           <button
-            onClick={onOpenFolder}
+            onClick={handleOpenFolder}
             className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground rounded-lg transition-colors"
             title={t('Open folder (⌘⇧F)')}
           >
@@ -555,7 +582,7 @@ export function ArtifactRail({
           ) : (
             <>
               <button
-                onClick={onOpenFolder}
+                onClick={handleOpenFolder}
                 className="p-2 hover:bg-secondary rounded-lg transition-colors"
                 title={t('Open folder')}
               >

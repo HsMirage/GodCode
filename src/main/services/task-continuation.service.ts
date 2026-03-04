@@ -17,6 +17,12 @@ export interface SessionState {
   lastContinuationTriggeredAt?: number
 }
 
+export interface TaskContinuationConfig {
+  countdownSeconds: number
+  idleDedupWindowMs: number
+  abortWindowMs: number
+}
+
 const CONTINUATION_PROMPT = `[SYSTEM REMINDER - TODO CONTINUATION]
 
 Incomplete tasks remain in your todo list. Continue working on the next pending task.
@@ -26,8 +32,12 @@ Incomplete tasks remain in your todo list. Continue working on the next pending 
 - Mark each task complete when finished
 - Do not stop until all tasks are done`
 
-const COUNTDOWN_SECONDS = 2
-const IDLE_DEDUP_WINDOW_MS = 500
+const DEFAULT_CONFIG: TaskContinuationConfig = {
+  countdownSeconds: 2,
+  idleDedupWindowMs: 500,
+  abortWindowMs: 3000
+}
+
 const BOULDER_STATE_PATHS = [
   path.join(process.cwd(), '.fuxi', 'boulder.json'),
   path.join(process.cwd(), '.sisyphus', 'boulder.json')
@@ -40,6 +50,7 @@ interface BoulderContinuationContext {
 
 export class TaskContinuationService {
   private sessions = new Map<string, SessionState>()
+  private config: TaskContinuationConfig = { ...DEFAULT_CONFIG }
 
   getState(sessionId: string): SessionState {
     let state = this.sessions.get(sessionId)
@@ -55,6 +66,30 @@ export class TaskContinuationService {
     state.todos = todos
   }
 
+  getConfig(): TaskContinuationConfig {
+    return { ...this.config }
+  }
+
+  setConfig(next: Partial<TaskContinuationConfig>): TaskContinuationConfig {
+    const merged: TaskContinuationConfig = {
+      countdownSeconds:
+        typeof next.countdownSeconds === 'number' && Number.isFinite(next.countdownSeconds)
+          ? Math.max(1, Math.floor(next.countdownSeconds))
+          : this.config.countdownSeconds,
+      idleDedupWindowMs:
+        typeof next.idleDedupWindowMs === 'number' && Number.isFinite(next.idleDedupWindowMs)
+          ? Math.max(0, Math.floor(next.idleDedupWindowMs))
+          : this.config.idleDedupWindowMs,
+      abortWindowMs:
+        typeof next.abortWindowMs === 'number' && Number.isFinite(next.abortWindowMs)
+          ? Math.max(0, Math.floor(next.abortWindowMs))
+          : this.config.abortWindowMs
+    }
+
+    this.config = merged
+    return this.getConfig()
+  }
+
   getIncompleteTodos(sessionId: string): Todo[] {
     const state = this.getState(sessionId)
     return state.todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled')
@@ -63,6 +98,10 @@ export class TaskContinuationService {
   shouldContinue(sessionId: string): boolean {
     const state = this.getState(sessionId)
     if (state.isRecovering) return false
+
+    if (this.wasRecentlyAborted(sessionId)) {
+      return false
+    }
 
     if (!this.isSessionEligibleForContinuation(sessionId)) {
       return false
@@ -111,7 +150,7 @@ export class TaskContinuationService {
     logger.info('[TaskContinuation] Abort detected', { sessionId })
   }
 
-  wasRecentlyAborted(sessionId: string, windowMs = 3000): boolean {
+  wasRecentlyAborted(sessionId: string, windowMs = this.config.abortWindowMs): boolean {
     const state = this.sessions.get(sessionId)
     if (!state?.abortDetectedAt) return false
 
@@ -144,11 +183,11 @@ export class TaskContinuationService {
         const now = Date.now()
         if (
           state.lastContinuationTriggeredAt &&
-          now - state.lastContinuationTriggeredAt < IDLE_DEDUP_WINDOW_MS
+          now - state.lastContinuationTriggeredAt < this.config.idleDedupWindowMs
         ) {
           logger.info('[TaskContinuation] Deduped duplicated idle continuation', {
             sessionId,
-            dedupWindowMs: IDLE_DEDUP_WINDOW_MS
+            dedupWindowMs: this.config.idleDedupWindowMs
           })
           return
         }
@@ -160,11 +199,11 @@ export class TaskContinuationService {
         })
         onContinue()
       }
-    }, COUNTDOWN_SECONDS * 1000)
+    }, this.config.countdownSeconds * 1000)
 
     logger.info('[TaskContinuation] Countdown started', {
       sessionId,
-      seconds: COUNTDOWN_SECONDS,
+      seconds: this.config.countdownSeconds,
       incompleteCount: incomplete.length
     })
   }

@@ -1,10 +1,20 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Atom, Paperclip, Send, Square, X } from 'lucide-react'
 import { AgentSelector } from './AgentSelector'
+import { useUIStore } from '../../store/ui.store'
+
+export interface MessageInputSendPayload {
+  content: string
+  skillCommand?: {
+    command: string
+    input?: string
+    rawInput?: string
+  }
+}
 
 export interface MessageInputProps {
   isLoading?: boolean
-  onSend: (message: string, agentCode?: string) => boolean | Promise<boolean>
+  onSend: (payload: MessageInputSendPayload, agentCode?: string) => boolean | Promise<boolean>
   onStop?: () => void | Promise<void>
   placeholder?: string
   afterSend?: React.ReactNode
@@ -45,6 +55,7 @@ const iconButtonBase = [
 const MAX_HEIGHT = 200
 const MAX_ATTACHMENTS = 8
 const MAX_ATTACHMENT_CHARS = 80_000
+const COMMAND_EMPTY_STATE_TEXT = '没有匹配的命令，继续输入以筛选'
 
 type Attachment = {
   id: string
@@ -59,6 +70,13 @@ type DraftState = {
   thinkingEnabled: boolean
   attachments: Attachment[]
   selectedAgent: string
+}
+
+type SlashCommandItem = {
+  label: string
+  command: string
+  description: string
+  argsHint?: string
 }
 
 const DEFAULT_AGENT_CODE = 'haotian'
@@ -77,6 +95,34 @@ function formatBytes(bytes: number) {
   return `${rounded} ${units[idx]}`
 }
 
+function parseSlashInvocation(input: string): { command: string; remainder: string } | null {
+  const trimmedLeft = input.trimStart()
+  if (!trimmedLeft.startsWith('/')) {
+    return null
+  }
+
+  const withoutPrefix = trimmedLeft.slice(1)
+  const firstSpace = withoutPrefix.search(/\s/)
+  if (firstSpace === -1) {
+    return { command: `/${withoutPrefix}`, remainder: '' }
+  }
+
+  const command = withoutPrefix.slice(0, firstSpace)
+  const remainder = withoutPrefix.slice(firstSpace).trim()
+  return { command: `/${command}`, remainder }
+}
+
+function getSlashQuery(input: string): string | null {
+  const invocation = parseSlashInvocation(input)
+  if (!invocation) {
+    return null
+  }
+  if (invocation.remainder) {
+    return null
+  }
+  return invocation.command
+}
+
 export function MessageInput({
   isLoading = false,
   onSend,
@@ -92,6 +138,11 @@ export function MessageInput({
   const [thinkingEnabled, setThinkingEnabled] = useState(false)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [selectedAgent, setSelectedAgent] = useState(DEFAULT_AGENT_CODE)
+  const [commandItems, setCommandItems] = useState<SlashCommandItem[]>([])
+  const [commandPanelOpen, setCommandPanelOpen] = useState(false)
+  const [commandSelectedIndex, setCommandSelectedIndex] = useState(0)
+  const slashCommandMru = useUIStore(state => state.slashCommandMru)
+  const recordSlashCommandUse = useUIStore(state => state.recordSlashCommandUse)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const inputId = useId()
@@ -110,6 +161,12 @@ export function MessageInput({
     textarea.style.height = 'auto'
     const nextHeight = Math.min(textarea.scrollHeight, MAX_HEIGHT)
     textarea.style.height = `${nextHeight}px`
+  }
+
+  const closeCommandPanel = () => {
+    setCommandPanelOpen(false)
+    setCommandItems([])
+    setCommandSelectedIndex(0)
   }
 
   useEffect(() => {
@@ -140,7 +197,6 @@ export function MessageInput({
 
     if (!autoFocus) return
 
-    // Focus after the DOM updates.
     requestAnimationFrame(() => {
       textareaRef.current?.focus()
     })
@@ -154,6 +210,97 @@ export function MessageInput({
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      if (disabled || isLoading) {
+        if (!cancelled) {
+          closeCommandPanel()
+        }
+        return
+      }
+
+      const slashQuery = getSlashQuery(value)
+      if (!slashQuery) {
+        if (!cancelled) {
+          closeCommandPanel()
+        }
+        return
+      }
+
+      if (!window.codeall) {
+        if (!cancelled) {
+          closeCommandPanel()
+        }
+        return
+      }
+
+      try {
+        const items = await window.codeall.invoke('skill:command-items', { query: slashQuery })
+        if (!cancelled) {
+          setCommandItems(Array.isArray(items) ? (items as SlashCommandItem[]) : [])
+          setCommandPanelOpen(true)
+        }
+      } catch {
+        if (!cancelled) {
+          setCommandItems([])
+          setCommandPanelOpen(true)
+        }
+      }
+    }
+
+    void run()
+
+    return () => {
+      cancelled = true
+    }
+  }, [disabled, isLoading, value])
+
+  const orderedCommandItems = useMemo(() => {
+    if (commandItems.length <= 1) {
+      return commandItems
+    }
+
+    const mruRank = new Map<string, number>()
+    slashCommandMru.forEach((command, index) => {
+      mruRank.set(command, index)
+    })
+
+    const withIndex = commandItems.map((item, index) => ({ item, index }))
+    withIndex.sort((a, b) => {
+      const aRank = mruRank.get(a.item.command)
+      const bRank = mruRank.get(b.item.command)
+
+      if (aRank !== undefined && bRank !== undefined) {
+        return aRank - bRank
+      }
+      if (aRank !== undefined) {
+        return -1
+      }
+      if (bRank !== undefined) {
+        return 1
+      }
+      return a.index - b.index
+    })
+
+    return withIndex.map(entry => entry.item)
+  }, [commandItems, slashCommandMru])
+
+  useEffect(() => {
+    if (!commandPanelOpen) {
+      setCommandSelectedIndex(0)
+      return
+    }
+
+    setCommandSelectedIndex(current => {
+      if (orderedCommandItems.length === 0) {
+        return 0
+      }
+      return Math.min(current, orderedCommandItems.length - 1)
+    })
+  }, [commandPanelOpen, orderedCommandItems])
+
   const canSend = useMemo(() => {
     if (disabled) return false
     if (isLoading) return false
@@ -162,12 +309,27 @@ export function MessageInput({
     return false
   }, [attachments.length, disabled, isLoading, value])
 
-  const buildPayload = () => {
+  const handleCommandPick = (item: SlashCommandItem) => {
+    const args = item.argsHint?.trim()
+    const commandDraft = args ? `${item.command} ${args}` : `${item.command} `
+    setValue(commandDraft)
+    closeCommandPanel()
+    recordSlashCommandUse(item.command)
+
+    requestAnimationFrame(() => {
+      const textarea = textareaRef.current
+      if (!textarea) return
+      textarea.focus()
+      const cursorPos = commandDraft.length
+      textarea.setSelectionRange(cursorPos, cursorPos)
+    })
+  }
+
+  const buildContent = () => {
     const trimmed = value.trim()
     let content = trimmed
 
     if (thinkingEnabled) {
-      // Hint only; backend currently only accepts "content".
       content = `请进行更深入的推理和分析后再回答。\n\n${content}`.trim()
     }
 
@@ -184,9 +346,28 @@ export function MessageInput({
     return content
   }
 
+  const buildSendPayload = (): MessageInputSendPayload | null => {
+    const content = buildContent()
+    if (!content) return null
+
+    const invocation = parseSlashInvocation(value)
+    if (!invocation) {
+      return { content }
+    }
+
+    return {
+      content,
+      skillCommand: {
+        command: invocation.command,
+        input: invocation.remainder || undefined,
+        rawInput: value.trim() || undefined
+      }
+    }
+  }
+
   const handleSend = async () => {
     if (!canSend) return
-    const payload = buildPayload()
+    const payload = buildSendPayload()
     if (!payload) return
 
     const prevDraft: DraftState = {
@@ -196,11 +377,10 @@ export function MessageInput({
       selectedAgent
     }
 
-    // Optimistically clear immediately to avoid IME/composition or async timing issues
-    // that can cause the old text to "re-appear" after a successful send.
     setValue('')
     setAttachments([])
-    textareaRef.current && (textareaRef.current.value = '')
+    closeCommandPanel()
+    if (textareaRef.current) textareaRef.current.value = ''
 
     const key = draftKeyRef.current
     if (key) {
@@ -212,11 +392,9 @@ export function MessageInput({
     try {
       const ok = await onSend(payload, selectedAgent)
       if (ok) {
-        // Already cleared above; keep it cleared.
         return
       }
 
-      // Not sent: restore so user can retry.
       setValue(prevDraft.value)
       setThinkingEnabled(prevDraft.thinkingEnabled)
       setAttachments(prevDraft.attachments)
@@ -226,7 +404,6 @@ export function MessageInput({
         sharedDraftCache.set(key, prevDraft)
       }
     } catch {
-      // Keep the input so user can retry.
       setValue(prevDraft.value)
       setThinkingEnabled(prevDraft.thinkingEnabled)
       setAttachments(prevDraft.attachments)
@@ -260,7 +437,6 @@ export function MessageInput({
     for (const f of selected) {
       try {
         let text = await f.text()
-        // Heuristic: treat files with NUL chars as binary.
         if (text.includes('\u0000')) {
           text = `[Binary file: ${f.name}, ${formatBytes(f.size)}]`
         }
@@ -291,7 +467,6 @@ export function MessageInput({
 
     setAttachments(prev => [...prev, ...newOnes])
 
-    // Reset input so selecting the same file again still triggers change.
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -300,11 +475,9 @@ export function MessageInput({
       <div className="flex items-stretch gap-3">
         <div className={['flex-1', inputShellClass].join(' ')}>
           {disabled && (
-            <div className="px-4 pt-3 text-xs text-[var(--text-muted)]">
-              {disabledHint ?? '请先选择一个对话'}
-            </div>
+            <div className="px-4 pt-3 text-xs text-[var(--text-muted)]">{disabledHint ?? '请先选择一个对话'}</div>
           )}
-          {/* Attachments */}
+
           {attachments.length > 0 && (
             <div className="px-3 pt-3 flex flex-wrap gap-2">
               {attachments.map(a => (
@@ -330,27 +503,89 @@ export function MessageInput({
             </div>
           )}
 
-          {/* Textarea */}
           <div className="px-4 pt-3">
-          <textarea
-            ref={textareaRef}
-            className={textareaClass}
-            // Keep placeholder stable; show disabled hint in the dedicated banner above.
-            placeholder={placeholder ?? 'Type your message...'}
-            rows={1}
-            value={value}
-            disabled={isLoading || disabled}
-            onChange={(event) => setValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                void handleSend()
-              }
-            }}
-          />
+            <textarea
+              ref={textareaRef}
+              className={textareaClass}
+              placeholder={placeholder ?? 'Type your message...'}
+              rows={1}
+              value={value}
+              disabled={isLoading || disabled}
+              onChange={(event) => setValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (commandPanelOpen) {
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    closeCommandPanel()
+                    return
+                  }
+
+                  if (event.key === 'ArrowDown' && orderedCommandItems.length > 0) {
+                    event.preventDefault()
+                    setCommandSelectedIndex(current => (current + 1) % orderedCommandItems.length)
+                    return
+                  }
+
+                  if (event.key === 'ArrowUp' && orderedCommandItems.length > 0) {
+                    event.preventDefault()
+                    setCommandSelectedIndex(current =>
+                      current === 0 ? orderedCommandItems.length - 1 : current - 1
+                    )
+                    return
+                  }
+
+                  if (event.key === 'Enter' && !event.shiftKey && orderedCommandItems.length > 0) {
+                    event.preventDefault()
+                    handleCommandPick(orderedCommandItems[commandSelectedIndex])
+                    return
+                  }
+                }
+
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault()
+                  void handleSend()
+                }
+              }}
+            />
           </div>
 
-          {/* Bottom toolbar */}
+          {commandPanelOpen && (
+            <div className="mx-3 mt-2 rounded-xl border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2">
+              {orderedCommandItems.length > 0 ? (
+                <ul className="max-h-52 overflow-y-auto space-y-1">
+                  {orderedCommandItems.map((item, index) => {
+                    const selected = index === commandSelectedIndex
+                    return (
+                      <li key={item.command}>
+                        <button
+                          type="button"
+                          className={[
+                            'w-full rounded-lg px-3 py-2 text-left text-xs text-[var(--text-primary)] border transition-colors',
+                            selected
+                              ? 'border-[var(--border-primary)] bg-[var(--bg-tertiary)]'
+                              : 'border-transparent hover:border-[var(--border-secondary)]'
+                          ].join(' ')}
+                          onMouseEnter={() => setCommandSelectedIndex(index)}
+                          onMouseDown={event => event.preventDefault()}
+                          onClick={() => handleCommandPick(item)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-[var(--text-primary)]">{item.command}</span>
+                            <span className="text-[var(--text-muted)]">{item.label}</span>
+                          </div>
+                          <div className="mt-1 text-[var(--text-muted)]">{item.description}</div>
+                          {item.argsHint && <div className="mt-1 text-[var(--text-muted)]">参数: {item.argsHint}</div>}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : (
+                <div className="px-3 py-2 text-xs text-[var(--text-muted)]">{COMMAND_EMPTY_STATE_TEXT}</div>
+              )}
+            </div>
+          )}
+
           <div className="mt-2 flex items-center justify-between px-3 pb-3">
             <div className="flex items-center gap-1.5">
               <input
@@ -391,7 +626,6 @@ export function MessageInput({
                 <span className="text-xs">深度思考</span>
               </button>
 
-              {/* Agent Selector */}
               <AgentSelector
                 selectedAgent={selectedAgent}
                 onAgentChange={setSelectedAgent}
@@ -436,7 +670,6 @@ export function MessageInput({
           </div>
         </div>
 
-        {/* External actions (e.g. open Task/Browser panels) */}
         {afterSend && (
           <div className="flex flex-col justify-between items-center self-stretch">
             {afterSend}

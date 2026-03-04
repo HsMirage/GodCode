@@ -12,6 +12,7 @@ import {
   type SessionState,
   type RecoveryPlan
 } from '../../services/session-continuity.service'
+import { DatabaseService } from '../../services/database'
 
 export function registerSessionContinuityHandlers(): void {
   // Get session state
@@ -66,6 +67,8 @@ export function registerSessionContinuityHandlers(): void {
   ipcMain.handle(
     INVOKE_CHANNELS.SESSION_RECOVERABLE_LIST,
     async (): Promise<SessionState[]> => {
+      const db = DatabaseService.getInstance()
+      await db.init()
       return sessionContinuityService.getRecoverableSessions()
     }
   )

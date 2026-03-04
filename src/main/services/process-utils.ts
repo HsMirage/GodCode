@@ -6,8 +6,8 @@ const execAsync = promisify(exec)
 
 // Safe path patterns to identify our bundled PostgreSQL
 const SAFE_PATH_PATTERNS = [
-  /node_modules[\\\/](?:@embedded-postgres|embedded-postgres)[\\\/]/i,
-  /app\.asar\.unpacked[\\\/]node_modules[\\\/](?:@embedded-postgres|embedded-postgres)[\\\/]/i
+  /node_modules[\\/](?:@embedded-postgres|embedded-postgres)[\\/]/i,
+  /app\.asar\.unpacked[\\/]node_modules[\\/](?:@embedded-postgres|embedded-postgres)[\\/]/i
 ]
 
 interface PostgresProcess {
@@ -78,7 +78,7 @@ function parsePsOutput(stdout: string): PostgresProcess[] {
     const commandLine = match[2]
 
     if (Number.isNaN(pid)) continue
-    if (!/(^|[\/\s])(postgres|initdb|pg_ctl)(\s|$)/.test(commandLine)) continue
+    if (!/(^|[/\s])(postgres|initdb|pg_ctl)(\s|$)/.test(commandLine)) continue
 
     processes.push({
       pid,

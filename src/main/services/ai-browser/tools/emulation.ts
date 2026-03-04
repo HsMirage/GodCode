@@ -33,7 +33,7 @@ export const emulateTool: BrowserTool = {
         type: 'string',
         description:
           'Throttle network. Set to "No emulation" to disable. If omitted, conditions remain unchanged.',
-        // @ts-ignore
+        // Schema typing uses non-standard JSON Schema fields
         enum: THROTTLING_OPTIONS as unknown as string[]
       },
       cpuThrottlingRate: {
@@ -61,7 +61,7 @@ export const emulateTool: BrowserTool = {
           }
         },
         required: ['latitude', 'longitude'],
-        // @ts-ignore
+        // Schema typing uses non-standard JSON Schema fields
         nullable: true
       }
     }

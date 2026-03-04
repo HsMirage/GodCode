@@ -4,10 +4,11 @@
  * The BrowserContext is the central manager for AI Browser operations.
  * It provides:
  * - Access to the active BrowserView's WebContents
- * - CDP command execution
+ * - CDP command execution with automatic timeout protection
  * - Accessibility snapshot management
  * - Network and console monitoring
  * - Element interaction operations
+ * - Emulation and performance tracing
  *
  * All AI Browser tools operate through this context.
  */
@@ -28,6 +29,29 @@ import type {
   ConsoleMessage,
   DialogInfo
 } from './types'
+
+// Default timeout for CDP commands (ms)
+const CDP_TIMEOUT = 15_000
+// Default timeout for navigation operations (ms)
+const NAVIGATION_TIMEOUT = 30_000
+// Default timeout for element wait operations (ms)
+const WAIT_TIMEOUT = 30_000
+
+/**
+ * Wrap a promise with a timeout. Rejects with a clear error if the promise
+ * does not settle within `ms` milliseconds.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label = 'Operation'): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`))
+    }, ms)
+    promise.then(
+      value => { clearTimeout(timer); resolve(value) },
+      error => { clearTimeout(timer); reject(error) }
+    )
+  })
+}
 
 /**
  * BrowserContext - Manages the browser state for AI operations
@@ -50,6 +74,28 @@ export class BrowserContext implements BrowserContextInterface {
   // Dialog handling state
   private pendingDialog: DialogInfo | null = null
   private dialogResolver: ((result: { accept: boolean; promptText?: string }) => void) | null = null
+
+  // Performance tracing state
+  private isTracing: boolean = false
+  private traceStartTime: number = 0
+
+  // View tracking for scoped cleanup
+  private ownedViewIds: Set<string> = new Set()
+
+  // Whether this is a scoped context (used for automation isolation).
+  // Scoped contexts create BrowserViews on the offscreen host window instead
+  // of the main window, preventing lifecycle conflicts with user-visible views.
+  private _isScoped: boolean = false
+
+  /** Whether this context is scoped (automation) vs the global singleton (interactive). */
+  get isScoped(): boolean {
+    return this._isScoped
+  }
+
+  /** Mark this context as scoped. Called by createScopedBrowserContext(). */
+  markAsScoped(): void {
+    this._isScoped = true
+  }
 
   /**
    * Initialize the context with the main window
@@ -123,25 +169,39 @@ export class BrowserContext implements BrowserContextInterface {
   }
 
   /**
-   * Send a CDP command to the active browser
+   * Ensure the CDP debugger is attached to the active webContents.
+   * Safe to call repeatedly - silently ignores "already attached" errors.
+   */
+  private ensureDebuggerAttached(webContents: Electron.WebContents): void {
+    try {
+      webContents.debugger.attach('1.3')
+    } catch (_e) {
+      // Already attached - this is expected
+    }
+  }
+
+  /**
+   * Send a CDP command to the active browser with automatic timeout protection.
+   * Every CDP call is guarded by a configurable timeout (default: 15s) to
+   * prevent the tool from hanging indefinitely if the page becomes unresponsive.
    */
   async sendCDPCommand<T = unknown>(
     method: string,
-    params?: Record<string, unknown>
+    params?: Record<string, unknown>,
+    timeout: number = CDP_TIMEOUT
   ): Promise<T> {
     const webContents = this.getWebContents()
     if (!webContents) {
       throw new Error('No active browser view')
     }
 
-    // Ensure debugger is attached
-    try {
-      webContents.debugger.attach('1.3')
-    } catch (e) {
-      // Already attached
-    }
+    this.ensureDebuggerAttached(webContents)
 
-    return webContents.debugger.sendCommand(method, params) as Promise<T>
+    return withTimeout(
+      webContents.debugger.sendCommand(method, params) as Promise<T>,
+      timeout,
+      `CDP ${method}`
+    )
   }
 
   // ============================================
@@ -310,12 +370,8 @@ export class BrowserContext implements BrowserContextInterface {
    * Get a specific network request by ID
    */
   getNetworkRequest(id: string): NetworkRequest | undefined {
-    for (const request of this.networkRequests.values()) {
-      if (request.id === id) {
-        return request
-      }
-    }
-    return undefined
+    const requests = Array.from(this.networkRequests.values())
+    return requests.find(r => r.id === id)
   }
 
   /**
@@ -924,49 +980,204 @@ export class BrowserContext implements BrowserContextInterface {
   // ============================================
 
   /**
-   * Wait for text to appear on the page
+   * Wait for text to appear on the page.
+   * Uses polling with an overall timeout guard.
    */
-  async waitForText(text: string, timeout: number = 30000): Promise<void> {
-    const startTime = Date.now()
+  async waitForText(text: string, timeout: number = WAIT_TIMEOUT): Promise<void> {
+    const deadline = Date.now() + timeout
     const pollInterval = 500
 
-    while (Date.now() - startTime < timeout) {
-      const snapshot = await this.createSnapshot()
-      const formattedText = snapshot.format()
-
-      if (formattedText.includes(text)) {
-        return
+    while (Date.now() < deadline) {
+      try {
+        const snapshot = await withTimeout(
+          this.createSnapshot(),
+          Math.min(CDP_TIMEOUT, deadline - Date.now()),
+          'waitForText snapshot'
+        )
+        if (snapshot.format().includes(text)) {
+          return
+        }
+      } catch (_e) {
+        // Snapshot may fail if page is navigating; ignore and retry
       }
 
-      await new Promise(resolve => setTimeout(resolve, pollInterval))
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) break
+      await new Promise(resolve => setTimeout(resolve, Math.min(pollInterval, remaining)))
     }
 
     throw new Error(`Timeout waiting for text: "${text}"`)
   }
 
   /**
-   * Wait for an element matching a selector
+   * Wait for an element matching a selector.
+   * Uses polling with an overall timeout guard.
    */
-  async waitForElement(selector: string, timeout: number = 30000): Promise<void> {
-    const startTime = Date.now()
+  async waitForElement(selector: string, timeout: number = WAIT_TIMEOUT): Promise<void> {
+    const deadline = Date.now() + timeout
     const pollInterval = 500
 
-    while (Date.now() - startTime < timeout) {
+    while (Date.now() < deadline) {
       try {
-        const result = await this.evaluateScript<boolean>(
-          `!!document.querySelector("${selector.replace(/"/g, '\\"')}")`
+        const result = await withTimeout(
+          this.evaluateScript<boolean>(
+            `!!document.querySelector("${selector.replace(/"/g, '\\"')}")`
+          ),
+          Math.min(CDP_TIMEOUT, deadline - Date.now()),
+          'waitForElement evaluate'
         )
         if (result) {
           return
         }
-      } catch (e) {
-        // Ignore errors and retry
+      } catch (_e) {
+        // Ignore and retry
       }
 
-      await new Promise(resolve => setTimeout(resolve, pollInterval))
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) break
+      await new Promise(resolve => setTimeout(resolve, Math.min(pollInterval, remaining)))
     }
 
     throw new Error(`Timeout waiting for element: "${selector}"`)
+  }
+
+  /**
+   * Wait for the active page to finish loading.
+   * Uses event-based waiting instead of a busy-wait polling loop.
+   */
+  async waitForNavigation(timeout: number = NAVIGATION_TIMEOUT): Promise<void> {
+    const viewId = this.activeViewId
+    if (!viewId) throw new Error('No active browser view')
+
+    const state = browserViewManager.getState(viewId)
+    if (state && !state.isLoading) return
+
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup()
+        // Resolve instead of reject - the page may still be usable
+        resolve()
+      }, timeout)
+
+      const check = () => {
+        const s = browserViewManager.getState(viewId)
+        if (!s || !s.isLoading) {
+          cleanup()
+          resolve()
+        }
+      }
+
+      const interval = setInterval(check, 200)
+
+      const cleanup = () => {
+        clearTimeout(timer)
+        clearInterval(interval)
+      }
+    })
+  }
+
+  // ============================================
+  // Emulation
+  // ============================================
+
+  /**
+   * Set viewport size via CDP Emulation domain
+   */
+  async setViewportSize(width: number, height: number): Promise<void> {
+    await this.sendCDPCommand('Emulation.setDeviceMetricsOverride', {
+      width,
+      height,
+      deviceScaleFactor: 1,
+      mobile: false,
+      screenWidth: width,
+      screenHeight: height
+    })
+  }
+
+  // ============================================
+  // Performance Tracing
+  // ============================================
+
+  // Standard trace categories (aligned with chrome-devtools-mcp)
+  private static readonly TRACE_CATEGORIES = [
+    '-*',
+    'blink.console',
+    'blink.user_timing',
+    'devtools.timeline',
+    'disabled-by-default-devtools.screenshot',
+    'disabled-by-default-devtools.timeline',
+    'disabled-by-default-devtools.timeline.invalidationTracking',
+    'disabled-by-default-devtools.timeline.frame',
+    'disabled-by-default-devtools.timeline.stack',
+    'disabled-by-default-v8.cpu_profiler',
+    'disabled-by-default-v8.cpu_profiler.hires',
+    'latencyInfo',
+    'loading',
+    'disabled-by-default-lighthouse',
+    'v8.execute',
+    'v8'
+  ]
+
+  /**
+   * Start performance tracing on the active page
+   */
+  async startPerformanceTrace(): Promise<void> {
+    if (this.isTracing) {
+      throw new Error('A performance trace is already running. Stop it first.')
+    }
+    await this.sendCDPCommand('Tracing.start', {
+      categories: BrowserContext.TRACE_CATEGORIES.join(',')
+    })
+    this.isTracing = true
+    this.traceStartTime = Date.now()
+  }
+
+  /**
+   * Stop performance tracing and return duration + metrics
+   */
+  async stopPerformanceTrace(): Promise<{ duration: number; metrics: Record<string, number> }> {
+    if (!this.isTracing) {
+      throw new Error('No performance trace is running.')
+    }
+    await this.sendCDPCommand('Tracing.end')
+    this.isTracing = false
+    const duration = Date.now() - this.traceStartTime
+    const metrics = await this.getPerformanceMetrics()
+    return { duration, metrics }
+  }
+
+  /**
+   * Whether a trace is currently running
+   */
+  isPerformanceTracing(): boolean {
+    return this.isTracing
+  }
+
+  /**
+   * Get CDP Performance.getMetrics as a key-value map
+   */
+  async getPerformanceMetrics(): Promise<Record<string, number>> {
+    try {
+      const result = await this.sendCDPCommand<{
+        metrics: Array<{ name: string; value: number }>
+      }>('Performance.getMetrics')
+      const map: Record<string, number> = {}
+      for (const m of result.metrics) {
+        map[m.name] = m.value
+      }
+      return map
+    } catch {
+      return {}
+    }
+  }
+
+  /**
+   * Get the current page URL
+   */
+  getPageUrl(): string {
+    const webContents = this.getWebContents()
+    if (!webContents) throw new Error('No active browser view')
+    return webContents.getURL()
   }
 
   // ============================================
@@ -985,47 +1196,134 @@ export class BrowserContext implements BrowserContextInterface {
    * Disable all monitoring features and cleanup debugger resources
    */
   private disableMonitoring(): void {
-    // Remove debugger event listener and detach to prevent memory leaks
     const webContents = this.getWebContents()
     if (webContents && !webContents.isDestroyed()) {
       try {
-        // Remove the CDP message listener
         webContents.debugger.off('message', this.handleCDPMessage)
-      } catch (e) {
+      } catch (_e) {
         // Listener may already be removed
       }
 
       try {
-        // Disable CDP domains before detaching
         if (this.networkEnabled) {
           webContents.debugger.sendCommand('Network.disable').catch(() => {})
         }
         if (this.consoleEnabled) {
           webContents.debugger.sendCommand('Runtime.disable').catch(() => {})
         }
-      } catch (e) {
+      } catch (_e) {
         // Ignore errors during domain disable
       }
 
       try {
-        // Detach debugger to free resources
         webContents.debugger.detach()
-      } catch (e) {
+      } catch (_e) {
         // Already detached or not attached
       }
     }
 
     this.networkEnabled = false
     this.consoleEnabled = false
+    this.isTracing = false
     this.clearNetworkRequests()
     this.clearConsoleMessages()
   }
 
   /**
-   * Cleanup when context is destroyed
+   * Register a view as owned by this context (for scoped cleanup).
+   * Only applies to scoped (automation) contexts — the global singleton
+   * used for interactive browsing is intentionally excluded so that
+   * normal user browsing is unaffected.
+   *
+   * Automation views are muted, have autoplay blocked, and report
+   * visibilityState='visible' regardless of the parent window's actual
+   * visibility. This prevents sites like Xiaohongshu from detecting the
+   * Electron window is in the background and auto-closing UI overlays
+   * (e.g. comment input popups) via visibilitychange events.
+   *
+   * Two-layer media suppression (per-WebContents, not session-wide):
+   *   1. Document layer — Page.addScriptToEvaluateOnNewDocument runs before any page
+   *                       script, locking down HTMLMediaElement.autoplay and pausing
+   *                       media on DOMContentLoaded (no race condition)
+   *   2. Audio layer    — setAudioMuted(true) silences any audio that slips through
+   */
+  trackView(viewId: string): void {
+    this.ownedViewIds.add(viewId)
+
+    // Guard: media suppression is only for automation (scoped) contexts.
+    // The global singleton serves the user's interactive browser and must
+    // not interfere with normal autoplay behaviour.
+    if (!this._isScoped) return
+
+    const wc = browserViewManager.getWebContents(viewId)
+    if (!wc) return
+
+    // Layer 2: mute audio output
+    wc.setAudioMuted(true)
+
+    // Layer 1: document-level startup script (no race condition).
+    // Page.addScriptToEvaluateOnNewDocument executes before any page JS on
+    // every navigation, so autoplay is blocked from the very first frame.
+    const startupScript = `
+      (function() {
+        // Visibility: report 'visible' so sites don't collapse UI overlays
+        // when the Electron window is in the background.
+        Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+        Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
+
+        // Autoplay: intercept the property at the prototype level so that any
+        // assignment of autoplay=true on any current or future media element
+        // is silently dropped.
+        Object.defineProperty(HTMLMediaElement.prototype, 'autoplay', {
+          get: function() { return false; },
+          set: function() { /* block all autoplay */ },
+          configurable: true
+        });
+
+        // Pause any media that already exists or gets added to the DOM.
+        function pauseAll(root) {
+          root.querySelectorAll('video, audio').forEach(function(el) { el.pause(); });
+        }
+        document.addEventListener('DOMContentLoaded', function() { pauseAll(document); }, true);
+        var obs = new MutationObserver(function(mutations) {
+          mutations.forEach(function(m) {
+            m.addedNodes.forEach(function(n) {
+              if (n.nodeType !== 1) return;
+              if (n.tagName === 'VIDEO' || n.tagName === 'AUDIO') n.pause();
+              else if (n.querySelectorAll) pauseAll(n);
+            });
+          });
+        });
+        // Observer starts immediately; document.body may not exist yet in
+        // very early scripts, so defer to documentElement as fallback.
+        var target = document.body || document.documentElement;
+        if (target) obs.observe(target, { childList: true, subtree: true });
+      })();
+    `
+
+    try { wc.debugger.attach('1.3') } catch (_) { /* already attached */ }
+    wc.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: startupScript }).catch(() => {})
+    // Apply immediately for the page that is already loaded when trackView is called.
+    wc.executeJavaScript(startupScript).catch(() => {})
+  }
+
+  /**
+   * Cleanup when context is destroyed.
+   * Also destroys any BrowserViews created during this context's lifetime.
    */
   destroy(): void {
     this.disableMonitoring()
+
+    // Destroy owned views (scoped contexts only -- singleton has no owned views)
+    for (const viewId of this.ownedViewIds) {
+      try {
+        browserViewManager.destroy(viewId)
+      } catch (_e) {
+        // View may already be destroyed
+      }
+    }
+    this.ownedViewIds.clear()
+
     this.activeViewId = null
     this.lastSnapshot = null
     this.mainWindow = null
@@ -1095,5 +1393,24 @@ function parseKey(key: string): {
   }
 }
 
-// Singleton instance
+/**
+ * Create a scoped BrowserContext for automation runs.
+ *
+ * A scoped context has its own activeViewId tracking (isolated from the global
+ * singleton and other scoped contexts) but shares the same browserViewManager
+ * and therefore the same Electron session (persist:browser) and cookies.
+ *
+ * Lifecycle: create before the run, call `destroy()` after the run.
+ * `destroy()` also cleans up any BrowserViews created during the scope.
+ */
+export function createScopedBrowserContext(mainWindow: BrowserWindow | null): BrowserContext {
+  const scoped = new BrowserContext()
+  scoped.markAsScoped()
+  if (mainWindow) {
+    scoped.initialize(mainWindow)
+  }
+  return scoped
+}
+
+// Singleton instance (used for interactive user-facing browser)
 export const browserContext = new BrowserContext()

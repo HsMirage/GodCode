@@ -66,7 +66,7 @@ export const listConsoleMessagesTool: BrowserTool = {
         type: 'array',
         description:
           'Filter messages to only return messages of the specified resource types. When omitted or empty, returns all messages.',
-        // @ts-ignore
+        // Schema enum tuple cast for runtime validator compatibility
         items: {
           type: 'string',
           enum: FILTERABLE_MESSAGE_TYPES as unknown as string[]

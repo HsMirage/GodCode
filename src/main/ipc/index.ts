@@ -26,7 +26,9 @@ import { handleTaskCreate, handleTaskGet, handleTaskList, handleTaskUpdate } fro
 import {
   handleTaskContinuationAbort,
   handleTaskContinuationGetStatus,
-  handleTaskContinuationSetTodos
+  handleTaskContinuationSetTodos,
+  handleTaskContinuationGetConfig,
+  handleTaskContinuationSetConfig
 } from './handlers/task-continuation'
 import { registerSpaceHandlers } from './handlers/space'
 import { registerArtifactHandlers } from './handlers/artifact'
@@ -52,11 +54,22 @@ import {
   handleCategoryBindingReset
 } from './handlers/binding'
 import { handleAgentRunList, handleAgentRunGet, handleAgentRunGetLogs } from './handlers/agent-run'
-import { handleSettingGet, handleSettingSet, handleSettingGetAll } from './handlers/setting'
+import {
+  handleSettingGet,
+  handleSettingSet,
+  handleSettingGetAll,
+  handleSettingGetResolved,
+  handleSettingSchemaList
+} from './handlers/setting'
 import { registerFileTreeHandlers } from './handlers/file-tree'
 import { registerSessionContinuityHandlers } from './handlers/session-continuity'
-import { handleWorkflowObservabilityGet } from './handlers/workflow-observability'
+import {
+  handleWorkflowObservabilityGet,
+  handleHookGovernanceGet,
+  handleHookGovernanceSet
+} from './handlers/workflow-observability'
 import { registerBackgroundTaskHandlers } from './handlers/background-task'
+import { handleSkillCommandItems } from './handlers/skill'
 import { INVOKE_CHANNELS } from '@/shared/ipc-channels'
 
 export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
@@ -81,6 +94,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle(INVOKE_CHANNELS.MESSAGE_LIST, handleMessageList)
   ipcMain.handle(INVOKE_CHANNELS.MESSAGE_ABORT, handleMessageAbort)
 
+  // Skill handlers
+  ipcMain.handle(INVOKE_CHANNELS.SKILL_COMMAND_ITEMS, handleSkillCommandItems)
+
   // Provider cache handlers
   ipcMain.handle(INVOKE_CHANNELS.PROVIDER_CACHE_GET_STATS, handleProviderCacheGetStats)
   ipcMain.handle(INVOKE_CHANNELS.PROVIDER_CACHE_IS_CONNECTED, handleProviderCacheIsConnected)
@@ -100,6 +116,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle(INVOKE_CHANNELS.TASK_CONTINUATION_GET_STATUS, handleTaskContinuationGetStatus)
   ipcMain.handle(INVOKE_CHANNELS.TASK_CONTINUATION_ABORT, handleTaskContinuationAbort)
   ipcMain.handle(INVOKE_CHANNELS.TASK_CONTINUATION_SET_TODOS, handleTaskContinuationSetTodos)
+  ipcMain.handle(INVOKE_CHANNELS.TASK_CONTINUATION_GET_CONFIG, handleTaskContinuationGetConfig)
+  ipcMain.handle(INVOKE_CHANNELS.TASK_CONTINUATION_SET_CONFIG, handleTaskContinuationSetConfig)
 
   // Space handlers
   registerSpaceHandlers()
@@ -140,6 +158,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
 
   // Workflow Observability handlers
   ipcMain.handle(INVOKE_CHANNELS.WORKFLOW_OBSERVABILITY_GET, handleWorkflowObservabilityGet)
+  ipcMain.handle(INVOKE_CHANNELS.HOOK_GOVERNANCE_GET, handleHookGovernanceGet)
+  ipcMain.handle(INVOKE_CHANNELS.HOOK_GOVERNANCE_SET, handleHookGovernanceSet)
 
   // Background task handlers
   registerBackgroundTaskHandlers()
@@ -148,6 +168,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle(INVOKE_CHANNELS.SETTING_GET, handleSettingGet)
   ipcMain.handle(INVOKE_CHANNELS.SETTING_SET, handleSettingSet)
   ipcMain.handle(INVOKE_CHANNELS.SETTING_GET_ALL, handleSettingGetAll)
+  ipcMain.handle(INVOKE_CHANNELS.SETTING_GET_RESOLVED, handleSettingGetResolved)
+  ipcMain.handle(INVOKE_CHANNELS.SETTING_SCHEMA_LIST, handleSettingSchemaList)
 
   // Session Continuity handlers
   registerSessionContinuityHandlers()

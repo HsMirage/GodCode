@@ -25,7 +25,6 @@ export const takeSnapshotTool: BrowserTool = {
   },
   execute: async (params, context) => {
     const { webContents } = context
-    const verbose = (params.verbose as boolean) || false
     const filePath = params.filePath as string | undefined
 
     if (!webContents) {
@@ -86,7 +85,7 @@ export const takeScreenshotTool: BrowserTool = {
       format: {
         type: 'string',
         description: 'Type of format to save the screenshot as. Default is "png"',
-        // @ts-ignore
+        // Schema typing is broader at runtime
         enum: ['png', 'jpeg', 'webp']
       },
       quality: {
@@ -185,7 +184,7 @@ export const evaluateScriptTool: BrowserTool = {
       args: {
         type: 'array',
         description: 'An optional list of arguments to pass to the function.',
-        // @ts-ignore
+        // Schema typing is broader at runtime
         items: {
           type: 'object',
           properties: {

@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import {
   backgroundTaskManager,
   getOutputChunks,
+  getOutputSize,
   cancelTask,
   type BackgroundTask,
   type OutputChunk
@@ -18,6 +19,21 @@ interface BackgroundTaskGetOutputInput {
 
 interface BackgroundTaskCancelInput {
   taskId: string
+}
+
+interface BackgroundTaskStats {
+  total: number
+  running: number
+  completed: number
+  error: number
+  cancelled: number
+}
+
+interface BackgroundTaskOutputMeta {
+  total: number
+  stdout: number
+  stderr: number
+  truncated: boolean
 }
 
 function normalizeTask(task: BackgroundTask) {
@@ -42,6 +58,25 @@ function normalizeChunks(chunks: OutputChunk[]) {
     data: chunk.data,
     timestamp: chunk.timestamp.toISOString()
   }))
+}
+
+function normalizeStats(stats: BackgroundTaskStats) {
+  return {
+    total: stats.total,
+    running: stats.running,
+    completed: stats.completed,
+    error: stats.error,
+    cancelled: stats.cancelled
+  }
+}
+
+function normalizeOutputMeta(meta: BackgroundTaskOutputMeta) {
+  return {
+    total: meta.total,
+    stdout: meta.stdout,
+    stderr: meta.stderr,
+    truncated: meta.truncated
+  }
 }
 
 export function registerBackgroundTaskHandlers(): void {
@@ -103,14 +138,31 @@ export function registerBackgroundTaskHandlers(): void {
 
       const afterIndex = Math.max(0, input.afterIndex ?? 0)
       const output = getOutputChunks(input.taskId, afterIndex)
+      const outputMeta = getOutputSize(input.taskId)
 
       return {
         success: true,
         data: {
           task: normalizeTask(task),
           chunks: normalizeChunks(output.chunks),
-          nextIndex: output.nextIndex
+          nextIndex: output.nextIndex,
+          outputMeta: normalizeOutputMeta(outputMeta)
         }
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }
+  })
+
+  ipcMain.handle('background-task:stats', async () => {
+    try {
+      const stats = backgroundTaskManager.getStats()
+      return {
+        success: true,
+        data: normalizeStats(stats)
       }
     } catch (error) {
       return {

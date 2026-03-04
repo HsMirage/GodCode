@@ -10,6 +10,8 @@ import { initAIBrowserStoreListeners } from './stores/ai-browser.store'
 import { initPerfStoreListeners } from './stores/perf.store'
 import { useSpaceStore } from './stores/space.store'
 import { useSearchStore } from './stores/search.store'
+import { useAppsStore } from './stores/apps.store'
+import { useAppsPageStore } from './stores/apps-page.store'
 import { SplashScreen } from './components/splash/SplashScreen'
 import { SetupFlow } from './components/setup/SetupFlow'
 import { GitBashSetup } from './components/setup/GitBashSetup'
@@ -17,7 +19,10 @@ import { SearchPanel } from './components/search/SearchPanel'
 import { SearchHighlightBar } from './components/search/SearchHighlightBar'
 import { OnboardingOverlay } from './components/onboarding'
 import { UpdateNotification } from './components/updater/UpdateNotification'
+import { NotificationToast } from './components/notification/NotificationToast'
+import { useNotificationStore } from './stores/notification.store'
 import { api } from './api'
+import { useTranslation } from './i18n'
 import type { AgentEventBase, Thought, ToolCall, HaloConfig, AgentErrorType, Question } from './types'
 import { hasAnyAISource } from './types'
 
@@ -26,6 +31,7 @@ import { hasAnyAISource } from './types'
 const HomePage = lazy(() => import('./pages/HomePage').then(m => ({ default: m.HomePage })))
 const SpacePage = lazy(() => import('./pages/SpacePage').then(m => ({ default: m.SpacePage })))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
+const AppsPage = lazy(() => import('./pages/AppsPage').then(m => ({ default: m.AppsPage })))
 
 // Page loading fallback - minimal spinner that matches app style
 function PageLoader() {
@@ -71,7 +77,8 @@ function applyTheme(theme: 'light' | 'dark' | 'system') {
 }
 
 export default function App() {
-  const { view, config, initialize, setMcpStatus, setView, setConfig } = useAppStore()
+  const { t } = useTranslation()
+  const { view, config, initialize, setMcpStatus, setView, setConfig, completeDeferredGitBashCheck } = useAppStore()
   const {
     handleAgentMessage,
     handleAgentToolCall,
@@ -90,8 +97,12 @@ export default function App() {
   const { initialize: initializeOnboarding } = useOnboardingStore()
   const { isSearchOpen, closeSearch, isHighlightBarVisible, hideHighlightBar, goToPreviousResult, goToNextResult, openSearch } = useSearchStore()
 
+  // Apps system real-time event handlers
+  const { handleStatusChanged, handleNewActivityEntry, handleNewEscalation } = useAppsStore()
+  const { setInitialAppId } = useAppsPageStore()
+
   // For search result navigation
-  const { spaces, haloSpace, setCurrentSpace: setSpaceStoreCurrentSpace } = useSpaceStore()
+  const { spaces, haloSpace, setCurrentSpace: setSpaceStoreCurrentSpace, refreshCurrentSpace } = useSpaceStore()
 
   // Initialize app on mount - wait for backend extended services to be ready
   // Uses Pull+Push pattern for reliable initialization:
@@ -132,7 +143,16 @@ export default function App() {
     // This is the normal startup flow for fresh app launch
     const unsubscribe = api.onBootstrapExtendedReady((data) => {
       console.log('[App] Received bootstrap:extended-ready', data)
-      doInit('event')
+      if (!initialized) {
+        // Normal path: extended services ready before timeout
+        doInit('event')
+      } else {
+        // Timeout already fired and initialize() ran. Extended services are now ready,
+        // so complete any deferred checks (e.g. git-bash on Windows) that failed
+        // because IPC handlers weren't registered yet during the timeout-triggered init.
+        console.log('[App] Extended ready after timeout, completing deferred checks...')
+        completeDeferredGitBashCheck()
+      }
     })
 
     // 3. Timeout: Fallback protection if something goes wrong
@@ -148,7 +168,7 @@ export default function App() {
       unsubscribe()
       clearTimeout(fallbackTimeout)
     }
-  }, [initialize, initializeOnboarding])
+  }, [initialize, initializeOnboarding, completeDeferredGitBashCheck])
 
   // Theme switching
   useEffect(() => {
@@ -276,6 +296,73 @@ export default function App() {
     setMcpStatus
   ])
 
+  // Register Apps system real-time event listeners
+  // These run globally so events are captured even when AppsPage is not mounted
+  useEffect(() => {
+    console.log('[App] Registering app event listeners')
+
+    const unsubStatus = api.onAppStatusChanged((data) => {
+      const { appId, state } = data as { appId: string; state: unknown }
+      handleStatusChanged(appId, state as Parameters<typeof handleStatusChanged>[1])
+    })
+
+    const unsubActivity = api.onAppActivityEntry((data) => {
+      const { appId, entry } = data as { appId: string; entry: unknown }
+      handleNewActivityEntry(appId, entry as Parameters<typeof handleNewActivityEntry>[1])
+    })
+
+    const unsubEscalation = api.onAppEscalation((data) => {
+      const { appId, entryId, question, choices } = data as {
+        appId: string; entryId: string; question: string; choices: string[]
+      }
+      handleNewEscalation(appId, entryId, question, choices)
+    })
+
+    // Deep navigation: notification click → navigate to specific App's Activity Thread
+    const unsubNavigate = api.onAppNavigate((data) => {
+      const { appId } = data as { appId: string }
+      if (appId) {
+        console.log(`[App] Notification deep navigation: appId=${appId}`)
+        setInitialAppId(appId)
+        setView('apps')
+      }
+    })
+
+    return () => {
+      unsubStatus()
+      unsubActivity()
+      unsubEscalation()
+      unsubNavigate()
+    }
+  }, [handleStatusChanged, handleNewActivityEntry, handleNewEscalation, setInitialAppId, setView])
+
+  // Register in-app toast listener (notification:toast from main process)
+  const showToast = useNotificationStore((s) => s.show)
+  useEffect(() => {
+    const unsub = api.onNotificationToast((data) => {
+      const { title, body, variant, duration, appId } = data as {
+        title: string; body?: string; variant?: 'default' | 'success' | 'warning' | 'error'; duration?: number; appId?: string
+      }
+      showToast({
+        title,
+        body,
+        variant: variant ?? 'default',
+        duration: duration ?? 6000,
+        // If appId is provided, add a "View" action for deep navigation
+        ...(appId ? {
+          action: {
+            label: t('View'),
+            onClick: () => {
+              setInitialAppId(appId)
+              setView('apps')
+            },
+          },
+        } : {}),
+      })
+    })
+    return () => { unsub() }
+  }, [showToast, setInitialAppId, setView, t])
+
   // Handle search keyboard shortcuts with debouncing for navigation
   // Use ref to maintain debounce timer across renders
   const navigationDebounceTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -386,6 +473,7 @@ export default function App() {
           // Update spaceStore
           console.log(`[App] Updating space to: ${targetSpace.name}`)
           setSpaceStoreCurrentSpace(targetSpace)
+          refreshCurrentSpace()  // Load full space data (preferences) from backend
 
           // Update chatStore
           setChatCurrentSpace(spaceId)
@@ -423,7 +511,7 @@ export default function App() {
 
     window.addEventListener('search:navigate-to-result', handleNavigateToResult)
     return () => window.removeEventListener('search:navigate-to-result', handleNavigateToResult)
-  }, [currentSpaceId, spaces, haloSpace, setSpaceStoreCurrentSpace, setChatCurrentSpace, loadConversations, selectConversation])
+  }, [currentSpaceId, spaces, haloSpace, setSpaceStoreCurrentSpace, refreshCurrentSpace, setChatCurrentSpace, loadConversations, selectConversation])
 
   // Handle Git Bash setup completion
   const handleGitBashSetupComplete = async (installed: boolean) => {
@@ -478,6 +566,12 @@ export default function App() {
             <SettingsPage />
           </Suspense>
         )
+      case 'apps':
+        return (
+          <Suspense fallback={<PageLoader />}>
+            <AppsPage />
+          </Suspense>
+        )
       default:
         return <SplashScreen />
     }
@@ -492,8 +586,10 @@ export default function App() {
       <SearchHighlightBar />
       {/* Onboarding overlay - renders on top of everything */}
       <OnboardingOverlay />
-      {/* Update notification - shows when update is downloaded */}
+      {/* Update notification listener - pushes toasts into notification store */}
       <UpdateNotification />
+      {/* Unified in-app toast notifications */}
+      <NotificationToast />
     </div>
   )
 }

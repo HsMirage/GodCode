@@ -1,9 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
   Search,
-  Download,
-  Calendar,
-  Filter,
   Eye,
   CheckCircle,
   XCircle,
@@ -38,7 +35,11 @@ interface AuditLogFilter {
   success?: boolean
 }
 
-export function AuditLogViewer() {
+interface AuditLogViewerProps {
+  defaultActionFilter?: string
+}
+
+export function AuditLogViewer({ defaultActionFilter }: AuditLogViewerProps) {
   const [logs, setLogs] = useState<AuditLogEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedLog, setSelectedLog] = useState<AuditLogEntry | null>(null)
@@ -49,8 +50,12 @@ export function AuditLogViewer() {
   const [total, setTotal] = useState(0)
 
   // Filters
-  const [filter, setFilter] = useState<AuditLogFilter>({})
-  const [actionInput, setActionInput] = useState('')
+  const [filter, setFilter] = useState<AuditLogFilter>({
+    action: defaultActionFilter
+  })
+  const [actionInput, setActionInput] = useState(defaultActionFilter ?? '')
+  const [startDateInput, setStartDateInput] = useState('')
+  const [endDateInput, setEndDateInput] = useState('')
 
   // Load data
   const fetchLogs = async () => {
@@ -85,6 +90,19 @@ export function AuditLogViewer() {
   }
 
   useEffect(() => {
+    if (!defaultActionFilter) {
+      return
+    }
+
+    setActionInput(defaultActionFilter)
+    setFilter(prev => ({
+      ...prev,
+      action: defaultActionFilter
+    }))
+    setPage(0)
+  }, [defaultActionFilter])
+
+  useEffect(() => {
     fetchLogs()
   }, [page, filter]) // Re-fetch on page/filter change
 
@@ -93,7 +111,9 @@ export function AuditLogViewer() {
     try {
       const result = (await window.codeall.invoke('audit-log:export', format, {
         ...filter,
-        action: actionInput || undefined
+        action: actionInput || undefined,
+        startDate: startDateInput ? new Date(startDateInput) : undefined,
+        endDate: endDateInput ? new Date(endDateInput) : undefined
       })) as { success: boolean; filePath: string }
       if (result.success) {
         // Could show toast here
@@ -106,8 +126,13 @@ export function AuditLogViewer() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
+    setFilter(prev => ({
+      ...prev,
+      action: actionInput || undefined,
+      startDate: startDateInput ? new Date(startDateInput) : undefined,
+      endDate: endDateInput ? new Date(endDateInput) : undefined
+    }))
     setPage(0) // Reset to first page
-    fetchLogs()
   }
 
   return (
@@ -173,6 +198,26 @@ export function AuditLogViewer() {
               <option value="true">Success</option>
               <option value="false">Failed</option>
             </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-slate-400">Start Time</label>
+            <input
+              type="datetime-local"
+              value={startDateInput}
+              onChange={e => setStartDateInput(e.target.value)}
+              className="h-[38px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-slate-400">End Time</label>
+            <input
+              type="datetime-local"
+              value={endDateInput}
+              onChange={e => setEndDateInput(e.target.value)}
+              className="h-[38px] rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none"
+            />
           </div>
 
           <button

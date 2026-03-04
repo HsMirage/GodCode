@@ -27,7 +27,6 @@ import type { AgentPromptTemplate } from './prompts/types'
 
 export interface AgentConfig {
   type: 'readonly' | 'executor'
-  model: string
   tools?: string[]
   promptTemplate?: AgentPromptTemplate
 }
@@ -60,7 +59,6 @@ const agentsRegistry = AGENT_DEFINITIONS.reduce(
 
     const config: AgentConfig = {
       type,
-      model: def.defaultModel,
       tools: def.tools,
       promptTemplate: PROMPT_MAP[def.code]
     }

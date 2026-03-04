@@ -2,7 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import { logger } from '../../../shared/logger'
 import { globTool } from '../tools/builtin/glob'
-import type { HookConfig, HookContext, MessageInfo } from './types'
+import type {
+  HookConfig,
+  HookContext,
+  MessageInfo,
+  MessageInjectionResult
+} from './types'
 
 const RULES_PATTERN = '.sisyphus/rules/*.md'
 const RULES_INJECTED_MARKER = '[WORKSPACE RULES INJECTED]'
@@ -82,12 +87,8 @@ export function createRulesInjectorHook(): HookConfig<'onMessageCreate'> {
     callback: async (
       context: HookContext,
       message: MessageInfo
-    ): Promise<{ modifiedContent?: string }> => {
+    ): Promise<{ inject?: MessageInjectionResult }> => {
       if (message.role !== 'system') {
-        return {}
-      }
-
-      if (message.content.includes(RULES_INJECTED_MARKER)) {
         return {}
       }
 
@@ -102,7 +103,12 @@ export function createRulesInjectorHook(): HookConfig<'onMessageCreate'> {
       }
 
       return {
-        modifiedContent: `${message.content}\n\n${rulesBlock}`
+        inject: {
+          type: 'workspace-rules',
+          source: 'rules-injector',
+          priority: 5,
+          content: rulesBlock
+        }
       }
     }
   }

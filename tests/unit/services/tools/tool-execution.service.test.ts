@@ -58,7 +58,23 @@ describe('ToolExecutionService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(defaultPolicy.isAllowed).mockReturnValue(true)
+    vi.mocked(toolRegistry.resolveName).mockImplementation((name: string) => name)
+    vi.mocked(toolRegistry.suggestName).mockReturnValue(undefined)
+    vi.mocked(defaultPolicy.getExecutionPreview).mockImplementation(
+      (toolName: string, requestedName?: string) => ({
+        requestedName: requestedName ?? toolName,
+        resolvedName: toolName,
+        template: 'balanced',
+        permission: 'auto',
+        source: 'default',
+        dangerous: false,
+        highRisk: false,
+        highRiskEnforced: false,
+        requiresConfirmation: false,
+        allowedByPolicy: true,
+        allowedWithoutConfirmation: true
+      })
+    )
     vi.mocked(toolRegistry.get).mockReturnValue(undefined)
     vi.mocked(toolRegistry.list).mockReturnValue([])
 
@@ -120,7 +136,8 @@ describe('ToolExecutionService', () => {
         properties: {
           input: { type: 'string', description: 'Input' }
         },
-        required: ['input']
+        required: ['input'],
+        additionalProperties: false
       })
     })
   })
@@ -138,12 +155,49 @@ describe('ToolExecutionService', () => {
 
       expect(output.success).toBe(true)
       expect(output.result).toEqual(mockResult)
+      expect(output.permissionPreview).toEqual(
+        expect.objectContaining({
+          requestedName: 'browser_test',
+          resolvedName: 'browser_test',
+          allowedByPolicy: true
+        })
+      )
       expect(output.durationMs).toBeGreaterThanOrEqual(0)
       expect(mockBrowserTool.execute).toHaveBeenCalledWith({ url: 'https://test.com' }, mockContext)
     })
 
+    it('should resolve alias before policy check and lookup', async () => {
+      service.registerBrowserTools([mockBrowserTool])
+      vi.mocked(toolRegistry.resolveName).mockReturnValue('browser_test')
+      vi.mocked(mockBrowserTool.execute).mockResolvedValue({ success: true })
+
+      const output = await service.executeTool(
+        { id: 'call-1', name: 'read', arguments: { url: 'https://test.com' } },
+        mockContext
+      )
+
+      expect(output.success).toBe(true)
+      expect(toolRegistry.resolveName).toHaveBeenCalledWith('read')
+      expect(defaultPolicy.getExecutionPreview).toHaveBeenCalledWith('browser_test', 'read')
+      expect(mockBrowserTool.execute).toHaveBeenCalled()
+    })
+
     it('should deny execution if policy forbids', async () => {
-      vi.mocked(defaultPolicy.isAllowed).mockReturnValue(false)
+      vi.mocked(defaultPolicy.getExecutionPreview).mockReturnValue({
+        requestedName: 'forbidden_tool',
+        resolvedName: 'forbidden_tool',
+        template: 'safe',
+        permission: 'deny',
+        source: 'template',
+        dangerous: true,
+        highRisk: true,
+        highRiskEnforced: false,
+        requiresConfirmation: false,
+        allowedByPolicy: false,
+        allowedWithoutConfirmation: false,
+        reason: 'Permission template or custom policy denies this tool',
+        confirmReason: 'Safe template denies write operations'
+      })
 
       const output = await service.executeTool(
         { id: 'call-1', name: 'forbidden_tool', arguments: {} },
@@ -151,6 +205,15 @@ describe('ToolExecutionService', () => {
       )
 
       expect(output.success).toBe(false)
+      expect(output.permissionPreview).toEqual(
+        expect.objectContaining({
+          requestedName: 'forbidden_tool',
+          resolvedName: 'forbidden_tool',
+          allowedByPolicy: false,
+          template: 'safe',
+          permission: 'deny'
+        })
+      )
       expect(output.error).toContain('not allowed by policy')
     })
 
@@ -162,6 +225,18 @@ describe('ToolExecutionService', () => {
 
       expect(output.success).toBe(false)
       expect(output.error).toContain('not found')
+    })
+
+    it('should include suggestion when tool is not found', async () => {
+      vi.mocked(toolRegistry.suggestName).mockReturnValue('file_read')
+
+      const output = await service.executeTool(
+        { id: 'call-1', name: 'read_file', arguments: {} },
+        mockContext
+      )
+
+      expect(output.success).toBe(false)
+      expect(output.error).toContain("Did you mean 'file_read'?")
     })
 
     it('should handle tool execution errors', async () => {
@@ -270,6 +345,23 @@ describe('ToolExecutionService', () => {
       expect(result.outputs).toHaveLength(2)
       expect(result.allSucceeded).toBe(false)
       expect(mockBrowserTool.execute).toHaveBeenCalledTimes(2)
+    })
+
+    it('should allow alias in scoped allowlist', async () => {
+      service.registerBrowserTools([mockBrowserTool])
+      vi.mocked(toolRegistry.resolveName).mockImplementation((name: string) => {
+        if (name === 'read') return 'browser_test'
+        return name
+      })
+      vi.mocked(mockBrowserTool.execute).mockResolvedValue({ success: true })
+
+      await service.withAllowedTools(['read'], async () => {
+        const result = await service.executeToolCalls(
+          [{ id: 'call-1', name: 'read', arguments: { url: 'https://test.com' } }],
+          mockContext
+        )
+        expect(result.allSucceeded).toBe(true)
+      })
     })
   })
 
