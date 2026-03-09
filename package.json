@@ -12,6 +12,8 @@
     "build": "electron-vite build",
     "prisma:clean": "node -e \"import('node:fs').then(fs=>fs.rmSync('node_modules/.prisma',{ recursive: true, force: true }))\"",
     "prisma:generate": "pnpm run prisma:clean && prisma generate",
+    "verify:ipc-alignment": "pnpm exec tsx scripts/verify-ipc-alignment.ts",
+    "verify:release-smoke": "pnpm exec tsx scripts/release-smoke-check.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",

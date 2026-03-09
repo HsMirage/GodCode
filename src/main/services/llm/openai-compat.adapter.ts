@@ -1,4 +1,5 @@
-import { OpenAIAdapter } from './openai.adapter'
+import type { LLMConfig, LLMConfigApiProtocol } from './adapter.interface'
+import { OpenAIAdapter, resolveApiProtocol } from './openai.adapter'
 import { normalizeOpenAICompatibleBaseURL } from './openai-base-url'
 
 export class OpenAICompatAdapter extends OpenAIAdapter {
@@ -8,5 +9,9 @@ export class OpenAICompatAdapter extends OpenAIAdapter {
     }
     const normalizedURL = normalizeOpenAICompatibleBaseURL(baseURL)
     super(apiKey, normalizedURL)
+  }
+
+  protected override resolveApiProtocol(config: LLMConfig): LLMConfigApiProtocol {
+    return resolveApiProtocol(config, 'chat/completions')
   }
 }

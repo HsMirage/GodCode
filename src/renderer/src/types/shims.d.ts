@@ -3,6 +3,12 @@ declare module '../../types/domain' {
 }
 
 import type { Space, Session, Message, Model, Task, Artifact } from '../../types/domain'
+import type {
+  HookGovernanceAuditRecord,
+  HookGovernanceStatus,
+  HookGovernanceUpdateInput,
+  HookGovernanceUpdateResult
+} from '../../../shared/hook-governance-contract'
 
 type ModelConfigPayload = {
   thinkingMode?: boolean
@@ -65,6 +71,38 @@ type SkillCommandInvocation = {
   rawInput?: string
 }
 
+type RecoveryTrackingMetadata = {
+  recoverySource: 'crash-recovery' | 'manual-resume' | 'auto-resume'
+  recoveryStage:
+    | 'detected'
+    | 'session-recovery'
+    | 'task-resumption'
+    | 'context-rebuild'
+    | 'prompt-ready'
+    | 'executing'
+    | 'completed'
+    | 'failed'
+    | 'aborted'
+  resumeReason:
+    | 'crash-detected'
+    | 'interrupted-tasks'
+    | 'in-progress-todo'
+    | 'pending-todos'
+    | 'pending-plan-tasks'
+    | 'session-active'
+    | 'no-pending-work'
+    | 'recovery-failed'
+  resumeAction:
+    | 'show-recovery-dialog'
+    | 'restore-session'
+    | 'resume-tasks'
+    | 'rebuild-context'
+    | 'send-resume-prompt'
+    | 'auto-send-resume-prompt'
+    | 'none'
+  recoveryUpdatedAt: string
+}
+
 interface CodeAllAPI {
   invoke(channel: 'ping'): Promise<string>
 
@@ -116,8 +154,23 @@ interface CodeAllAPI {
   invoke(channel: 'session:get-or-create-default', data?: { spaceId?: string }): Promise<Session>
   invoke(channel: 'session:list', spaceId?: string): Promise<Session[]>
   invoke(
+    channel: 'session:update',
+    data: {
+      id: string
+      spaceId?: string
+      title?: string
+      status?: Session['status']
+    }
+  ): Promise<Session>
+  invoke(
     channel: 'message:send',
-    data: { sessionId: string; content: string; agentCode?: string; skillCommand?: SkillCommandInvocation }
+    data: {
+      sessionId: string
+      content: string
+      agentCode?: string
+      skillCommand?: SkillCommandInvocation
+      resumeContext?: RecoveryTrackingMetadata
+    }
   ): Promise<Message>
   invoke(channel: 'message:list', sessionId: string): Promise<Message[]>
   invoke(channel: 'skill:command-items', input?: { query?: string }): Promise<SkillCommandItem[]>
@@ -131,6 +184,55 @@ interface CodeAllAPI {
     cancelledTaskRows: number
   }>
   invoke(channel: 'task:list', sessionId: string): Promise<Task[]>
+  invoke(
+    channel: 'tool-approval:list',
+    input?: { sessionId?: string; includeResolved?: boolean }
+  ): Promise<
+    Array<{
+      id: string
+      sessionId: string
+      taskId?: string
+      runId?: string
+      traceId?: string
+      toolCallId: string
+      toolName: string
+      requestedToolName: string
+      resolvedToolName: string
+      arguments: Record<string, unknown>
+      riskLevel: 'low' | 'medium' | 'high'
+      reason: string
+      status: 'pending_approval' | 'approved' | 'rejected' | 'expired'
+      requestedAt: string
+      resolvedAt?: string
+      decision?: 'pending_approval' | 'approved' | 'rejected' | 'expired'
+      decisionReason?: string
+    }>
+  >
+  invoke(
+    channel: 'tool-approval:resolve',
+    input: { requestId: string; decision: 'approved' | 'rejected'; reason?: string }
+  ): Promise<{
+    success: boolean
+    request: {
+      id: string
+      sessionId: string
+      taskId?: string
+      runId?: string
+      traceId?: string
+      toolCallId: string
+      toolName: string
+      requestedToolName: string
+      resolvedToolName: string
+      arguments: Record<string, unknown>
+      riskLevel: 'low' | 'medium' | 'high'
+      reason: string
+      status: 'pending_approval' | 'approved' | 'rejected' | 'expired'
+      requestedAt: string
+      resolvedAt?: string
+      decision?: 'pending_approval' | 'approved' | 'rejected' | 'expired'
+      decisionReason?: string
+    }
+  }>
   invoke(
     channel: 'background-task:list',
     input?: { sessionId?: string }
@@ -360,6 +462,30 @@ interface CodeAllAPI {
     channel: 'task:status-changed',
     callback: (data: { taskId: string; status: Task['status'] }) => void
   ): () => void
+  on(
+    channel: 'tool-approval:updated',
+    callback: (data: {
+      request: {
+        id: string
+        sessionId: string
+        taskId?: string
+        runId?: string
+        traceId?: string
+        toolCallId: string
+        toolName: string
+        requestedToolName: string
+        resolvedToolName: string
+        arguments: Record<string, unknown>
+        riskLevel: 'low' | 'medium' | 'high'
+        reason: string
+        status: 'pending_approval' | 'approved' | 'rejected' | 'expired'
+        requestedAt: string
+        resolvedAt?: string
+        decision?: 'pending_approval' | 'approved' | 'rejected' | 'expired'
+        decisionReason?: string
+      }
+    }) => void
+  ): () => void
 
   // Task Continuation Channels
   invoke(channel: 'task-continuation:get-status', sessionId: string): Promise<unknown>
@@ -459,39 +585,7 @@ interface CodeAllAPI {
   ): () => void
   on(
     channel: 'hook-audit:appended',
-    callback: (data: {
-      record: {
-        id: string
-        timestamp: string | Date
-        strategy: {
-          hookId: string
-          hookName: string
-          event: string
-          priority: number
-          enabled: boolean
-        }
-        execution: {
-          sessionId: string
-          workspaceDir: string
-          userId?: string
-          tool?: string
-          callId?: string
-          messageId?: string
-          messageRole?: 'user' | 'assistant' | 'system'
-          currentTokens?: number
-          maxTokens?: number
-          usagePercentage?: number
-          filePath?: string
-          errorType?: 'not_found' | 'multiple_matches' | 'same_content' | 'unknown'
-        }
-        result: {
-          success: boolean
-          duration: number
-          error?: string
-          returnValuePreview?: string
-        }
-      }
-    }) => void
+    callback: (data: { record: HookGovernanceAuditRecord }) => void
   ): () => void
   on(
     channel: 'background-task:started',
@@ -603,125 +697,8 @@ interface CodeAllAPI {
 
   // Workflow Observability Channels
   invoke(channel: 'workflow-observability:get', workflowTaskId: string): Promise<any>
-  invoke(channel: 'hook-governance:get'): Promise<{
-    initialized: boolean
-    stats: {
-      total: number
-      enabled: number
-      disabled: number
-      byEvent: Record<string, number>
-      totalExecutions: number
-      totalErrors: number
-    }
-    hooks: Array<{
-      id: string
-      name: string
-      event: string
-      enabled: boolean
-      priority: number
-      executionCount: number
-      errorCount: number
-    }>
-    recentExecutions: Array<{
-      id: string
-      timestamp: string | Date
-      strategy: {
-        hookId: string
-        hookName: string
-        event: string
-        priority: number
-        enabled: boolean
-      }
-      execution: {
-        sessionId: string
-        workspaceDir: string
-        userId?: string
-        tool?: string
-        callId?: string
-        messageId?: string
-        messageRole?: 'user' | 'assistant' | 'system'
-        currentTokens?: number
-        maxTokens?: number
-        usagePercentage?: number
-        filePath?: string
-        errorType?: 'not_found' | 'multiple_matches' | 'same_content' | 'unknown'
-      }
-      result: {
-        success: boolean
-        duration: number
-        status?: 'success' | 'error' | 'timeout' | 'circuit_open'
-        degraded?: boolean
-        error?: string
-        returnValuePreview?: string
-        circuitOpenUntil?: string | Date
-      }
-    }>
-  }>
-  invoke(
-    channel: 'hook-governance:set',
-    input: {
-      hooks: Array<{
-        id: string
-        enabled?: boolean
-        priority?: number
-      }>
-    }
-  ): Promise<{
-    success: boolean
-    updated: string[]
-    skipped: Array<{ id: string; reason: string }>
-    status: {
-      initialized: boolean
-      stats: {
-        total: number
-        enabled: number
-        disabled: number
-        byEvent: Record<string, number>
-        totalExecutions: number
-        totalErrors: number
-      }
-      hooks: Array<{
-        id: string
-        name: string
-        event: string
-        enabled: boolean
-        priority: number
-        executionCount: number
-        errorCount: number
-      }>
-      recentExecutions: Array<{
-        id: string
-        timestamp: string | Date
-        strategy: {
-          hookId: string
-          hookName: string
-          event: string
-          priority: number
-          enabled: boolean
-        }
-        execution: {
-          sessionId: string
-          workspaceDir: string
-          userId?: string
-          tool?: string
-          callId?: string
-          messageId?: string
-          messageRole?: 'user' | 'assistant' | 'system'
-          currentTokens?: number
-          maxTokens?: number
-          usagePercentage?: number
-          filePath?: string
-          errorType?: 'not_found' | 'multiple_matches' | 'same_content' | 'unknown'
-        }
-        result: {
-          success: boolean
-          duration: number
-          error?: string
-          returnValuePreview?: string
-        }
-      }>
-    }
-  }>
+  invoke(channel: 'hook-governance:get'): Promise<HookGovernanceStatus>
+  invoke(channel: 'hook-governance:set', input: HookGovernanceUpdateInput): Promise<HookGovernanceUpdateResult>
 
   // Enhanced Artifact Channels
   invoke(channel: 'artifact:get-diff', artifactId: string): Promise<string | null>

@@ -1,5 +1,29 @@
 import { create } from 'zustand'
 
+interface ToolCallPayload {
+  id: string
+  name: string
+  arguments?: Record<string, unknown>
+  result?: unknown
+  permissionPreview?: ToolPermissionPreview
+}
+
+export interface ToolPermissionPreview {
+  requestedName: string
+  resolvedName: string
+  template: 'safe' | 'balanced' | 'full'
+  permission: 'auto' | 'confirm' | 'deny'
+  source: 'default' | 'template' | 'custom' | 'fallback'
+  dangerous: boolean
+  highRisk: boolean
+  highRiskEnforced: boolean
+  requiresConfirmation: boolean
+  allowedByPolicy: boolean
+  allowedWithoutConfirmation: boolean
+  reason?: string
+  confirmReason?: string
+}
+
 /**
  * Tool call information during streaming
  */
@@ -9,6 +33,7 @@ export interface StreamingToolCall {
   status: 'pending' | 'running' | 'completed' | 'failed'
   arguments?: Record<string, unknown>
   result?: unknown
+  permissionPreview?: ToolPermissionPreview
   startedAt?: number
   completedAt?: number
 }
@@ -35,6 +60,9 @@ interface StreamingState {
   /** Map of sessionId -> streaming state */
   sessions: Map<string, SessionStreamState>
 
+  /** Keep streaming state only for the active session */
+  retainCurrentSession: (sessionId: string | null) => void
+
   /** Start streaming for a session */
   startStreaming: (sessionId: string) => void
 
@@ -45,10 +73,7 @@ interface StreamingState {
   toolStart: (sessionId: string, toolCall: { id: string; name: string }) => void
 
   /** Handle tool end event */
-  toolEnd: (
-    sessionId: string,
-    toolCall: { id: string; name: string; arguments?: Record<string, unknown>; result?: unknown }
-  ) => void
+  toolEnd: (sessionId: string, toolCall: ToolCallPayload) => void
 
   /** Handle error event */
   setError: (sessionId: string, error: { message: string; code?: string }) => void
@@ -78,12 +103,40 @@ const createDefaultSessionState = (): SessionStreamState => ({
   usage: null
 })
 
+function retainOnlyCurrentSession(
+  sessions: Map<string, SessionStreamState>,
+  sessionId: string | null
+): Map<string, SessionStreamState> {
+  if (!sessionId) {
+    return sessions.size === 0 ? sessions : new Map()
+  }
+
+  const current = sessions.get(sessionId)
+  if (!current) {
+    return sessions.size === 0 ? sessions : new Map()
+  }
+
+  if (sessions.size === 1 && sessions.has(sessionId)) {
+    return sessions
+  }
+
+  return new Map([[sessionId, current]])
+}
+
 export const useStreamingStore = create<StreamingState>((set, get) => ({
   sessions: new Map(),
 
+  retainCurrentSession: (sessionId: string | null) => {
+    set((state) => {
+      const nextSessions = retainOnlyCurrentSession(state.sessions, sessionId)
+      return nextSessions === state.sessions ? state : { sessions: nextSessions }
+    })
+  },
+
   startStreaming: (sessionId: string) => {
     set((state) => {
-      const newSessions = new Map(state.sessions)
+      const retainedSessions = retainOnlyCurrentSession(state.sessions, sessionId)
+      const newSessions = new Map(retainedSessions)
       newSessions.set(sessionId, {
         ...createDefaultSessionState(),
         isStreaming: true
@@ -127,10 +180,7 @@ export const useStreamingStore = create<StreamingState>((set, get) => ({
     })
   },
 
-  toolEnd: (
-    sessionId: string,
-    toolCall: { id: string; name: string; arguments?: Record<string, unknown>; result?: unknown }
-  ) => {
+  toolEnd: (sessionId: string, toolCall: ToolCallPayload) => {
     set((state) => {
       const newSessions = new Map(state.sessions)
       const current = newSessions.get(sessionId) || createDefaultSessionState()
@@ -141,6 +191,7 @@ export const useStreamingStore = create<StreamingState>((set, get) => ({
               status: 'completed' as const,
               arguments: toolCall.arguments,
               result: toolCall.result,
+              permissionPreview: toolCall.permissionPreview,
               completedAt: Date.now()
             }
           : tc

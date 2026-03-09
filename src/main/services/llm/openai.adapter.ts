@@ -28,16 +28,10 @@ import {
   type ToolExecutionOutput
 } from '@/main/services/tools/tool-execution.service'
 import { resolveLLMRuntimeConfig, type ResolvedLLMRuntimeConfig } from './runtime-config'
+import { getLLMRetryDecision } from './retry-utils'
 import { llmRetryNotifier } from './retry-notifier'
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
-const MAX_RECONNECT_DELAY_MS = 30_000
-
-const getReconnectDelay = (baseDelayMs: number, attempt: number): number => {
-  const safeBaseDelayMs = Math.max(500, baseDelayMs)
-  const factor = Math.min(Math.max(attempt - 1, 0), 6)
-  return Math.min(safeBaseDelayMs * Math.pow(2, factor), MAX_RECONNECT_DELAY_MS)
-}
 
 const hasUserCancellationMarker = (message: string): boolean => {
   const normalized = message.toLowerCase()
@@ -53,31 +47,6 @@ const isAbortRequested = (error: unknown, signal?: AbortSignal): boolean => {
   if (signal?.aborted) return true
   if (!(error instanceof Error)) return false
   return hasUserCancellationMarker(error.message)
-}
-
-const isRetryableApiError = (error: unknown): boolean => {
-  if (!(error instanceof Error)) return true
-  const message = error.message.toLowerCase()
-  return (
-    message.includes('timeout') ||
-    message.includes('timed out') ||
-    message.includes('network') ||
-    message.includes('fetch failed') ||
-    message.includes('econn') ||
-    message.includes('socket') ||
-    message.includes('connection') ||
-    message.includes('service unavailable') ||
-    message.includes('temporarily unavailable') ||
-    message.includes('overloaded') ||
-    message.includes('rate limit') ||
-    message.includes('too many requests') ||
-    message.includes('429') ||
-    message.includes('500') ||
-    message.includes('502') ||
-    message.includes('503') ||
-    message.includes('504') ||
-    message.includes('abort')
-  )
 }
 
 const toOpenAIMessages = (messages: Message[]): ChatCompletionMessageParam[] => {
@@ -245,6 +214,20 @@ const extractResponsesUsage = (
   }
 }
 
+const toUsageChunk = (usage: { prompt_tokens: number; completion_tokens: number }): LLMChunk => ({
+  content: '',
+  done: false,
+  type: 'usage',
+  usage: {
+    promptTokens: usage.prompt_tokens,
+    completionTokens: usage.completion_tokens,
+    totalTokens: usage.prompt_tokens + usage.completion_tokens
+  }
+})
+
+const hasUsage = (usage: { prompt_tokens: number; completion_tokens: number }): boolean =>
+  usage.prompt_tokens > 0 || usage.completion_tokens > 0
+
 const parseToolCalls = (toolCalls: ChatCompletionMessageFunctionToolCall[]): ToolCall[] => {
   return toolCalls.map(tc => {
     let args: Record<string, unknown> = {}
@@ -386,10 +369,16 @@ const truncateText = (text: string, maxLength = 280): string => {
   return `${text.slice(0, maxLength)}...`
 }
 
-const resolveApiProtocol = (config: LLMConfig): LLMConfigApiProtocol => {
-  const protocol = config.apiProtocol
+export const resolveApiProtocol = (
+  config: LLMConfig,
+  fallbackProtocol?: LLMConfigApiProtocol
+): LLMConfigApiProtocol => {
+  const protocol = typeof config.apiProtocol === 'string' ? config.apiProtocol.trim() : ''
   if (protocol === 'chat/completions' || protocol === 'responses') {
     return protocol
+  }
+  if (!protocol && fallbackProtocol) {
+    return fallbackProtocol
   }
   throw new Error(
     'MODEL_PROTOCOL_NOT_CONFIGURED: OpenAI-compatible 模型缺少 apiProtocol 配置。' +
@@ -437,6 +426,10 @@ export class OpenAIAdapter implements LLMAdapter {
     this.fallbackModel = ''
   }
 
+  protected resolveApiProtocol(config: LLMConfig): LLMConfigApiProtocol {
+    return resolveApiProtocol(config)
+  }
+
   async sendMessage(messages: Message[], config: LLMConfig): Promise<LLMResponse> {
     let openaiMessages: ChatCompletionMessageParam[] = toOpenAIMessages(messages)
     const runtime = resolveLLMRuntimeConfig(config)
@@ -444,7 +437,7 @@ export class OpenAIAdapter implements LLMAdapter {
     if (!model) {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
-    const protocol = resolveApiProtocol(config)
+    const protocol = this.resolveApiProtocol(config)
     if (protocol === 'responses') {
       return this.sendMessageWithResponses(messages, config, model, runtime)
     }
@@ -577,7 +570,10 @@ export class OpenAIAdapter implements LLMAdapter {
             viewId,
             webContents,
             workspaceDir: config.workspaceDir || process.cwd(),
-            sessionId: config.sessionId || ''
+            sessionId: config.sessionId || '',
+            traceId: config.traceId,
+            taskId: config.taskId,
+            runId: config.runId
           }
 
           const executionResult = await toolExecutionService.executeToolCalls(
@@ -625,25 +621,47 @@ export class OpenAIAdapter implements LLMAdapter {
             logger.info('OpenAI request aborted by user')
             throw error instanceof Error ? error : new Error('Request aborted by user')
           }
-          if (!isRetryableApiError(error)) {
+          const retryDecision = getLLMRetryDecision({
+            error,
+            attempt,
+            maxRetries: runtime.maxRetries,
+            baseDelayMs: runtime.baseDelayMs
+          })
+          if (!retryDecision.retryable) {
             throw error
+          }
+          if (!retryDecision.retryAllowed) {
+            logger.error('OpenAI request failed without retry continuation', {
+              error,
+              attempt,
+              maxAttempts: retryDecision.maxAttempts,
+              classification: retryDecision.classification,
+              nextAction: retryDecision.nextAction,
+              manualTakeoverRequired: retryDecision.manualTakeoverRequired
+            })
+            throw error instanceof Error ? error : new Error(String(error))
           }
 
           const errorMessage = error instanceof Error ? error.message : String(error)
-          const delay = getReconnectDelay(runtime.baseDelayMs, attempt)
           logger.warn(`OpenAI request failed (attempt ${attempt}), reconnecting`, {
             error,
-            delayMs: delay
+            delayMs: retryDecision.delayMs,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            maxAttempts: retryDecision.maxAttempts
           })
           llmRetryNotifier.notify({
             sessionId: config.sessionId,
             provider: 'openai',
             attempt,
-            delayMs: delay,
+            delayMs: retryDecision.delayMs,
             error: errorMessage,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            manualTakeoverRequired: retryDecision.manualTakeoverRequired,
             occurredAt: new Date()
           })
-          await sleep(delay)
+          await sleep(retryDecision.delayMs)
         }
       }
     }
@@ -666,6 +684,9 @@ export class OpenAIAdapter implements LLMAdapter {
     webContents: ReturnType<typeof browserViewManager.getWebContents>
     workspaceDir: string
     sessionId: string
+    traceId?: string
+    taskId?: string
+    runId?: string
   } {
     const viewId = 'default'
     const webContents = browserViewManager.getWebContents(viewId)
@@ -673,7 +694,10 @@ export class OpenAIAdapter implements LLMAdapter {
       viewId,
       webContents,
       workspaceDir: config.workspaceDir || process.cwd(),
-      sessionId: config.sessionId || ''
+      sessionId: config.sessionId || '',
+      traceId: config.traceId,
+      taskId: config.taskId,
+      runId: config.runId
     }
   }
 
@@ -786,25 +810,47 @@ export class OpenAIAdapter implements LLMAdapter {
             logger.info('Responses request aborted by user')
             throw error instanceof Error ? error : new Error('Request aborted by user')
           }
-          if (!isRetryableApiError(error)) {
+          const retryDecision = getLLMRetryDecision({
+            error,
+            attempt,
+            maxRetries: runtime.maxRetries,
+            baseDelayMs: runtime.baseDelayMs
+          })
+          if (!retryDecision.retryable) {
             throw error
+          }
+          if (!retryDecision.retryAllowed) {
+            logger.error('Responses request failed without retry continuation', {
+              error,
+              attempt,
+              maxAttempts: retryDecision.maxAttempts,
+              classification: retryDecision.classification,
+              nextAction: retryDecision.nextAction,
+              manualTakeoverRequired: retryDecision.manualTakeoverRequired
+            })
+            throw error instanceof Error ? error : new Error(String(error))
           }
 
           const errorMessage = error instanceof Error ? error.message : String(error)
-          const delay = getReconnectDelay(runtime.baseDelayMs, attempt)
           logger.warn(`Responses request failed (attempt ${attempt}), reconnecting`, {
             error,
-            delayMs: delay
+            delayMs: retryDecision.delayMs,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            maxAttempts: retryDecision.maxAttempts
           })
           llmRetryNotifier.notify({
             sessionId: config.sessionId,
             provider: 'openai',
             attempt,
-            delayMs: delay,
+            delayMs: retryDecision.delayMs,
             error: errorMessage,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            manualTakeoverRequired: retryDecision.manualTakeoverRequired,
             occurredAt: new Date()
           })
-          await sleep(delay)
+          await sleep(retryDecision.delayMs)
         }
       }
     }
@@ -828,6 +874,7 @@ export class OpenAIAdapter implements LLMAdapter {
     const tools = getResponsesTools(config.tools)
     let previousResponseId: string | undefined
     let pendingInput: ResponseInputItem[] | undefined
+    const totalUsage = { prompt_tokens: 0, completion_tokens: 0 }
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
       for (let attempt = 1; ; attempt++) {
@@ -905,6 +952,9 @@ export class OpenAIAdapter implements LLMAdapter {
 
             if (event.type === 'response.completed') {
               latestResponseId = event.response.id
+              const usage = extractResponsesUsage(event.response)
+              totalUsage.prompt_tokens += usage.prompt_tokens
+              totalUsage.completion_tokens += usage.completion_tokens
               continue
             }
 
@@ -952,6 +1002,9 @@ export class OpenAIAdapter implements LLMAdapter {
           }
 
           if (parsedToolCalls.length === 0) {
+            if (hasUsage(totalUsage)) {
+              yield toUsageChunk(totalUsage)
+            }
             yield { content: '', done: true, type: 'done' }
             return
           }
@@ -982,7 +1035,8 @@ export class OpenAIAdapter implements LLMAdapter {
                 id: output.toolCall.id,
                 name: output.toolCall.name,
                 arguments: output.toolCall.arguments,
-                result: output.result
+                result: output.result,
+                permissionPreview: output.permissionPreview
               }
             }
           }
@@ -1006,25 +1060,47 @@ export class OpenAIAdapter implements LLMAdapter {
             yield { content: '', done: true, type: 'done' }
             return
           }
-          if (!isRetryableApiError(error)) {
+          const retryDecision = getLLMRetryDecision({
+            error,
+            attempt,
+            maxRetries: runtime.maxRetries,
+            baseDelayMs: runtime.baseDelayMs
+          })
+          if (!retryDecision.retryable) {
             throw error
+          }
+          if (!retryDecision.retryAllowed) {
+            logger.error('Responses streaming failed without retry continuation', {
+              error,
+              attempt,
+              maxAttempts: retryDecision.maxAttempts,
+              classification: retryDecision.classification,
+              nextAction: retryDecision.nextAction,
+              manualTakeoverRequired: retryDecision.manualTakeoverRequired
+            })
+            throw error instanceof Error ? error : new Error(String(error))
           }
 
           const errorMessage = error instanceof Error ? error.message : String(error)
-          const delay = getReconnectDelay(runtime.baseDelayMs, attempt)
           logger.warn(`Responses streaming failed (attempt ${attempt}), reconnecting`, {
             error,
-            delayMs: delay
+            delayMs: retryDecision.delayMs,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            maxAttempts: retryDecision.maxAttempts
           })
           llmRetryNotifier.notify({
             sessionId: config.sessionId,
             provider: 'openai',
             attempt,
-            delayMs: delay,
+            delayMs: retryDecision.delayMs,
             error: errorMessage,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            manualTakeoverRequired: retryDecision.manualTakeoverRequired,
             occurredAt: new Date()
           })
-          await sleep(delay)
+          await sleep(retryDecision.delayMs)
         }
       }
     }
@@ -1050,13 +1126,14 @@ export class OpenAIAdapter implements LLMAdapter {
     if (!model) {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
-    const protocol = resolveApiProtocol(config)
+    const protocol = this.resolveApiProtocol(config)
     if (protocol === 'responses') {
       yield* this.streamMessageWithResponses(messages, config, model, runtime)
       return
     }
 
     const tools = getOpenAITools(config.tools)
+    const totalUsage = { prompt_tokens: 0, completion_tokens: 0 }
 
     logger.info('[OpenAIAdapter] streamMessage called', {
       model,
@@ -1091,7 +1168,8 @@ export class OpenAIAdapter implements LLMAdapter {
               temperature: config.temperature,
               max_tokens: config.maxTokens,
               tools: tools.length > 0 ? tools : undefined,
-              stream: true
+              stream: true,
+              stream_options: { include_usage: true }
             },
             { signal: controller.signal }
           )
@@ -1102,6 +1180,12 @@ export class OpenAIAdapter implements LLMAdapter {
           let assistantContent = ''
 
           for await (const chunk of stream) {
+            const chunkUsage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage
+            if (chunkUsage) {
+              totalUsage.prompt_tokens += chunkUsage.prompt_tokens ?? 0
+              totalUsage.completion_tokens += chunkUsage.completion_tokens ?? 0
+            }
+
             const choice = Array.isArray((chunk as { choices?: unknown }).choices)
               ? chunk.choices[0]
               : undefined
@@ -1175,6 +1259,9 @@ export class OpenAIAdapter implements LLMAdapter {
           // Check if we have tool calls to execute
           if (streamingToolCalls.size === 0) {
             // No tool calls - we're done
+            if (hasUsage(totalUsage)) {
+              yield toUsageChunk(totalUsage)
+            }
             yield { content: '', done: true, type: 'done' }
             return
           }
@@ -1235,7 +1322,8 @@ export class OpenAIAdapter implements LLMAdapter {
                 id: output.toolCall.id,
                 name: output.toolCall.name,
                 arguments: output.toolCall.arguments,
-                result: output.result
+                result: output.result,
+                permissionPreview: output.permissionPreview
               }
             }
           }
@@ -1287,25 +1375,47 @@ export class OpenAIAdapter implements LLMAdapter {
             yield { content: '', done: true, type: 'done' }
             return
           }
-          if (!isRetryableApiError(error)) {
+          const retryDecision = getLLMRetryDecision({
+            error,
+            attempt,
+            maxRetries: runtime.maxRetries,
+            baseDelayMs: runtime.baseDelayMs
+          })
+          if (!retryDecision.retryable) {
             throw error
+          }
+          if (!retryDecision.retryAllowed) {
+            logger.error('OpenAI streaming failed without retry continuation', {
+              error,
+              attempt,
+              maxAttempts: retryDecision.maxAttempts,
+              classification: retryDecision.classification,
+              nextAction: retryDecision.nextAction,
+              manualTakeoverRequired: retryDecision.manualTakeoverRequired
+            })
+            throw error instanceof Error ? error : new Error(String(error))
           }
 
           const errorMessage = error instanceof Error ? error.message : String(error)
-          const delay = getReconnectDelay(runtime.baseDelayMs, attempt)
           logger.warn(`OpenAI streaming failed (attempt ${attempt}), reconnecting`, {
             error,
-            delayMs: delay
+            delayMs: retryDecision.delayMs,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            maxAttempts: retryDecision.maxAttempts
           })
           llmRetryNotifier.notify({
             sessionId: config.sessionId,
             provider: 'openai',
             attempt,
-            delayMs: delay,
+            delayMs: retryDecision.delayMs,
             error: errorMessage,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            manualTakeoverRequired: retryDecision.manualTakeoverRequired,
             occurredAt: new Date()
           })
-          await sleep(delay)
+          await sleep(retryDecision.delayMs)
         }
       }
     }

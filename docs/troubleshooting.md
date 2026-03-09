@@ -98,3 +98,35 @@ CodeAll’s unified hook entry includes reliability protections:
 
 _Ultraworked with [Sisyphus](https://github.com/code-yeongyu/oh-my-opencode)_
 
+
+## 6. Browser Workbench Residue / Bounds Issues
+
+### Symptom: Browser panel is closed but the page is still visible
+
+This usually indicates the renderer panel has unmounted, but the underlying Electron `BrowserView` was not hidden in time.
+
+**Current behavior:**
+
+- Closing the browser panel hides the visible `BrowserView` during component unmount.
+- Switching sessions clears old browser tabs and closes the browser panel before entering the next session.
+
+**Troubleshooting Steps:**
+
+1. Re-open the browser panel and verify whether the active tab list is empty or stale.
+2. Switch to another session and back once; the old session's `BrowserView` should be destroyed during the session cleanup path.
+3. If the panel area looks blank after resizing, resize the right panel again or reopen the browser panel to force a fresh bounds sync.
+4. In development mode, inspect logs from:
+   - `src/main/services/browser-view.service.ts`
+   - `src/renderer/src/components/panels/browser-panel-lifecycle.ts`
+   - `src/renderer/src/services/browser-session-cleanup.ts`
+
+### Symptom: Browser content is misaligned after layout resize
+
+This usually comes from stale bounds or an overlay temporarily blocking the `BrowserView`.
+
+**Troubleshooting Steps:**
+
+1. Confirm no modal/dialog is covering the workbench.
+2. Toggle the browser panel once to retrigger lifecycle sync.
+3. Check whether the browser container has non-zero width and height.
+4. If the issue reproduces reliably, capture the active session ID, browser tab ID, and the latest resize operation for debugging.

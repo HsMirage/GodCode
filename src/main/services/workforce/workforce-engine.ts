@@ -21,220 +21,112 @@ import { ModelSelectionService, type ModelSource } from '../llm/model-selection.
 import type { LLMConfig } from '../llm/adapter.interface'
 import type { Message } from '@/types/domain'
 import { resolvePrimaryAgentRolePolicy } from '@/shared/agent-definitions'
+import {
+  applyRecoveryTrackingMetadata
+} from '@/shared/recovery-contract'
+import { applyTraceMetadata } from '@/shared/trace-contract'
+import { renderTaskBriefMarkdown, type StructuredTaskBrief } from '@/shared/task-brief-contract'
+import type {
+  FallbackReason,
+  ModelSelectionAttemptSummary,
+  ModelSelectionReason,
+  ModelSelectionSnapshot
+} from '@/shared/model-selection-contract'
 import { workflowEvents } from './events'
 import {
-  classifyError,
   getTaskRetryService,
-  isRetryable,
-  NonRetryableErrorType,
-  type RetryConfig,
   type RetryState
 } from './retry'
 import {
   DEFAULT_RECOVERY_CLASS_BUDGET,
   DEFAULT_RECOVERY_CONFIG,
   type RecoveryConfig,
-  type RecoveryFailureClass,
-  type RecoveryRouteSelection,
   type WorkflowRecoveryState
 } from './recovery-types'
 import { SecureStorageService } from '../secure-storage.service'
 import { BoulderStateService } from '../boulder-state.service'
+import {
+  buildWorkflowGraph,
+  validateWorkflowGraph
+} from './workflow-graph-builder'
 import { sanitizeCompletionOutput } from './output-sanitizer'
+import { executionEventPersistenceService } from '../execution-event-persistence.service'
+import {
+  buildDispatchBatch,
+  buildWorkflowConcurrencyKey,
+  getReadyWorkflowTasks,
+  getConcurrencyLimitForKey
+} from './workflow-scheduler'
+import {
+  buildWorkflowFinalOutput,
+  buildWorkflowIntegratedResult
+} from './workflow-integration-service'
+import { buildWorkflowObservabilitySnapshot as writeWorkflowObservabilitySnapshot } from './workflow-observability-writer'
+import {
+  buildCheckpointHaltRecoveryPrompt,
+  buildRecoveryRepairPrompt,
+  buildRecoveryRouteSelection,
+  classifyRecoveryFailure,
+  isRecoveryClassRecoverable,
+  selectCheckpointRecoveryTargets,
+  shouldAttemptCheckpointHaltRecovery
+} from './workflow-recovery-controller'
+import {
+  normalizeDecomposedSubtasks as normalizeDecomposedSubtasksPure,
+  parsePlanSubtasks as parsePlanSubtasksPure,
+  extractPlanPathFromInput as extractPlanPathFromInputPure,
+  normalizePlanPath as normalizePlanPathPure,
+  shouldPreferPlanExecution as shouldPreferPlanExecutionPure,
+  extractMarkdownPathCandidates as extractMarkdownPathCandidatesPure,
+  shouldRequireReferencedFiles as shouldRequireReferencedFilesPure,
+  buildReferencedMarkdownDecompositionContext as buildReferencedMarkdownDecompositionContextPure,
+  extractDependencyIds as extractDependencyIdsPure,
+  extractTaskExecutionHint as extractTaskExecutionHintPure
+} from './workflow-decomposer'
+import type { ReferencedMarkdownFile, ReferencedMarkdownContext } from './workflow-decomposer'
+import {
+  type SubTask,
+  type WorkflowResult,
+  type WorkflowOptions,
+  type SharedContextEntry,
+  type SharedContextStore,
+  type SharedContextQuery,
+  type WorkflowObservabilitySnapshot,
+  type WorkflowTaskExecution,
+  type WorkflowTaskResolution,
+  type WorkflowPhase,
+  type WorkflowLifecycleStage,
+  type TaskIntent,
+  type OrchestratorCheckpointPhase,
+  type TaskPromptContract,
+  type OrchestratorCheckpointRecord,
+  SPECIALIST_WORKERS,
+  resolveCanonicalSubagent,
+  resolveCanonicalCategory,
+  isPrimaryOrchestrator as isPrimaryOrchestratorFn
+} from './workflow-types'
 import fs from 'node:fs'
 import path from 'node:path'
 
-export interface SubTask {
-  id: string
-  description: string
-  dependencies: string[]
-  assignedAgent?: string
-  assignedCategory?: string
-  source?: 'decomposed' | 'plan'
-  workflowPhase?: WorkflowPhase
-}
-
-export interface WorkflowResult {
-  workflowId: string
-  tasks: SubTask[]
-  results: Map<string, string>
-  executions: Map<string, WorkflowTaskExecution>
-  success: boolean
-  sharedContextStore: SharedContextStore
-  /** Retry states for tasks that were retried */
-  retryStates?: Map<string, RetryState>
-  /** Continuation snapshot for session/workflow recovery consumers. */
-  continuationSnapshot?: WorkflowObservabilitySnapshot['continuationSnapshot']
-  /** Orchestrator checkpoint records captured during workflow execution. */
-  orchestratorCheckpoints?: OrchestratorCheckpointRecord[]
-  /** Whether orchestrator checkpoint participation actually happened. */
-  orchestratorParticipation?: boolean
-}
-
-export interface WorkflowOptions {
-  /** Task category for routing */
-  category?: string
-  /** Selected dialog agent code for model/prompt inheritance */
-  agentCode?: string
-  /** Retry configuration override */
-  retryConfig?: Partial<RetryConfig>
-  /** Whether to enable retries (default: true) */
-  enableRetry?: boolean
-  /** Optional recovery configuration override */
-  recoveryConfig?: Partial<RecoveryConfig>
-  /** Optional explicit plan path for plan-driven execution */
-  planPath?: string
-  /** Abort signal propagated from session stop action */
-  abortSignal?: AbortSignal
-  /** Optional runtime tool allowlist override propagated by router */
-  availableTools?: string[]
-  /** Optional runtime model override propagated by router */
-  overrideModelSpec?: string
-  /** Optional skill runtime payload propagated by router */
-  skillRuntime?: {
-    id: string
-    command: string
-    allowedTools: string[] | null
-    model: string | null
-  }
-  /** Router-provided scoring rationale and selected strategy */
-  routingContext?: {
-    strategy?: string
-    complexityScore?: number
-    rationale?: string[]
-  }
-}
-
-interface WorkflowTaskResolution {
-  subtasks: SubTask[]
-  source: 'decomposed' | 'plan'
-  planPath?: string
-  planName?: string
-  referencedMarkdownFiles?: string[]
-}
-
-interface WorkflowGraphNode {
-  taskId: string
-  dependencies: string[]
-  dependents: string[]
-}
-
-interface WorkflowGraph {
-  workflowId: string
-  nodes: Map<string, WorkflowGraphNode>
-  nodeOrder: string[]
-}
-
-export interface SharedContextEntry {
-  id: string
-  workflowId: string
-  taskId: string
-  phase: WorkflowPhase | 'integration'
-  category: 'facts' | 'decisions' | 'constraints' | 'artifacts' | 'dependencies'
-  content: string
-  createdAt: string
-  metadata?: Record<string, unknown>
-}
-
-export interface SharedContextStore {
-  workflowId: string
-  entries: SharedContextEntry[]
-  archivedEntries: SharedContextEntry[]
-  retentionLimit: number
-}
-
-export interface SharedContextQuery {
-  workflowId?: string
-  taskId?: string
-  category?: SharedContextEntry['category']
-  includeArchived?: boolean
-}
-
-type WorkflowLifecycleStage = 'plan' | 'dispatch' | 'checkpoint' | 'integration' | 'finalize'
-
-interface WorkflowIntegratorResult {
-  summary: string
-  conflicts: string[]
-  unresolvedItems: string[]
-  taskOutputs: Array<{ taskId: string; outputPreview: string }>
-  rawTaskOutputs: Array<{ taskId: string; outputPreview: string }>
-}
-
-export interface WorkflowObservabilitySnapshot {
-  workflowId: string
-  graph: {
-    workflowId: string
-    nodeOrder: string[]
-    nodes: WorkflowGraphNode[]
-  }
-  correlation: {
-    workflowId: string
-    sessionId?: string
-  }
-  timeline: {
-    workflow: Array<Record<string, unknown>>
-    task: Array<Record<string, unknown>>
-    run: Array<Record<string, unknown>>
-  }
-  integration: WorkflowIntegratorResult
-  lifecycleStages: WorkflowLifecycleStage[]
-  assignments: Array<{
-    taskId: string
-    persistedTaskId?: string
-    runId?: string
-    assignedAgent?: string
-    assignedCategory?: string
-    workflowPhase?: WorkflowPhase
-    assignedModel?: string
-    modelSource?: ModelSource
-    concurrencyKey?: string
-    fallbackTrail?: string[]
-  }>
-  retryState: {
-    tasks: Record<
-      string,
-      {
-        attemptNumber: number
-        status: string
-        maxAttempts: number
-        errors: Array<{ errorType: string; error: string; timestamp: string }>
-      }
-    >
-    totalRetried: number
-  }
-  recoveryState: WorkflowRecoveryState
-  continuationSnapshot: {
-    workflowId: string
-    sessionId?: string
-    status: 'completed' | 'failed' | 'cancelled' | 'running'
-    resumable: boolean
-    failedTasks: string[]
-    retryableTasks: string[]
-    updatedAt: string
-  }
-  sharedContext: {
-    workflowId: string
-    totalEntries: number
-    activeEntries: number
-    archivedEntries: number
-    entries: SharedContextEntry[]
-    archived: SharedContextEntry[]
-  }
+export type {
+  SubTask,
+  WorkflowResult,
+  WorkflowOptions,
+  SharedContextEntry,
+  SharedContextStore,
+  SharedContextQuery,
+  WorkflowObservabilitySnapshot,
+  WorkflowTaskExecution,
+  WorkflowPhase,
+  WorkflowLifecycleStage,
+  TaskIntent,
+  OrchestratorCheckpointPhase,
+  OrchestratorCheckpointRecord
 }
 
 interface TaskExecutionProfile {
   assignedAgent?: string
   assignedCategory?: string
-}
-
-type WorkflowPhase = 'discovery' | 'plan-review' | 'deep-review' | 'execution'
-type TaskIntent = 'analysis' | 'implementation'
-type OrchestratorCheckpointPhase = 'pre-dispatch' | 'between-waves' | 'final'
-
-interface TaskPromptContract {
-  intent: TaskIntent
-  workflowPhase: WorkflowPhase
-  readOnly: boolean
 }
 
 interface OrchestratorPolicyContext {
@@ -243,33 +135,6 @@ interface OrchestratorPolicyContext {
   source: 'decomposed' | 'plan'
   workflowCategory: string
   readOnlyRequested: boolean
-}
-
-export interface WorkflowTaskExecution {
-  logicalTaskId: string
-  persistedTaskId: string
-  runId?: string
-  assignedAgent?: string
-  assignedCategory?: string
-  model?: string
-  modelSource?: ModelSource
-  concurrencyKey?: string
-  fallbackTrail?: string[]
-  evidenceSummary?: {
-    missingFields: string[]
-    isComplete: boolean
-  }
-}
-
-interface ReferencedMarkdownFile {
-  rawPath: string
-  resolvedPath: string
-}
-
-interface ReferencedMarkdownContext {
-  existingFiles: ReferencedMarkdownFile[]
-  missingFiles: string[]
-  needsExistingFiles: boolean
 }
 
 interface OrchestratorCheckpointInput {
@@ -283,6 +148,7 @@ interface OrchestratorCheckpointInput {
   results: Map<string, string>
   executions: Map<string, WorkflowTaskExecution>
   abortSignal?: AbortSignal
+  traceId?: string
 }
 
 interface OrchestratorCheckpointDecision {
@@ -293,17 +159,6 @@ interface OrchestratorCheckpointDecision {
   rawOutput: string
 }
 
-interface OrchestratorCheckpointRecord {
-  timestamp: string
-  phase: OrchestratorCheckpointPhase
-  status: 'continue' | 'halt' | 'fallback'
-  reportedTaskIds: string[]
-  readyTaskIds: string[]
-  approvedTaskIds: string[]
-  reason?: string
-  persistedTaskId?: string
-}
-
 interface DispatcherAttemptResult {
   result: {
     output: string
@@ -311,6 +166,10 @@ interface DispatcherAttemptResult {
     runId?: string
     model?: string
     modelSource?: ModelSource
+    modelSelectionReason?: ModelSelectionReason
+    modelSelectionSummary?: string
+    fallbackReason?: FallbackReason
+    fallbackAttemptSummary?: ModelSelectionAttemptSummary[]
   }
   concurrencyKey: string
   fallbackTrail: string[]
@@ -326,35 +185,35 @@ const MAX_CONCURRENT = 3
 const DEFAULT_WORKFORCE_CONCURRENCY_LIMITS: Record<string, number> = {
   default: MAX_CONCURRENT
 }
+
+function buildModelSelectionSnapshot(input: {
+  model?: string
+  modelSource?: ModelSource
+  modelSelectionReason?: ModelSelectionReason
+  modelSelectionSummary?: string
+  fallbackReason?: FallbackReason
+  fallbackAttemptSummary?: ModelSelectionAttemptSummary[]
+}): ModelSelectionSnapshot | undefined {
+  if (!input.model && !input.modelSource && !input.modelSelectionSummary) {
+    return undefined
+  }
+
+  return {
+    model: input.model,
+    modelSelectionSource: input.modelSource || 'system-default',
+    modelSelectionReason: input.modelSelectionReason || 'system-default-hit',
+    modelSelectionSummary:
+      input.modelSelectionSummary ||
+      `命中${input.modelSource || 'system-default'}，使用模型 ${input.model || 'unknown'}。`,
+    fallbackReason: input.fallbackReason,
+    fallbackAttemptSummary: input.fallbackAttemptSummary || []
+  }
+}
 const isStrictBindingEnabled = (): boolean =>
   String(process.env.WORKFORCE_STRICT_BINDING || 'false').toLowerCase() === 'true'
 
 const isStrictRoleModeEnabled = (): boolean =>
   String(process.env.WORKFORCE_STRICT_ROLE_MODE || 'false').toLowerCase() === 'true'
-const PRIMARY_ORCHESTRATORS = new Set(['fuxi', 'haotian', 'kuafu'])
-const SPECIALIST_WORKERS = new Set(['qianliyan', 'diting', 'baize', 'chongming', 'leigong'])
-const KNOWN_SUBAGENT_CODES = new Set([
-  'fuxi',
-  'haotian',
-  'kuafu',
-  'luban',
-  'baize',
-  'chongming',
-  'leigong',
-  'diting',
-  'qianliyan',
-  'multimodal-looker'
-])
-const KNOWN_CATEGORY_CODES = new Set([
-  'zhinv',
-  'cangjie',
-  'tianbing',
-  'guigu',
-  'maliang',
-  'guixu',
-  'tudi',
-  'dayu'
-])
 const CATEGORY_TO_FALLBACK_SUBAGENT: Record<string, string> = {
   zhinv: 'luban',
   cangjie: 'luban',
@@ -411,25 +270,15 @@ export class WorkforceEngine {
   }
 
   private resolveCanonicalSubagent(raw?: string): string | undefined {
-    if (!raw) return undefined
-    const normalized = this.normalizeToken(raw)
-    if (KNOWN_SUBAGENT_CODES.has(normalized)) {
-      return normalized
-    }
-    return undefined
+    return resolveCanonicalSubagent(raw)
   }
 
   private resolveCanonicalCategory(raw?: string): string | undefined {
-    if (!raw) return undefined
-    const normalized = this.normalizeToken(raw)
-    if (KNOWN_CATEGORY_CODES.has(normalized)) {
-      return normalized
-    }
-    return undefined
+    return resolveCanonicalCategory(raw)
   }
 
   private normalizeWorkflowCategory(category?: string): string {
-    return this.resolveCanonicalCategory(category) || 'dayu'
+    return resolveCanonicalCategory(category) || 'dayu'
   }
 
   private normalizeRecoveryConfig(override?: Partial<RecoveryConfig>): RecoveryConfig {
@@ -542,206 +391,12 @@ export class WorkforceEngine {
     }
   }
 
-  private classifyRecoveryFailure(error: unknown): RecoveryFailureClass {
-    const classification = classifyError(error)
-    const message = error instanceof Error ? error.message.toLowerCase() : String(error || '').toLowerCase()
-
-    if (classification === NonRetryableErrorType.FORBIDDEN || /permission|forbidden|403|denied/.test(message)) {
-      return 'permission'
-    }
-
-    if (classification === NonRetryableErrorType.AUTH_ERROR || /api key|auth|unauthorized|401|config/.test(message)) {
-      return 'config'
-    }
-
-    if (/dependency|module not found|cannot find module|missing package|install/.test(message)) {
-      return 'dependency'
-    }
-
-    if (/assert|typecheck|compile|syntax|validation failed|test failed/.test(message)) {
-      return 'implementation'
-    }
-
-    if (isRetryable(classification)) {
-      return 'transient'
-    }
-
-    return 'unknown'
-  }
-
-  private isRecoveryClassRecoverable(failureClass: RecoveryFailureClass): boolean {
-    return failureClass !== 'permission' && failureClass !== 'unknown'
-  }
-
-  private buildRecoveryRouteSelection(input: {
-    failureClass: RecoveryFailureClass
-    fallbackPolicy: RecoveryConfig['fallbackPolicy']
-    assignedAgent?: string
-    assignedCategory?: string
-    lastModel?: string
-  }): RecoveryRouteSelection {
-    const attemptedRoutes: string[] = []
-    const blockedReasons: string[] = []
-    const alternatives: string[] = []
-
-    if (!this.isRecoveryClassRecoverable(input.failureClass)) {
-      blockedReasons.push(`Failure class ${input.failureClass} is non-recoverable`)
-      if (input.failureClass === 'permission') {
-        alternatives.push('Check credentials and workspace permissions')
-      } else {
-        alternatives.push('Inspect terminal diagnostics and recover manually')
-      }
-      return {
-        strategy: 'fail-fast',
-        diagnostics: { attemptedRoutes, blockedReasons, alternatives }
-      }
-    }
-
-    let strategy = 'category-repair'
-    let category: string | undefined = input.assignedCategory || 'dayu'
-    let subagent: string | undefined = input.assignedAgent
-    let model: string | undefined
-
-    switch (input.failureClass) {
-      case 'transient':
-        strategy = 'transient-retry-via-category'
-        category = input.assignedCategory || 'tianbing'
-        break
-      case 'config':
-        strategy = 'config-repair-via-subagent'
-        subagent = 'luban'
-        category = undefined
-        break
-      case 'dependency':
-        strategy = 'dependency-repair-via-category'
-        category = input.assignedCategory || 'dayu'
-        break
-      case 'implementation':
-        strategy = 'implementation-repair-via-category'
-        category = input.assignedCategory || 'dayu'
-        break
-      default:
-        break
-    }
-
-    if (input.fallbackPolicy === 'subagent-first') {
-      strategy = `${strategy}:subagent-first`
-      subagent = subagent || (category ? CATEGORY_TO_FALLBACK_SUBAGENT[category] || 'luban' : 'luban')
-      category = undefined
-    } else if (input.fallbackPolicy === 'model-first') {
-      strategy = `${strategy}:model-first`
-      category = undefined
-      subagent = undefined
-      const normalizedModel =
-        typeof input.lastModel === 'string' && input.lastModel.includes('::')
-          ? input.lastModel.replace('::', '/')
-          : input.lastModel
-      if (normalizedModel && normalizedModel.includes('/')) {
-        model = normalizedModel
-      } else {
-        blockedReasons.push('No compatible model token available for model-first recovery')
-        alternatives.push('Switch fallback policy to category-first or subagent-first')
-      }
-    }
-
-    if (!category && !subagent && !model) {
-      blockedReasons.push('No route target available for recovery')
-      alternatives.push('Configure category/agent bindings for recovery tasks')
-      return {
-        strategy,
-        diagnostics: { attemptedRoutes, blockedReasons, alternatives }
-      }
-    }
-
-    attemptedRoutes.push(
-      [category ? `category:${category}` : null, subagent ? `subagent:${subagent}` : null, model ? `model:${model}` : null]
-        .filter(Boolean)
-        .join('|')
-    )
-
-    return {
-      strategy,
-      category,
-      subagent_type: subagent,
-      model,
-      diagnostics: {
-        attemptedRoutes,
-        blockedReasons,
-        alternatives
-      }
-    }
-  }
-
-  private buildRecoveryRepairPrompt(input: {
-    task: SubTask
-    sourceError: string
-    failureClass: RecoveryFailureClass
-    attempt: number
-    objective: string
-  }): string {
-    return [
-      `任务执行失败，进入自动恢复流程（第 ${input.attempt} 轮）。`,
-      `失败任务: ${input.task.id} - ${input.task.description}`,
-      `失败分类: ${input.failureClass}`,
-      `源错误: ${input.sourceError}`,
-      `修复目标: ${input.objective}`,
-      '请执行最小必要修复并输出结构化证据，必须包含以下字段：',
-      '- objective: ...',
-      '- changes: ...',
-      '- validation: ...',
-      '- residual-risk: ...'
-    ].join('\n')
-  }
-
   private normalizeDecomposedSubtasks(input: unknown): SubTask[] {
-    if (!Array.isArray(input)) return []
-
-    const normalized: SubTask[] = []
-    for (let index = 0; index < input.length; index++) {
-      const item = input[index]
-      if (!item || typeof item !== 'object') {
-        continue
-      }
-
-      const payload = item as Record<string, unknown>
-      const id =
-        (typeof payload.id === 'string' && payload.id.trim()) || `task-${index + 1}`
-      const description =
-        (typeof payload.description === 'string' && payload.description.trim()) || `Task ${index + 1}`
-      const dependencies = Array.isArray(payload.dependencies)
-        ? payload.dependencies
-          .filter((dep): dep is string => typeof dep === 'string' && dep.trim().length > 0)
-          .map(dep => dep.trim())
-        : []
-
-      const explicitSubagent =
-        (typeof payload.subagent_type === 'string' && payload.subagent_type) ||
-        (typeof payload.assignedAgent === 'string' && payload.assignedAgent) ||
-        undefined
-      const explicitCategory =
-        (typeof payload.category === 'string' && payload.category) ||
-        (typeof payload.assignedCategory === 'string' && payload.assignedCategory) ||
-        undefined
-
-      const assignedAgent = this.resolveCanonicalSubagent(explicitSubagent)
-      const assignedCategory = this.resolveCanonicalCategory(explicitCategory)
-
-      normalized.push({
-        id: id.trim(),
-        description: description.trim(),
-        dependencies: Array.from(new Set(dependencies)),
-        assignedAgent,
-        assignedCategory
-      })
-    }
-
-    return normalized
+    return normalizeDecomposedSubtasksPure(input)
   }
 
   private isPrimaryOrchestrator(agentCode?: string): boolean {
-    if (!agentCode) return false
-    const canonical = this.resolveCanonicalSubagent(agentCode) || this.normalizeToken(agentCode)
-    return PRIMARY_ORCHESTRATORS.has(canonical)
+    return isPrimaryOrchestratorFn(agentCode)
   }
 
   private isReadOnlyWorkflowRequest(input: string): boolean {
@@ -1459,85 +1114,6 @@ Only return the JSON, no other text.`
     return dag
   }
 
-  private buildWorkflowGraph(workflowId: string, tasks: SubTask[]): WorkflowGraph {
-    const nodes = new Map<string, WorkflowGraphNode>()
-
-    for (const task of tasks) {
-      nodes.set(task.id, {
-        taskId: task.id,
-        dependencies: Array.from(new Set(task.dependencies || [])),
-        dependents: []
-      })
-    }
-
-    for (const node of nodes.values()) {
-      for (const depId of node.dependencies) {
-        const depNode = nodes.get(depId)
-        if (depNode) {
-          depNode.dependents = Array.from(new Set([...depNode.dependents, node.taskId]))
-        }
-      }
-    }
-
-    return {
-      workflowId,
-      nodes,
-      nodeOrder: tasks.map(task => task.id)
-    }
-  }
-
-  private validateWorkflowGraph(graph: WorkflowGraph): { valid: boolean; issues: string[] } {
-    const issues: string[] = []
-
-    for (const node of graph.nodes.values()) {
-      for (const depId of node.dependencies) {
-        if (!graph.nodes.has(depId)) {
-          issues.push(`任务 ${node.taskId} 依赖了不存在的任务 ${depId}`)
-        }
-      }
-    }
-
-    const inDegree = new Map<string, number>()
-    for (const node of graph.nodes.values()) {
-      inDegree.set(node.taskId, node.dependencies.filter(dep => graph.nodes.has(dep)).length)
-    }
-
-    const queue: string[] = []
-    for (const [taskId, degree] of inDegree.entries()) {
-      if (degree === 0) {
-        queue.push(taskId)
-      }
-    }
-
-    let visited = 0
-    while (queue.length > 0) {
-      const current = queue.shift()!
-      visited++
-      const currentNode = graph.nodes.get(current)
-      if (!currentNode) continue
-
-      for (const dependentId of currentNode.dependents) {
-        const nextDegree = (inDegree.get(dependentId) || 0) - 1
-        inDegree.set(dependentId, nextDegree)
-        if (nextDegree === 0) {
-          queue.push(dependentId)
-        }
-      }
-    }
-
-    if (visited !== graph.nodes.size) {
-      const blocked = Array.from(inDegree.entries())
-        .filter(([, degree]) => degree > 0)
-        .map(([taskId]) => taskId)
-      issues.push(`检测到循环依赖或不可调度任务: ${blocked.join(', ')}`)
-    }
-
-    return {
-      valid: issues.length === 0,
-      issues
-    }
-  }
-
   private emitWorkflowStage(
     workflowId: string,
     stage: WorkflowLifecycleStage,
@@ -1656,193 +1232,11 @@ Only return the JSON, no other text.`
     return ['shared_context:', ...lines].join('\n')
   }
 
-  private buildIntegratedResult(
-    workflowId: string,
-    tasks: SubTask[],
-    results: Map<string, string>
-  ): WorkflowIntegratorResult {
-    const rawTaskOutputs = tasks.map(task => {
-      const rawOutput = (results.get(task.id) || '').trim()
-      return {
-        taskId: task.id,
-        outputPreview: rawOutput.length > 360 ? `${rawOutput.slice(0, 360)}\n[...截断...]` : rawOutput
-      }
-    })
-
-    const taskOutputs = rawTaskOutputs.map(item => {
-      const sanitized = sanitizeCompletionOutput(item.outputPreview).trim()
-      return {
-        taskId: item.taskId,
-        outputPreview: sanitized
-      }
-    })
-
-    const conflicts: string[] = []
-    const unresolvedItems: string[] = []
-
-    for (const item of taskOutputs) {
-      const text = item.outputPreview
-      if (!text) {
-        unresolvedItems.push(`${item.taskId}: 无输出`)
-      }
-      if (/(conflict|冲突|inconsistent|不一致)/i.test(text)) {
-        conflicts.push(`${item.taskId}: 输出中包含冲突信号`)
-      }
-      if (/(todo|待办|未完成|pending)/i.test(text)) {
-        unresolvedItems.push(`${item.taskId}: 输出包含未完成事项`)
-      }
-
-      const missingEvidenceFields = this.collectMissingEvidenceFields(text)
-      if (missingEvidenceFields.length > 0) {
-        unresolvedItems.push(
-          `${item.taskId}: evidence-gap missing fields: ${missingEvidenceFields.join(', ')}`
-        )
-      }
-    }
-
-    const summary = [
-      `Workflow ${workflowId} integration summary`,
-      `- total_tasks: ${tasks.length}`,
-      `- conflicts: ${conflicts.length}`,
-      `- unresolved: ${unresolvedItems.length}`
-    ].join('\n')
-
-    return {
-      summary,
-      conflicts,
-      unresolvedItems,
-      taskOutputs,
-      rawTaskOutputs
-    }
-  }
-
   public querySharedContextEntries(
     workflowResult: WorkflowResult,
     criteria: SharedContextQuery = {}
   ): SharedContextEntry[] {
     return this.querySharedContext(workflowResult.sharedContextStore, criteria)
-  }
-
-  private buildWorkflowObservabilitySnapshot(params: {
-    workflowId: string
-    sessionId?: string
-    graph: WorkflowGraph
-    integrated: WorkflowIntegratorResult
-    sharedContext: SharedContextStore
-    executions: Map<string, WorkflowTaskExecution>
-    tasks: SubTask[]
-    lifecycleEvents: Array<{ stage: WorkflowLifecycleStage; timestamp: string; details?: Record<string, unknown> }>
-    taskTimeline: Array<Record<string, unknown>>
-    runTimeline: Array<Record<string, unknown>>
-    retryStates: Map<string, RetryState>
-    recoveryState: WorkflowRecoveryState
-    status: 'completed' | 'failed' | 'cancelled' | 'running'
-  }): WorkflowObservabilitySnapshot {
-    const assignments = params.tasks.map(task => ({
-      taskId: task.id,
-      persistedTaskId: params.executions.get(task.id)?.persistedTaskId,
-      runId: params.executions.get(task.id)?.runId,
-      assignedAgent: task.assignedAgent,
-      assignedCategory: task.assignedCategory,
-      workflowPhase: task.workflowPhase,
-      assignedModel: params.executions.get(task.id)?.model,
-      modelSource: params.executions.get(task.id)?.modelSource,
-      concurrencyKey: params.executions.get(task.id)?.concurrencyKey,
-      fallbackTrail: params.executions.get(task.id)?.fallbackTrail || []
-    }))
-
-    const activeEntries = this.querySharedContext(params.sharedContext, {
-      workflowId: params.workflowId
-    })
-
-    const archivedEntries = this.querySharedContext(params.sharedContext, {
-      workflowId: params.workflowId,
-      includeArchived: true
-    }).filter(entry =>
-      params.sharedContext.archivedEntries.some(archived => archived.id === entry.id)
-    )
-
-    const retryTasks = Array.from(params.retryStates.entries()).reduce<
-      Record<
-        string,
-        {
-          attemptNumber: number
-          status: string
-          maxAttempts: number
-          errors: Array<{ errorType: string; error: string; timestamp: string }>
-        }
-      >
-    >((acc, [taskId, state]) => {
-      acc[taskId] = {
-        attemptNumber: state.attemptNumber,
-        status: state.status,
-        maxAttempts: state.maxAttempts,
-        errors: state.errors.map(errorItem => ({
-          errorType: String(errorItem.errorType),
-          error: errorItem.error,
-          timestamp: errorItem.timestamp.toISOString()
-        }))
-      }
-      return acc
-    }, {})
-
-    const retryableTasks = Object.entries(retryTasks)
-      .filter(([, item]) => item.status === 'retrying' || item.status === 'pending')
-      .map(([taskId]) => taskId)
-
-    const failedTasks = Object.entries(retryTasks)
-      .filter(([, item]) => item.status === 'exhausted')
-      .map(([taskId]) => taskId)
-
-    return {
-      workflowId: params.workflowId,
-      graph: {
-        workflowId: params.graph.workflowId,
-        nodeOrder: params.graph.nodeOrder,
-        nodes: Array.from(params.graph.nodes.values())
-      },
-      correlation: {
-        workflowId: params.workflowId,
-        sessionId: params.sessionId
-      },
-      timeline: {
-        workflow: params.lifecycleEvents.map(event => ({
-          workflowId: params.workflowId,
-          sessionId: params.sessionId,
-          eventType: 'workflow:stage',
-          stage: event.stage,
-          timestamp: event.timestamp,
-          details: event.details || {}
-        })),
-        task: params.taskTimeline,
-        run: params.runTimeline
-      },
-      integration: params.integrated,
-      lifecycleStages: ['plan', 'dispatch', 'checkpoint', 'integration', 'finalize'],
-      assignments,
-      retryState: {
-        tasks: retryTasks,
-        totalRetried: Object.values(retryTasks).filter(item => item.attemptNumber > 1).length
-      },
-      recoveryState: this.cloneRecoveryState(params.recoveryState),
-      continuationSnapshot: {
-        workflowId: params.workflowId,
-        sessionId: params.sessionId,
-        status: params.status,
-        resumable: params.status === 'failed' && retryableTasks.length > 0,
-        failedTasks,
-        retryableTasks,
-        updatedAt: new Date().toISOString()
-      },
-      sharedContext: {
-        workflowId: params.sharedContext.workflowId,
-        totalEntries: params.sharedContext.entries.length + params.sharedContext.archivedEntries.length,
-        activeEntries: params.sharedContext.entries.length,
-        archivedEntries: params.sharedContext.archivedEntries.length,
-        entries: activeEntries,
-        archived: archivedEntries
-      }
-    }
   }
 
   private async resolveWorkflowTasks(
@@ -1943,135 +1337,36 @@ Only return the JSON, no other text.`
   }
 
   private shouldPreferPlanExecution(input: string, agentCode?: string): boolean {
-    if (agentCode === 'kuafu') {
-      return true
-    }
-
-    return /(执行计划|继续计划|run plan|execute plan|resume plan|按计划)/i.test(input)
+    return shouldPreferPlanExecutionPure(input, agentCode)
   }
 
   private extractPlanPathFromInput(input: string): string | undefined {
-    const match = input.match(
-      /(?:[A-Za-z]:)?[^\s"'`]*(?:\.fuxi|\.sisyphus)[\\/]+plans[\\/]+[^\s"'`<>]+\.md/i
-    )
-    return match?.[0]
+    return extractPlanPathFromInputPure(input)
   }
 
   private normalizePlanPath(rawPath: string, workspaceDir: string): string {
-    const trimmed = rawPath.trim().replace(/^["']|["']$/g, '')
-    if (path.isAbsolute(trimmed)) {
-      return path.normalize(trimmed)
-    }
-    return path.resolve(workspaceDir, trimmed)
+    return normalizePlanPathPure(rawPath, workspaceDir)
   }
 
   private parsePlanSubtasks(planPath: string): SubTask[] {
-    const content = fs.readFileSync(planPath, 'utf-8')
-    const lines = content.split(/\r?\n/)
-    const pending: Array<{
-      logicalId: string
-      description: string
-      rawDependencies: string[]
-      assignedAgent?: string
-      assignedCategory?: string
-    }> = []
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      const checkboxMatch = line.match(/^\s*[-*]\s+\[( |x|X)\]\s+(.+)$/)
-      if (!checkboxMatch) continue
-
-      const completed = checkboxMatch[1].toLowerCase() === 'x'
-      if (completed) continue
-
-      const rawDescription = checkboxMatch[2]
-      const normalizedDescription = rawDescription
-        .replace(/\*\*/g, '')
-        .replace(/`/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-      const explicitId =
-        normalizedDescription.match(/\bTask\s+([0-9]+(?:\.[0-9]+)*)\b/i)?.[1] ??
-        normalizedDescription.match(/^([0-9]+(?:\.[0-9]+)*)[:：]/)?.[1]
-      const logicalId = explicitId ?? String(pending.length + 1)
-      const taskBlockLines: string[] = []
-
-      for (let j = i + 1; j < lines.length; j++) {
-        const nextLine = lines[j]
-        if (/^\s*[-*]\s+\[( |x|X)\]\s+(.+)$/i.test(nextLine)) {
-          break
-        }
-        if (!nextLine.trim()) {
-          continue
-        }
-        taskBlockLines.push(nextLine)
-      }
-
-      const rawDependencies = [normalizedDescription, ...taskBlockLines].flatMap(blockLine =>
-        this.extractDependencyIds(blockLine)
-      )
-      const executionHint = this.extractTaskExecutionHint([normalizedDescription, ...taskBlockLines])
-
-      pending.push({
-        logicalId,
-        description: normalizedDescription,
-        rawDependencies: Array.from(new Set(rawDependencies)),
-        assignedAgent: executionHint.assignedAgent,
-        assignedCategory: executionHint.assignedCategory
-      })
-    }
-
-    const hasExplicitDependencies = pending.some(task => task.rawDependencies.length > 0)
-    const knownIds = new Set(pending.map(task => task.logicalId))
-
-    return pending.map((task, index) => {
-      const safeId = task.logicalId.replace(/[^a-zA-Z0-9_.-]/g, '-')
-      const explicitDependencies = task.rawDependencies
-        .filter(dep => knownIds.has(dep))
-        .map(dep => `plan-${dep.replace(/[^a-zA-Z0-9_.-]/g, '-')}`)
-      const previous = index > 0 ? pending[index - 1].logicalId.replace(/[^a-zA-Z0-9_.-]/g, '-') : ''
-      const dependencies = hasExplicitDependencies
-        ? explicitDependencies
-        : previous
-          ? [`plan-${previous}`]
-          : []
-      return {
-        id: `plan-${safeId}`,
-        description: task.description,
-        dependencies,
-        assignedAgent: task.assignedAgent,
-        assignedCategory: task.assignedCategory,
-        source: 'plan'
-      }
-    })
+    return parsePlanSubtasksPure(planPath)
   }
 
   private extractMarkdownPathCandidates(input: string): string[] {
-    const matches = Array.from(input.matchAll(/(?:[A-Za-z]:)?[^\s"'`<>]+\.md\b/gi))
-      .map(match => match[0].replace(/[，。,.!?;:]+$/u, '').trim())
-      .filter(Boolean)
-      .filter(candidate => !/\.sisyphus[\\/]+plans[\\/]/i.test(candidate))
-
-    return Array.from(new Set(matches))
+    return extractMarkdownPathCandidatesPure(input)
   }
 
   private shouldRequireReferencedFiles(input: string): boolean {
-    return /(根据|基于|依据|按照|依照|参考|参照|from|based on|according to|per)\s+[^\n]*\.md/i.test(
-      input
-    )
+    return shouldRequireReferencedFilesPure(input)
   }
 
   private resolveReferencedMarkdownContext(
     input: string,
     workspaceDir: string
   ): ReferencedMarkdownContext {
-    const candidates = this.extractMarkdownPathCandidates(input)
+    const candidates = extractMarkdownPathCandidatesPure(input)
     if (candidates.length === 0) {
-      return {
-        existingFiles: [],
-        missingFiles: [],
-        needsExistingFiles: false
-      }
+      return { existingFiles: [], missingFiles: [], needsExistingFiles: false }
     }
 
     const existingFiles: ReferencedMarkdownFile[] = []
@@ -2086,10 +1381,7 @@ Only return the JSON, no other text.`
         try {
           const stats = fs.statSync(resolvedPath)
           if (stats.isFile()) {
-            existingFiles.push({
-              rawPath: candidate,
-              resolvedPath
-            })
+            existingFiles.push({ rawPath: candidate, resolvedPath })
             continue
           }
         } catch (error) {
@@ -2107,121 +1399,22 @@ Only return the JSON, no other text.`
     return {
       existingFiles,
       missingFiles,
-      needsExistingFiles: this.shouldRequireReferencedFiles(input)
+      needsExistingFiles: shouldRequireReferencedFilesPure(input)
     }
   }
 
   private buildReferencedMarkdownDecompositionContext(
     referencedFiles: ReferencedMarkdownFile[]
   ): string | undefined {
-    if (referencedFiles.length === 0) {
-      return undefined
-    }
-
-    const snippets: string[] = []
-    for (const file of referencedFiles.slice(0, 3)) {
-      try {
-        const content = fs.readFileSync(file.resolvedPath, 'utf-8').trim()
-        if (!content) {
-          continue
-        }
-
-        const clippedContent =
-          content.length > 6000 ? `${content.slice(0, 6000)}\n[...截断...]` : content
-        snippets.push(`FILE: ${file.rawPath}
-PATH: ${file.resolvedPath}
-CONTENT:
-${clippedContent}`)
-      } catch (error) {
-        this.logger.warn('Failed to read referenced markdown file for decomposition context', {
-          path: file.resolvedPath,
-          error: error instanceof Error ? error.message : String(error)
-        })
-      }
-    }
-
-    if (snippets.length === 0) {
-      return undefined
-    }
-
-    return snippets.join('\n\n---\n\n')
+    return buildReferencedMarkdownDecompositionContextPure(referencedFiles)
   }
 
   private extractDependencyIds(text: string): string[] {
-    const normalized = text
-      .replace(/[*`]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-    const hasDependencyMarker = /(depends on|dependencies|dependency|blocked by|依赖|依赖于|前置|阻塞于|blocked-by|deps?)/i.test(
-      normalized
-    )
-    if (!hasDependencyMarker) {
-      return []
-    }
-    const dependencyPrefix =
-      /(depends on|dependencies|dependency|blocked by|依赖|依赖于|前置|阻塞于|blocked-by|deps?)\s*[:：]\s*(.+)$/i
-    const prefixMatch = normalized.match(dependencyPrefix)
-    const targetText = prefixMatch ? prefixMatch[2] : normalized
-    const ids = Array.from(targetText.matchAll(/(?:task\s*)?([0-9]+(?:\.[0-9]+)*)/gi)).map(match => match[1])
-    return Array.from(new Set(ids))
-  }
-
-  private escapeForRegex(value: string): string {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return extractDependencyIdsPure(text)
   }
 
   private extractTaskExecutionHint(lines: string[]): TaskExecutionProfile {
-    const normalized = lines
-      .map(line => line.replace(/[*`]/g, ' ').trim())
-      .filter(Boolean)
-
-    let assignedAgent: string | undefined
-    let assignedCategory: string | undefined
-
-    const subagentCandidates = Array.from(KNOWN_SUBAGENT_CODES)
-    const categoryCandidates = Array.from(KNOWN_CATEGORY_CODES)
-
-    for (const line of normalized) {
-      const explicitAssignee =
-        line.match(/subagent_type\s*[:：=]\s*["']?([a-zA-Z0-9_-]+)["']?/i)?.[1] ||
-        line.match(/task\s*\(\s*subagent_type\s*=\s*["']([a-zA-Z0-9_-]+)["']/i)?.[1] ||
-        line.match(/(?:agent|代理|执行者|assignee)\s*[:：=]\s*([a-zA-Z0-9_-]+)/i)?.[1] ||
-        line.match(/\[agent\s*[:：=]\s*([a-zA-Z0-9_-]+)\]/i)?.[1]
-      if (explicitAssignee) {
-        assignedAgent =
-          assignedAgent || this.resolveCanonicalSubagent(explicitAssignee)
-        assignedCategory =
-          assignedCategory || this.resolveCanonicalCategory(explicitAssignee)
-      }
-
-      const categoryHint =
-        line.match(/(?:category|类别)\s*[:：=]\s*([a-zA-Z0-9_-]+)/i)?.[1] ||
-        line.match(/task\s*\(\s*category\s*=\s*["']([a-zA-Z0-9_-]+)["']\s*\)/i)?.[1]
-      if (categoryHint) {
-        assignedCategory =
-          assignedCategory || this.resolveCanonicalCategory(categoryHint)
-      }
-
-      if (!assignedAgent) {
-        const inlineSubagent = subagentCandidates.find(code =>
-          new RegExp(`\\b${this.escapeForRegex(code)}\\b`, 'i').test(line)
-        )
-        if (inlineSubagent) {
-          assignedAgent = this.resolveCanonicalSubagent(inlineSubagent)
-        }
-      }
-
-      if (!assignedCategory) {
-        const inlineCategory = categoryCandidates.find(code =>
-          new RegExp(`\\b${this.escapeForRegex(code)}\\b`, 'i').test(line)
-        )
-        if (inlineCategory) {
-          assignedCategory = this.resolveCanonicalCategory(inlineCategory)
-        }
-      }
-    }
-
-    return { assignedAgent, assignedCategory }
+    return extractTaskExecutionHintPure(lines)
   }
 
   private selectSpecialistSubagentForTask(
@@ -2617,7 +1810,8 @@ ${clippedContent}`)
     taskSource: 'decomposed' | 'plan',
     dependencyContext: string,
     contract: TaskPromptContract,
-    referencedMarkdownFiles: string[] = []
+    referencedMarkdownFiles: string[] = [],
+    taskBrief?: StructuredTaskBrief | null
   ): string {
     const normalizedReferencedMarkdownFiles = Array.from(
       new Set(referencedMarkdownFiles.map(file => file.trim()).filter(Boolean))
@@ -2630,6 +1824,20 @@ ${clippedContent}`)
           '- 如果任务涉及上述规格文件，必须先读取并按规格执行。'
         ]
         : ['- referenced_specs: (none)']
+    const taskBriefSection = taskBrief
+      ? [
+        '',
+        'ROOT TASK BRIEF:',
+        renderTaskBriefMarkdown({
+          ...taskBrief,
+          taskId: taskBrief.taskId || task.id
+        }),
+        '',
+        'FINAL RESPONSE REQUIREMENTS:',
+        `- 必须包含 TASK_ID: ${task.id}`,
+        '- 必须包含 ACCEPTANCE_CHECKLIST 小节，并逐条对应验收标准。'
+      ]
+      : []
 
     if (contract.intent === 'analysis') {
       return [
@@ -2660,7 +1868,8 @@ ${clippedContent}`)
         `- workflow_read_only: ${contract.readOnly}`,
         ...specContextLines,
         '- dependencies_output:',
-        dependencyContext
+        dependencyContext,
+        ...taskBriefSection
       ].join('\n')
     }
 
@@ -2709,7 +1918,8 @@ ${clippedContent}`)
       `- workflow_read_only: ${contract.readOnly}`,
       ...specContextLines,
       '- dependencies_output:',
-      dependencyContext
+      dependencyContext,
+      ...taskBriefSection
     ].join('\n')
   }
 
@@ -2777,87 +1987,6 @@ ${clippedContent}`)
     return input.recentlyCompletedTasks.some(task =>
       this.hasConcreteExecutionEvidence(input.results.get(task.id) || '')
     )
-  }
-
-  private shouldAttemptCheckpointHaltRecovery(reason?: string): boolean {
-    const normalizedReason = (reason || '').trim()
-    if (!normalizedReason) {
-      return false
-    }
-
-    if (ORCHESTRATOR_RECOVERABLE_HALT_REASON_PATTERN.test(normalizedReason)) {
-      return true
-    }
-
-    const hasTaskReference = /(?:\btask\b[\s#-]*\d+|任务\s*#?\s*\d+)/i.test(normalizedReason)
-    const hasEvidenceOrDependencyIssue =
-      /(evidence|证据|探索|分析|analysis|intent|计划|依赖|dependency|未提供代码|code change|修复内容|不满足|未满足|verify|验证)/i.test(
-        normalizedReason
-      )
-
-    return hasTaskReference && hasEvidenceOrDependencyIssue
-  }
-
-  private selectCheckpointRecoveryTargets(reason: string | undefined, candidates: SubTask[]): SubTask[] {
-    if (!reason || candidates.length === 0) {
-      return candidates
-    }
-
-    const candidateIds = new Set(candidates.map(task => task.id))
-    const tokenMatches = reason.match(/[A-Za-z][A-Za-z0-9_.-]*-[A-Za-z0-9_.-]+/g) || []
-    const matchedIds = Array.from(
-      new Set(
-        tokenMatches
-          .map(token => token.replace(/[.,;:!?()[\]{}"']/g, ''))
-          .filter(token => candidateIds.has(token))
-      )
-    )
-
-    const taskNumberMatches = Array.from(reason.matchAll(/(?:task|任务)\s*#?\s*(\d+)/gi)).map(
-      match => match[1]
-    )
-    for (const numberToken of taskNumberMatches) {
-      const normalized = numberToken.trim()
-      if (!normalized) continue
-      for (const candidate of candidates) {
-        const candidateId = candidate.id.toLowerCase()
-        if (
-          candidateId === normalized ||
-          candidateId === `task-${normalized}` ||
-          candidateId.endsWith(`-${normalized}`)
-        ) {
-          matchedIds.push(candidate.id)
-        }
-      }
-    }
-
-    const dedupMatchedIds = Array.from(new Set(matchedIds))
-    if (dedupMatchedIds.length === 0) {
-      return candidates
-    }
-
-    const matchedSet = new Set(dedupMatchedIds)
-    return candidates.filter(task => matchedSet.has(task.id))
-  }
-
-  private buildCheckpointHaltRecoveryPrompt(
-    basePrompt: string,
-    reason: string,
-    attempt: number,
-    phase: OrchestratorCheckpointPhase
-  ): string {
-    return [
-      basePrompt,
-      '',
-      'CHECKPOINT HALT RECOVERY (MANDATORY):',
-      `- 本任务在 orchestrator checkpoint (${phase}) 被拦截，恢复尝试次数: ${attempt}/${CHECKPOINT_HALT_RECOVERY_MAX_ATTEMPTS}。`,
-      `- 拦截原因: ${reason}`,
-      '- 必须输出可验证的执行证据，不得只给计划/意图/待办。',
-      '- 证据至少包含：',
-      '  1) Changed files（真实文件路径）',
-      '  2) Verification command（至少一条命令 + 关键输出）',
-      '  3) 若涉及数据库，明确 schema/migration 校验结果。'
-    ].join('\n')
   }
 
   private buildOrchestratorCheckpointPrompt(
@@ -3043,7 +2172,8 @@ ${clippedContent}`)
           orchestrationCheckpoint: true,
           checkpointPhase: input.phase,
           reportedTaskIds: input.recentlyCompletedTasks.map(task => task.id),
-          readyTaskIds: input.readyTasks.map(task => task.id)
+          readyTaskIds: input.readyTasks.map(task => task.id),
+          ...(input.traceId ? { traceId: input.traceId } : {})
         }
       })
 
@@ -3291,91 +2421,6 @@ ${clippedContent}`)
     }
   }
 
-  private parseModelProviderAndName(spec?: string): { provider?: string; model?: string } {
-    const normalized = spec?.trim()
-    if (!normalized) {
-      return {}
-    }
-
-    const slashIndex = normalized.indexOf('/')
-    if (slashIndex <= 0 || slashIndex === normalized.length - 1) {
-      return { model: normalized }
-    }
-
-    return {
-      provider: normalized.slice(0, slashIndex),
-      model: normalized.slice(slashIndex + 1)
-    }
-  }
-
-  private buildConcurrencyKey(input: {
-    category?: string
-    modelSpec?: string
-    provider?: string
-  }): string {
-    const parsed = this.parseModelProviderAndName(input.modelSpec)
-    const provider = (input.provider || parsed.provider || '').trim()
-    const model = (parsed.model || '').trim()
-    const category = (input.category || '').trim()
-
-    if (provider && model) {
-      return `${provider}::${model}`
-    }
-    if (provider) {
-      return provider
-    }
-    if (category) {
-      return category
-    }
-
-    return 'default'
-  }
-
-  private getConcurrencyLimitForKey(key: string, limits: Record<string, number>): number {
-    const trimmed = key.trim()
-    const defaultLimit = typeof limits.default === 'number' ? limits.default : MAX_CONCURRENT
-    if (!trimmed) {
-      return defaultLimit
-    }
-
-    return limits[trimmed] ?? defaultLimit
-  }
-
-  private findNextFairTask(
-    candidates: SubTask[],
-    lastServedIndexByKey: Map<string, number>,
-    keyResolver: (task: SubTask) => string
-  ): SubTask | undefined {
-    if (candidates.length === 0) {
-      return undefined
-    }
-
-    const grouped = new Map<string, Array<{ task: SubTask; index: number }>>()
-    candidates.forEach((task, index) => {
-      const key = keyResolver(task)
-      const bucket = grouped.get(key) || []
-      bucket.push({ task, index })
-      grouped.set(key, bucket)
-    })
-
-    let selected: { task: SubTask; index: number } | undefined
-    for (const [key, bucket] of grouped.entries()) {
-      const last = lastServedIndexByKey.get(key) ?? -1
-      const preferred = bucket.find(item => item.index > last) || bucket[0]
-      if (!selected || preferred.index < selected.index) {
-        selected = preferred
-      }
-    }
-
-    if (!selected) {
-      return candidates[0]
-    }
-
-    const selectedKey = keyResolver(selected.task)
-    lastServedIndexByKey.set(selectedKey, selected.index)
-    return selected.task
-  }
-
   private resolveStrictBindingPreference(input: {
     fallbackModelSpec?: string
     attemptedModelTokens: Set<string>
@@ -3469,11 +2514,11 @@ ${clippedContent}`)
       }
 
       const effectiveModelSpec = selectedModelSpec
-      const concurrencyKey = this.buildConcurrencyKey({
+      const concurrencyKey = buildWorkflowConcurrencyKey({
         category: input.assignedCategory,
         modelSpec: effectiveModelSpec
       })
-      const perKeyLimit = this.getConcurrencyLimitForKey(concurrencyKey, input.concurrencyLimits)
+      const perKeyLimit = getConcurrencyLimitForKey(concurrencyKey, input.concurrencyLimits)
       delegateInput.metadata = {
         ...(delegateInput.metadata || {}),
         concurrencyKey,
@@ -3528,7 +2573,11 @@ ${clippedContent}`)
             taskId: result.taskId,
             runId: result.runId,
             model: result.model,
-            modelSource: result.modelSource
+            modelSource: result.modelSource,
+            modelSelectionReason: result.modelSelectionReason,
+            modelSelectionSummary: result.modelSelectionSummary,
+            fallbackReason: result.fallbackReason,
+            fallbackAttemptSummary: result.fallbackAttemptSummary
           },
           concurrencyKey,
           fallbackTrail,
@@ -3640,6 +2689,7 @@ ${clippedContent}`)
       recoveryConfig,
       abortSignal
     } = resolvedOptions
+    const traceId = resolvedOptions.traceContext?.traceId
     const category = this.normalizeWorkflowCategory(requestedCategory)
     const orchestratorAgentCode = this.resolveCanonicalSubagent(agentCode) || agentCode
     const orchestratorPrimaryRolePolicy = orchestratorAgentCode
@@ -3685,23 +2735,32 @@ ${clippedContent}`)
     }
 
     const workflow = await this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const baseMetadata = applyTraceMetadata(
+        {
+          category,
+          enableRetry,
+          readOnlyRequested,
+          recoveryMode: recoveryMode as unknown as Prisma.InputJsonValue,
+          taskBrief: resolvedOptions.taskBrief || null
+        },
+        resolvedOptions.traceContext
+      )
+      const metadata = resolvedOptions.resumeContext
+        ? applyRecoveryTrackingMetadata(baseMetadata, resolvedOptions.resumeContext)
+        : baseMetadata
+
       return tx.task.create({
         data: {
           sessionId: resolvedSessionId,
           type: 'workflow',
           input,
           status: 'running',
-          metadata: {
-            category,
-            enableRetry,
-            readOnlyRequested,
-            recoveryMode: recoveryMode as unknown as Prisma.InputJsonValue
-          }
+          metadata: metadata as Prisma.InputJsonValue
         }
       })
     })
 
-    this.logger.info('Executing workflow', { workflowId: workflow.id, input, enableRetry })
+    this.logger.info('Executing workflow', { workflowId: workflow.id, input, enableRetry, traceId })
 
     const dispatchSkillRuntime = resolvedOptions.skillRuntime
       ? {
@@ -3717,7 +2776,8 @@ ${clippedContent}`)
         workflowId: workflow.id,
         sessionId: resolvedSessionId,
         workspaceDir,
-        agentCode: orchestratorAgentCode
+        agentCode: orchestratorAgentCode,
+        traceId
       })
       throwIfAborted()
       const taskResolution = await this.resolveWorkflowTasks(
@@ -3749,8 +2809,14 @@ ${clippedContent}`)
       })
       await this.validateBindingConsistencyBeforeDispatch(subtasks, orchestratorAgentCode, category)
       const dag = this.buildDAG(subtasks)
-      const graph = this.buildWorkflowGraph(workflow.id, subtasks)
-      const graphValidation = this.validateWorkflowGraph(graph)
+      const graph = buildWorkflowGraph(workflow.id, subtasks)
+      let graphValidation
+      try {
+        graphValidation = validateWorkflowGraph(graph)
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        throw new Error(`Deadlock detected: ${errorMessage}`)
+      }
       if (!graphValidation.valid) {
         throw new Error(`Deadlock detected: ${graphValidation.issues.join(' | ')}`)
       }
@@ -3787,10 +2853,22 @@ ${clippedContent}`)
           approvedTaskIds: params.approvedTaskIds || [],
           reason: params.reason,
           persistedTaskId: params.persistedTaskId
+      }
+      orchestratorCheckpoints.push(record)
+      void executionEventPersistenceService.appendEvent({
+        sessionId: resolvedSessionId,
+        taskId: params.persistedTaskId || workflow.id,
+        type: 'checkpoint-saved',
+        payload: {
+          workflowId: workflow.id,
+          phase: params.phase,
+          status: params.status,
+          reason: params.reason,
+          approvedTaskIds: params.approvedTaskIds || []
         }
-        orchestratorCheckpoints.push(record)
+      })
 
-        workflowEvents.emit({
+      workflowEvents.emit({
           type: 'workflow:checkpoint',
           workflowId: workflow.id,
           taskId: params.persistedTaskId || workflow.id,
@@ -3901,7 +2979,8 @@ ${clippedContent}`)
           assignedAgent: assignedAgent || null,
           assignedCategory: assignedCategory || null,
           description: task.description,
-          dependencies: task.dependencies
+          dependencies: task.dependencies,
+          traceId: traceId || null
         })
 
         workflowEvents.emit({
@@ -3913,7 +2992,8 @@ ${clippedContent}`)
             description: task.description,
             assignedAgent: assignedTarget,
             sessionId: resolvedSessionId,
-            workspaceDir
+            workspaceDir,
+            ...(traceId ? { traceId } : {})
           }
         })
 
@@ -3927,7 +3007,8 @@ ${clippedContent}`)
           timestamp: startedEventTimestamp,
           assignedAgent: assignedAgent || null,
           assignedCategory: assignedCategory || null,
-          description: task.description
+          description: task.description,
+          traceId: traceId || null
         })
 
         workflowEvents.emit({
@@ -3939,7 +3020,8 @@ ${clippedContent}`)
             description: task.description,
             assignedAgent: assignedTarget,
             sessionId: resolvedSessionId,
-            workspaceDir
+            workspaceDir,
+            ...(traceId ? { traceId } : {})
           }
         })
 
@@ -3961,17 +3043,19 @@ ${clippedContent}`)
             taskResolution.source,
             dependencyContext,
             promptContract,
-            taskResolution.referencedMarkdownFiles || []
+            taskResolution.referencedMarkdownFiles || [],
+            resolvedOptions.taskBrief
           )
           const promptWithSharedContext = `${basePrompt}\n\nSHARED COLLABORATION CONTEXT:\n${sharedContextPrompt}`
           const recoveryPrompt =
             checkpointRecoveryReason && checkpointRecoveryAttempt > 0
-              ? this.buildCheckpointHaltRecoveryPrompt(
-                promptWithSharedContext,
-                checkpointRecoveryReason,
-                checkpointRecoveryAttempt,
-                checkpointRecoveryPhase || 'between-waves'
-              )
+              ? buildCheckpointHaltRecoveryPrompt({
+                basePrompt: promptWithSharedContext,
+                reason: checkpointRecoveryReason,
+                attempt: checkpointRecoveryAttempt,
+                phase: checkpointRecoveryPhase || 'between-waves',
+                maxAttempts: CHECKPOINT_HALT_RECOVERY_MAX_ATTEMPTS
+              })
               : promptWithSharedContext
           const runtimeBindingSnapshot = {
             assignedAgent,
@@ -3987,7 +3071,7 @@ ${clippedContent}`)
               : undefined
           }
 
-          const baseMetadata: Record<string, unknown> = {
+          const rawBaseMetadata: Record<string, unknown> = {
             dependencies: dependencyTaskIds,
             logicalTaskId: task.id,
             logicalDependencies: task.dependencies,
@@ -4006,12 +3090,19 @@ ${clippedContent}`)
             checkpointRecoveryPhase,
             checkpointRecoveryReason,
             recoveryAttempt,
+            traceId: traceId || null,
             routingContext: resolvedOptions.routingContext || null,
+            taskBrief: resolvedOptions.taskBrief || null,
             skill: resolvedOptions.skillRuntime || null,
             skillToolScope: resolvedOptions.availableTools || null,
             skillModelOverride: resolvedOptions.overrideModelSpec || null,
-            runtimeBindingSnapshot
+            runtimeBindingSnapshot,
+            ...(traceId ? { traceId } : {})
           }
+          const tracedBaseMetadata = applyTraceMetadata(rawBaseMetadata, resolvedOptions.traceContext)
+          const baseMetadata = resolvedOptions.resumeContext
+            ? applyRecoveryTrackingMetadata(tracedBaseMetadata, resolvedOptions.resumeContext)
+            : tracedBaseMetadata
 
           const attemptResult = await this.dispatchWithFallbackAndQuota({
             baseDelegateInput: {
@@ -4032,15 +3123,26 @@ ${clippedContent}`)
           })
 
           if (attemptResult.result.taskId) {
+            const modelSelection = buildModelSelectionSnapshot({
+              model: attemptResult.result.model,
+              modelSource: attemptResult.result.modelSource,
+              modelSelectionReason: attemptResult.result.modelSelectionReason,
+              modelSelectionSummary: attemptResult.result.modelSelectionSummary,
+              fallbackReason: attemptResult.result.fallbackReason,
+              fallbackAttemptSummary: attemptResult.result.fallbackAttemptSummary
+            })
+
             await this.prisma.task.update({
               where: { id: attemptResult.result.taskId },
               data: {
                 metadata: {
                   ...(baseMetadata as Record<string, unknown>),
+                  ...(modelSelection ? { modelSelection } : {}),
                   runtimeBindingSnapshot: {
                     ...runtimeBindingSnapshot,
                     model: attemptResult.result.model,
                     modelSource: attemptResult.result.modelSource,
+                    ...(modelSelection ? { modelSelection } : {}),
                     concurrencyKey: attemptResult.concurrencyKey,
                     fallbackTrail: attemptResult.fallbackTrail
                   }
@@ -4068,17 +3170,18 @@ ${clippedContent}`)
 
               const primaryErrorMessage =
                 primaryError instanceof Error ? primaryError.message : String(primaryError)
-              const failureClass = this.classifyRecoveryFailure(primaryError)
+              const failureClass = classifyRecoveryFailure(primaryError)
               const nextAttempt = (taskRecoveryAttempts.get(task.id) || 0) + 1
               const nextClassAttempt = (taskRecoveryClassAttempts.get(task.id) || 0) + 1
               const classBudget = recoveryMode.classBudget[failureClass] ?? 0
-              const recoverableClass = this.isRecoveryClassRecoverable(failureClass)
+              const recoverableClass = isRecoveryClassRecoverable(failureClass)
               const attemptId = `${workflow.id}:${task.id}:${nextAttempt}`
-              const selectedRoute = this.buildRecoveryRouteSelection({
+              const selectedRoute = buildRecoveryRouteSelection({
                 failureClass,
                 fallbackPolicy: recoveryMode.fallbackPolicy,
                 assignedAgent,
-                assignedCategory
+                assignedCategory,
+                fallbackSubagentsByCategory: CATEGORY_TO_FALLBACK_SUBAGENT
               })
 
               if (
@@ -4165,7 +3268,8 @@ ${clippedContent}`)
                     orchestratorCheckpointEnabled: checkpointEnabled,
                     orchestratorCheckpoints,
                     orchestratorParticipation: orchestratorCheckpoints.length > 0,
-                    routingContext: resolvedOptions.routingContext || null,
+                    traceId: traceId || null,
+            routingContext: resolvedOptions.routingContext || null,
                     skill: resolvedOptions.skillRuntime || null,
                     skillToolScope: resolvedOptions.availableTools || null,
                     skillModelOverride: resolvedOptions.overrideModelSpec || null,
@@ -4196,7 +3300,8 @@ ${clippedContent}`)
                     orchestratorCheckpointEnabled: checkpointEnabled,
                     orchestratorCheckpoints,
                     orchestratorParticipation: orchestratorCheckpoints.length > 0,
-                    routingContext: resolvedOptions.routingContext || null,
+                    traceId: traceId || null,
+            routingContext: resolvedOptions.routingContext || null,
                     skill: resolvedOptions.skillRuntime || null,
                     skillToolScope: resolvedOptions.availableTools || null,
                     skillModelOverride: resolvedOptions.overrideModelSpec || null,
@@ -4208,7 +3313,7 @@ ${clippedContent}`)
                   }
                 }
               })
-              const recoveryPrompt = this.buildRecoveryRepairPrompt({
+              const recoveryPrompt = buildRecoveryRepairPrompt({
                 task,
                 sourceError: primaryErrorMessage,
                 failureClass,
@@ -4229,7 +3334,8 @@ ${clippedContent}`)
                 taskResolution.source,
                 dependencyContext,
                 promptContract,
-                taskResolution.referencedMarkdownFiles || []
+                taskResolution.referencedMarkdownFiles || [],
+                resolvedOptions.taskBrief
               )
 
               const retryAttemptResult = await this.dispatchWithFallbackAndQuota({
@@ -4255,7 +3361,9 @@ ${clippedContent}`)
                     planPath: taskResolution.planPath,
                     planName: taskResolution.planName,
                     referencedMarkdownFiles: taskResolution.referencedMarkdownFiles || [],
+                    traceId: traceId || null,
                     routingContext: resolvedOptions.routingContext || null,
+                    taskBrief: resolvedOptions.taskBrief || null,
                     skill: dispatchSkillRuntime || null,
                     skillToolScope: resolvedOptions.availableTools || null,
                     skillModelOverride: resolvedOptions.overrideModelSpec || null,
@@ -4325,6 +3433,10 @@ ${clippedContent}`)
                 runId: retryAttemptResult.result.runId,
                 model: retryAttemptResult.result.model,
                 modelSource: retryAttemptResult.result.modelSource,
+                modelSelectionReason: retryAttemptResult.result.modelSelectionReason,
+                modelSelectionSummary: retryAttemptResult.result.modelSelectionSummary,
+                fallbackReason: retryAttemptResult.result.fallbackReason,
+                fallbackAttemptSummary: retryAttemptResult.result.fallbackAttemptSummary,
                 concurrencyKey: retryAttemptResult.concurrencyKey,
                 fallbackTrail: retryAttemptResult.fallbackTrail
               }
@@ -4337,6 +3449,10 @@ ${clippedContent}`)
             runId?: string
             model?: string
             modelSource?: ModelSource
+            modelSelectionReason?: ModelSelectionReason
+            modelSelectionSummary?: string
+            fallbackReason?: FallbackReason
+            fallbackAttemptSummary?: ModelSelectionAttemptSummary[]
             concurrencyKey?: string
             fallbackTrail?: string[]
           }
@@ -4367,7 +3483,8 @@ ${clippedContent}`)
                         orchestratorCheckpointEnabled: checkpointEnabled,
                         orchestratorCheckpoints,
                         orchestratorParticipation: orchestratorCheckpoints.length > 0,
-                        routingContext: resolvedOptions.routingContext || null,
+                        traceId: traceId || null,
+            routingContext: resolvedOptions.routingContext || null,
                         scheduling: {
                           maxConcurrent: concurrencySettings.maxConcurrent,
                           concurrencyLimits: concurrencySettings.limits,
@@ -4439,6 +3556,10 @@ ${clippedContent}`)
             assignedCategory,
             model: result.model,
             modelSource: result.modelSource,
+            modelSelectionReason: result.modelSelectionReason,
+            modelSelectionSummary: result.modelSelectionSummary,
+            fallbackReason: result.fallbackReason,
+            fallbackAttemptSummary: result.fallbackAttemptSummary,
             concurrencyKey: result.concurrencyKey,
             fallbackTrail: result.fallbackTrail,
             evidenceSummary: {
@@ -4455,6 +3576,15 @@ ${clippedContent}`)
 
           const normalizedOutput = result.output.trim()
           if (normalizedOutput) {
+            const modelSelection = buildModelSelectionSnapshot({
+              model: result.model,
+              modelSource: result.modelSource,
+              modelSelectionReason: result.modelSelectionReason,
+              modelSelectionSummary: result.modelSelectionSummary,
+              fallbackReason: result.fallbackReason,
+              fallbackAttemptSummary: result.fallbackAttemptSummary
+            })
+
             this.appendSharedContextEntry(sharedContext, {
               taskId: task.id,
               phase: task.workflowPhase || 'execution',
@@ -4465,10 +3595,12 @@ ${clippedContent}`)
                 persistedTaskId: result.taskId,
                 model: result.model,
                 modelSource: result.modelSource,
+                ...(modelSelection ? { modelSelection } : {}),
                 assignedAgent,
                 assignedCategory,
                 concurrencyKey: result.concurrencyKey,
-                fallbackTrail: result.fallbackTrail || []
+                fallbackTrail: result.fallbackTrail || [],
+                ...(traceId ? { traceId } : {})
               }
             })
           }
@@ -4493,7 +3625,11 @@ ${clippedContent}`)
             assignedCategory: assignedCategory || null,
             model: result.model || null,
             modelSource: result.modelSource || null,
-            retryState: taskRetryStates.get(task.id) || null
+            modelSelectionReason: result.modelSelectionReason || null,
+            modelSelectionSummary: result.modelSelectionSummary || null,
+            fallbackReason: result.fallbackReason || null,
+            retryState: taskRetryStates.get(task.id) || null,
+            traceId: traceId || null
           })
 
           runTimeline.push({
@@ -4505,7 +3641,12 @@ ${clippedContent}`)
             timestamp: completedEventTimestamp,
             model: result.model || null,
             modelSource: result.modelSource || null,
+            modelSelectionReason: result.modelSelectionReason || null,
+            modelSelectionSummary: result.modelSelectionSummary || null,
+            fallbackReason: result.fallbackReason || null,
+            fallbackAttemptSummary: result.fallbackAttemptSummary || [],
             fallbackTrail: result.fallbackTrail || [],
+            traceId: traceId || null,
             concurrencyKey: result.concurrencyKey || null
           })
 
@@ -4533,7 +3674,7 @@ ${clippedContent}`)
 
           const errorMessage = error instanceof Error ? error.message : String(error)
           const retryState = taskRetryStates.get(task.id)
-          const failureClass = this.classifyRecoveryFailure(error)
+          const failureClass = classifyRecoveryFailure(error)
           if (!recoveryState.unrecoveredTasks.includes(task.id)) {
             recoveryState.unrecoveredTasks.push(task.id)
           }
@@ -4596,13 +3737,13 @@ ${clippedContent}`)
       workflowLoop: for (;;) {
         while (completed.size < subtasks.length) {
           throwIfAborted()
-          const ready = subtasks.filter(
-            task =>
-              !completed.has(task.id) &&
-              !inProgress.has(task.id) &&
-              !failed.has(task.id) &&
-              canExecute(task)
-          )
+          const ready = getReadyWorkflowTasks({
+            tasks: subtasks,
+            completed,
+            inProgress,
+            failed,
+            canExecute
+          })
 
           if (ready.length === 0 && inProgress.size === 0) {
             if (failed.size > 0) {
@@ -4617,7 +3758,7 @@ ${clippedContent}`)
             const execution = executions.get(candidate.id)
             return (
               execution?.concurrencyKey ||
-              this.buildConcurrencyKey({
+              buildWorkflowConcurrencyKey({
                 category: candidate.assignedCategory || category
               })
             )
@@ -4636,7 +3777,8 @@ ${clippedContent}`)
                 readyTasks: ready,
                 results,
                 executions,
-                abortSignal
+                abortSignal,
+                traceId
               })
 
               if (checkpointDecision) {
@@ -4652,7 +3794,7 @@ ${clippedContent}`)
 
                 if (checkpointDecision.status === 'halt') {
                   const haltReason = checkpointDecision.reason || '主代理未提供原因'
-                  if (!this.shouldAttemptCheckpointHaltRecovery(haltReason)) {
+                  if (!shouldAttemptCheckpointHaltRecovery(haltReason, ORCHESTRATOR_RECOVERABLE_HALT_REASON_PATTERN)) {
                     throw new Error(`Orchestrator checkpoint halted workflow: ${haltReason}`)
                   }
                   this.logger.warn(
@@ -4697,7 +3839,8 @@ ${clippedContent}`)
                 readyTasks: ready,
                 results,
                 executions,
-                abortSignal
+                abortSignal,
+                traceId
               })
 
               newlyCompletedTasks.forEach(task => reportedToOrchestrator.add(task.id))
@@ -4715,8 +3858,8 @@ ${clippedContent}`)
 
                 if (checkpointDecision.status === 'halt') {
                   const haltReason = checkpointDecision.reason || '主代理未提供原因'
-                  if (this.shouldAttemptCheckpointHaltRecovery(haltReason)) {
-                    const recoveryTargets = this.selectCheckpointRecoveryTargets(
+                  if (shouldAttemptCheckpointHaltRecovery(haltReason, ORCHESTRATOR_RECOVERABLE_HALT_REASON_PATTERN)) {
+                    const recoveryTargets = selectCheckpointRecoveryTargets(
                       haltReason,
                       newlyCompletedTasks
                     )
@@ -4767,26 +3910,19 @@ ${clippedContent}`)
             }
           }
 
-          const batch: Array<{ task: SubTask; key: string }> = []
-          const remaining = [...dispatchCandidates]
-          while (batch.length < availableSlots && remaining.length > 0) {
-            const next = this.findNextFairTask(remaining, lastServedIndexByConcurrencyKey, keyResolver)
-            if (!next) {
-              break
-            }
+          const { batch, nextInProgressByKey } = buildDispatchBatch({
+            candidates: dispatchCandidates,
+            availableSlots,
+            inProgressByKey: inProgressByConcurrencyKey,
+            lastServedIndexByKey: lastServedIndexByConcurrencyKey,
+            concurrencyLimits: concurrencySettings.limits,
+            keyResolver,
+            defaultLimit: MAX_CONCURRENT
+          })
 
-            const key = keyResolver(next)
-            const inUse = inProgressByConcurrencyKey.get(key) || 0
-            const limit = this.getConcurrencyLimitForKey(key, concurrencySettings.limits)
-            if (inUse < limit) {
-              batch.push({ task: next, key })
-              inProgressByConcurrencyKey.set(key, inUse + 1)
-            }
-
-            const nextIndex = remaining.findIndex(task => task.id === next.id)
-            if (nextIndex >= 0) {
-              remaining.splice(nextIndex, 1)
-            }
+          inProgressByConcurrencyKey.clear()
+          for (const [key, count] of nextInProgressByKey.entries()) {
+            inProgressByConcurrencyKey.set(key, count)
           }
 
           if (batch.length > 0) {
@@ -4838,7 +3974,8 @@ ${clippedContent}`)
             readyTasks: [],
             results,
             executions,
-            abortSignal
+            abortSignal,
+            traceId
           })
 
           if (finalCheckpointDecision) {
@@ -4854,8 +3991,8 @@ ${clippedContent}`)
 
             if (finalCheckpointDecision.status === 'halt') {
               const haltReason = finalCheckpointDecision.reason || '主代理未提供原因'
-              if (this.shouldAttemptCheckpointHaltRecovery(haltReason)) {
-                const recoveryTargets = this.selectCheckpointRecoveryTargets(
+              if (shouldAttemptCheckpointHaltRecovery(haltReason, ORCHESTRATOR_RECOVERABLE_HALT_REASON_PATTERN)) {
+                const recoveryTargets = selectCheckpointRecoveryTargets(
                   haltReason,
                   finalReportedTasks
                 )
@@ -4900,7 +4037,12 @@ ${clippedContent}`)
         completedTasks: completed.size
       })
 
-      const integrated = this.buildIntegratedResult(workflow.id, subtasks, results)
+      const integrated = buildWorkflowIntegratedResult({
+        workflowId: workflow.id,
+        tasks: subtasks,
+        results,
+        collectMissingEvidenceFields: text => this.collectMissingEvidenceFields(text)
+      })
       this.appendSharedContextEntry(sharedContext, {
         taskId: workflow.id,
         phase: 'integration',
@@ -4912,38 +4054,33 @@ ${clippedContent}`)
         }
       })
 
-      const finalResult = [
-        integrated.summary,
-        '',
-        '### task_outputs',
-        ...integrated.taskOutputs.map(item => `- ${item.taskId}:\n${item.outputPreview || '(empty)'}`),
-        '',
-        '### conflicts',
-        ...(integrated.conflicts.length > 0 ? integrated.conflicts.map(item => `- ${item}`) : ['- (none)']),
-        '',
-        '### unresolved_items',
-        ...(integrated.unresolvedItems.length > 0
-          ? integrated.unresolvedItems.map(item => `- ${item}`)
-          : ['- (none)'])
-      ].join('\n')
+      const finalResult = buildWorkflowFinalOutput(integrated)
 
       recordStageTransition('finalize', {
         finalResultLength: finalResult.length
       })
 
-      const observability = this.buildWorkflowObservabilitySnapshot({
+      const observability = writeWorkflowObservabilitySnapshot({
         workflowId: workflow.id,
         sessionId: resolvedSessionId,
+        traceId,
         graph,
         integrated,
         sharedContext,
+        activeEntries: this.querySharedContext(sharedContext, {
+          workflowId: workflow.id
+        }),
+        archivedEntries: this.querySharedContext(sharedContext, {
+          workflowId: workflow.id,
+          includeArchived: true
+        }).filter(entry => sharedContext.archivedEntries.some(archived => archived.id === entry.id)),
         executions,
         tasks: subtasks,
         lifecycleEvents: lifecycleTimeline,
         taskTimeline,
         runTimeline,
         retryStates: taskRetryStates,
-        recoveryState,
+        recoveryState: this.cloneRecoveryState(recoveryState),
         status: 'completed'
       })
 
@@ -4965,6 +4102,7 @@ ${clippedContent}`)
             orchestratorCheckpointEnabled: checkpointEnabled,
             orchestratorCheckpoints,
             orchestratorParticipation: orchestratorCheckpoints.length > 0,
+            traceId: traceId || null,
             routingContext: resolvedOptions.routingContext || null,
             skill: dispatchSkillRuntime || null,
             skillToolScope: resolvedOptions.availableTools || null,
@@ -5058,22 +4196,35 @@ ${clippedContent}`)
       const fallbackTaskTimeline: Array<Record<string, unknown>> = []
       const fallbackRunTimeline: Array<Record<string, unknown>> = []
 
-      const fallbackGraph = this.buildWorkflowGraph(workflow.id, fallbackTasks)
-      const fallbackIntegrated = this.buildIntegratedResult(workflow.id, fallbackTasks, fallbackResults)
+      const fallbackGraph = buildWorkflowGraph(workflow.id, fallbackTasks)
+      const fallbackIntegrated = buildWorkflowIntegratedResult({
+        workflowId: workflow.id,
+        tasks: fallbackTasks,
+        results: fallbackResults,
+        collectMissingEvidenceFields: text => this.collectMissingEvidenceFields(text)
+      })
       const failureStatus: 'failed' | 'cancelled' = cancelled ? 'cancelled' : 'failed'
-      const observability = this.buildWorkflowObservabilitySnapshot({
+      const observability = writeWorkflowObservabilitySnapshot({
         workflowId: workflow.id,
         sessionId: resolvedSessionId,
+        traceId,
         graph: fallbackGraph,
         integrated: fallbackIntegrated,
         sharedContext: fallbackSharedContext,
+        activeEntries: this.querySharedContext(fallbackSharedContext, {
+          workflowId: workflow.id
+        }),
+        archivedEntries: this.querySharedContext(fallbackSharedContext, {
+          workflowId: workflow.id,
+          includeArchived: true
+        }).filter(entry => fallbackSharedContext.archivedEntries.some(archived => archived.id === entry.id)),
         executions: fallbackExecutions,
         tasks: fallbackTasks,
         lifecycleEvents: fallbackLifecycleTimeline,
         taskTimeline: fallbackTaskTimeline,
         runTimeline: fallbackRunTimeline,
         retryStates: taskRetryStates,
-        recoveryState,
+        recoveryState: this.cloneRecoveryState(recoveryState),
         status: failureStatus
       })
 
@@ -5091,6 +4242,7 @@ ${clippedContent}`)
             orchestratorCheckpointEnabled: checkpointEnabled,
             orchestratorCheckpoints,
             orchestratorParticipation: orchestratorCheckpoints.length > 0,
+            traceId: traceId || null,
             routingContext: resolvedOptions.routingContext || null,
             skill: dispatchSkillRuntime || null,
             skillToolScope: resolvedOptions.availableTools || null,
@@ -5128,6 +4280,19 @@ ${clippedContent}`)
   }
 
   async getWorkflowObservability(workflowTaskId: string): Promise<WorkflowObservabilitySnapshot | null> {
+    type PersistedWorkflowObservabilityMetadata = {
+      graph?: Partial<WorkflowObservabilitySnapshot['graph']>
+      integration?: Partial<WorkflowObservabilitySnapshot['integration']>
+      sharedContext?: Partial<WorkflowObservabilitySnapshot['sharedContext']>
+      correlation?: Partial<WorkflowObservabilitySnapshot['correlation']>
+      timeline?: Partial<WorkflowObservabilitySnapshot['timeline']>
+      retryState?: Partial<WorkflowObservabilitySnapshot['retryState']>
+      continuationSnapshot?: Partial<WorkflowObservabilitySnapshot['continuationSnapshot']>
+      lifecycleStages?: WorkflowObservabilitySnapshot['lifecycleStages']
+      assignments?: WorkflowObservabilitySnapshot['assignments']
+      recoveryState?: WorkflowObservabilitySnapshot['recoveryState']
+    }
+
     const workflowTask = await this.prisma.task.findUnique({
       where: { id: workflowTaskId },
       select: {
@@ -5144,7 +4309,8 @@ ${clippedContent}`)
       return null
     }
 
-    const metadata = (workflowTask.metadata as Record<string, any> | null) || {}
+    const metadata: PersistedWorkflowObservabilityMetadata =
+      (workflowTask.metadata as PersistedWorkflowObservabilityMetadata | null) ?? {}
     if (!metadata.graph || !metadata.integration || !metadata.sharedContext) {
       return null
     }
@@ -5167,20 +4333,37 @@ ${clippedContent}`)
             ? 'cancelled'
             : 'running'
 
-    const correlation =
+    const correlation: WorkflowObservabilitySnapshot['correlation'] =
       metadata.correlation && typeof metadata.correlation === 'object'
-        ? metadata.correlation
-        : { workflowId: metadata.graph.workflowId || workflowTask.id }
+        ? {
+            workflowId:
+              typeof metadata.correlation.workflowId === 'string' && metadata.correlation.workflowId.trim().length > 0
+                ? metadata.correlation.workflowId
+                : metadata.graph.workflowId || workflowTask.id,
+            sessionId:
+              typeof metadata.correlation.sessionId === 'string' && metadata.correlation.sessionId.trim().length > 0
+                ? metadata.correlation.sessionId
+                : undefined,
+            traceId:
+              typeof metadata.correlation.traceId === 'string' && metadata.correlation.traceId.trim().length > 0
+                ? metadata.correlation.traceId
+                : undefined
+          }
+        : {
+            workflowId: metadata.graph.workflowId || workflowTask.id,
+            sessionId: undefined,
+            traceId: undefined
+          }
 
-    const timelineSource =
+    const timelineSource: Partial<WorkflowObservabilitySnapshot['timeline']> =
       metadata.timeline && typeof metadata.timeline === 'object' ? metadata.timeline : {}
 
-    const retryStateSource =
+    const retryStateSource: Partial<WorkflowObservabilitySnapshot['retryState']> =
       metadata.retryState && typeof metadata.retryState === 'object'
         ? metadata.retryState
         : { tasks: {}, totalRetried: 0 }
 
-    const continuationSource =
+    const continuationSource: Partial<WorkflowObservabilitySnapshot['continuationSnapshot']> =
       metadata.continuationSnapshot && typeof metadata.continuationSnapshot === 'object'
         ? metadata.continuationSnapshot
         : {
@@ -5194,6 +4377,71 @@ ${clippedContent}`)
         }
 
     const recoverySource = this.normalizePersistedRecoveryState(metadata.recoveryState)
+
+    const integration: WorkflowObservabilitySnapshot['integration'] = {
+      summary: typeof metadata.integration.summary === 'string' ? metadata.integration.summary : '',
+      conflicts: Array.isArray(metadata.integration.conflicts) ? metadata.integration.conflicts : [],
+      unresolvedItems: Array.isArray(metadata.integration.unresolvedItems)
+        ? metadata.integration.unresolvedItems
+        : [],
+      taskOutputs: Array.isArray(metadata.integration.taskOutputs) ? metadata.integration.taskOutputs : [],
+      rawTaskOutputs: Array.isArray(metadata.integration.rawTaskOutputs)
+        ? metadata.integration.rawTaskOutputs
+        : []
+    }
+
+    const retryState: WorkflowObservabilitySnapshot['retryState'] = {
+      tasks:
+        retryStateSource.tasks && typeof retryStateSource.tasks === 'object'
+          ? retryStateSource.tasks
+          : {},
+      totalRetried:
+        typeof retryStateSource.totalRetried === 'number' ? retryStateSource.totalRetried : 0
+    }
+
+    const continuationSnapshot: WorkflowObservabilitySnapshot['continuationSnapshot'] = {
+      workflowId: continuationSource.workflowId || metadata.graph.workflowId || workflowTask.id,
+      sessionId:
+        typeof continuationSource.sessionId === 'string' && continuationSource.sessionId.trim().length > 0
+          ? continuationSource.sessionId
+          : undefined,
+      status:
+        continuationSource.status === 'completed' ||
+          continuationSource.status === 'failed' ||
+          continuationSource.status === 'cancelled' ||
+          continuationSource.status === 'running'
+          ? continuationSource.status
+          : derivedContinuationStatus,
+      resumable: Boolean(continuationSource.resumable),
+      failedTasks: Array.isArray(continuationSource.failedTasks) ? continuationSource.failedTasks : [],
+      retryableTasks: Array.isArray(continuationSource.retryableTasks)
+        ? continuationSource.retryableTasks
+        : [],
+      updatedAt:
+        typeof continuationSource.updatedAt === 'string' && continuationSource.updatedAt.length > 0
+          ? continuationSource.updatedAt
+          : workflowTaskUpdatedAt.toISOString()
+    }
+
+    const sharedContext: WorkflowObservabilitySnapshot['sharedContext'] = {
+      workflowId: metadata.sharedContext.workflowId || workflowTask.id,
+      totalEntries:
+        typeof metadata.sharedContext.totalEntries === 'number' ? metadata.sharedContext.totalEntries : 0,
+      activeEntries:
+        typeof metadata.sharedContext.activeEntries === 'number'
+          ? metadata.sharedContext.activeEntries
+          : Array.isArray(metadata.sharedContext.entries)
+            ? metadata.sharedContext.entries.length
+            : 0,
+      archivedEntries:
+        typeof metadata.sharedContext.archivedEntries === 'number'
+          ? metadata.sharedContext.archivedEntries
+          : Array.isArray(metadata.sharedContext.archived)
+            ? metadata.sharedContext.archived.length
+            : 0,
+      entries: Array.isArray(metadata.sharedContext.entries) ? metadata.sharedContext.entries : [],
+      archived: Array.isArray(metadata.sharedContext.archived) ? metadata.sharedContext.archived : []
+    }
 
     return {
       workflowId: metadata.graph.workflowId || workflowTask.id,
@@ -5214,72 +4462,13 @@ ${clippedContent}`)
         task: Array.isArray(timelineSource.task) ? timelineSource.task : [],
         run: Array.isArray(timelineSource.run) ? timelineSource.run : []
       },
-      integration: {
-        ...metadata.integration,
-        taskOutputs: Array.isArray(metadata.integration?.taskOutputs)
-          ? metadata.integration.taskOutputs
-          : [],
-        rawTaskOutputs: Array.isArray(metadata.integration?.rawTaskOutputs)
-          ? metadata.integration.rawTaskOutputs
-          : []
-      },
+      integration,
       lifecycleStages: Array.isArray(metadata.lifecycleStages) ? metadata.lifecycleStages : [],
       assignments: Array.isArray(metadata.assignments) ? metadata.assignments : [],
-      retryState: {
-        tasks:
-          retryStateSource.tasks && typeof retryStateSource.tasks === 'object'
-            ? retryStateSource.tasks
-            : {},
-        totalRetried:
-          typeof retryStateSource.totalRetried === 'number' ? retryStateSource.totalRetried : 0
-      },
+      retryState,
       recoveryState: recoverySource,
-      continuationSnapshot: {
-        workflowId: continuationSource.workflowId || metadata.graph.workflowId || workflowTask.id,
-        sessionId:
-          typeof continuationSource.sessionId === 'string' && continuationSource.sessionId.trim().length > 0
-            ? continuationSource.sessionId
-            : undefined,
-        status:
-          continuationSource.status === 'completed' ||
-            continuationSource.status === 'failed' ||
-            continuationSource.status === 'cancelled' ||
-            continuationSource.status === 'running'
-            ? continuationSource.status
-            : derivedContinuationStatus,
-        resumable: Boolean(continuationSource.resumable),
-        failedTasks: Array.isArray(continuationSource.failedTasks)
-          ? continuationSource.failedTasks
-          : [],
-        retryableTasks: Array.isArray(continuationSource.retryableTasks)
-          ? continuationSource.retryableTasks
-          : [],
-        updatedAt:
-          typeof continuationSource.updatedAt === 'string' && continuationSource.updatedAt.length > 0
-            ? continuationSource.updatedAt
-            : workflowTaskUpdatedAt.toISOString()
-      },
-      sharedContext: {
-        workflowId: metadata.sharedContext.workflowId || workflowTask.id,
-        totalEntries:
-          typeof metadata.sharedContext.totalEntries === 'number'
-            ? metadata.sharedContext.totalEntries
-            : 0,
-        activeEntries:
-          typeof metadata.sharedContext.activeEntries === 'number'
-            ? metadata.sharedContext.activeEntries
-            : Array.isArray(metadata.sharedContext.entries)
-              ? metadata.sharedContext.entries.length
-              : 0,
-        archivedEntries:
-          typeof metadata.sharedContext.archivedEntries === 'number'
-            ? metadata.sharedContext.archivedEntries
-            : Array.isArray(metadata.sharedContext.archived)
-              ? metadata.sharedContext.archived.length
-              : 0,
-        entries: Array.isArray(metadata.sharedContext.entries) ? metadata.sharedContext.entries : [],
-        archived: Array.isArray(metadata.sharedContext.archived) ? metadata.sharedContext.archived : []
-      }
+      continuationSnapshot,
+      sharedContext
     }
   }
 

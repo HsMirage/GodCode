@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-03-03T09:14:50.538Z",
+  "warmupMs": 2075,
+  "samples": [
+    2082,
+    2094,
+    2093
+  ],
+  "averageMs": 2090,
+  "worstMs": 2094,
+  "sampleResults": [
+    {
+      "elapsedMs": 2082,
+      "heapUsedMB": 35.62,
+      "rssMB": 440.14,
+      "externalMB": 5.92
+    },
+    {
+      "elapsedMs": 2094,
+      "heapUsedMB": 36.88,
+      "rssMB": 376.61,
+      "externalMB": 6.03
+    },
+    {
+      "elapsedMs": 2093,
+      "heapUsedMB": 27.67,
+      "rssMB": 297.38,
+      "externalMB": 4.57
+    }
+  ],
+  "peakHeapMB": 36.88,
+  "peakRssMB": 440.14
+}

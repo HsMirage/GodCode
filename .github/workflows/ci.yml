@@ -7,6 +7,7 @@ on:
 
 jobs:
   build:
+    name: General CI
     runs-on: ubuntu-latest
 
     steps:
@@ -30,7 +31,7 @@ jobs:
       - name: Detect scripts
         id: scripts
         run: |
-          node -e "const s=require('./package.json').scripts||{}; const o=(k)=>process.stdout.write(`${k}=${!!s[k]}\n`); o('lint'); o('typecheck'); o('test'); o('build'); o('test:e2e:ci'); o('test:e2e:acceptance');" >> $GITHUB_OUTPUT
+          node -e "const s=require('./package.json').scripts||{}; const o=(k,n=k)=>process.stdout.write(`${n}=${!!s[k]}\n`); o('lint'); o('typecheck'); o('verify:ipc-alignment','verify_ipc_alignment'); o('test'); o('build'); o('test:e2e:ci'); o('test:e2e:acceptance');" >> $GITHUB_OUTPUT
 
       - name: Lint
         if: ${{ steps.scripts.outputs.lint == 'true' }}
@@ -39,6 +40,10 @@ jobs:
       - name: Typecheck
         if: ${{ steps.scripts.outputs.typecheck == 'true' }}
         run: pnpm typecheck
+
+      - name: Verify IPC alignment
+        if: ${{ steps.scripts.outputs.verify_ipc_alignment == 'true' }}
+        run: pnpm verify:ipc-alignment
 
       - name: Test
         if: ${{ steps.scripts.outputs.test == 'true' }}
@@ -85,9 +90,93 @@ jobs:
           path: test-results
           if-no-files-found: ignore
 
+  release-agent-gates:
+    name: Agent Capability Gates
+    runs-on: ubuntu-latest
+    outputs:
+      chat_status: ${{ steps.chat_status.outputs.status }}
+      delegate_status: ${{ steps.delegate_status.outputs.status }}
+      browser_status: ${{ steps.browser_status.outputs.status }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Release gate chat flow
+        id: chat_gate
+        run: xvfb-run -a pnpm exec playwright test tests/e2e/session-workflow.spec.ts -g "can bind default model and send message"
+
+      - name: Record chat gate status
+        if: always()
+        id: chat_status
+        run: |
+          if [ "${{ steps.chat_gate.outcome }}" = "success" ]; then
+            echo "status=PASS" >> $GITHUB_OUTPUT
+          else
+            echo "status=FAIL" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Release gate delegate/workforce flow
+        id: delegate_gate
+        run: pnpm exec vitest run "tests/integration/workforce-engine.test.ts"
+
+      - name: Record delegate/workforce gate status
+        if: always()
+        id: delegate_status
+        run: |
+          if [ "${{ steps.delegate_gate.outcome }}" = "success" ]; then
+            echo "status=PASS" >> $GITHUB_OUTPUT
+          else
+            echo "status=FAIL" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Release gate browser flow
+        id: browser_gate
+        run: pnpm exec vitest run "tests/integration/browser-automation.test.ts" "tests/integration/ai-browser.test.ts"
+
+      - name: Record browser gate status
+        if: always()
+        id: browser_status
+        run: |
+          if [ "${{ steps.browser_gate.outcome }}" = "success" ]; then
+            echo "status=PASS" >> $GITHUB_OUTPUT
+          else
+            echo "status=FAIL" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload agent capability artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-agent-gates-artifacts
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
 
   build-macos:
+    name: Platform Gate macOS
     runs-on: macos-latest
+    outputs:
+      build_status: ${{ steps.mac_build_status.outputs.status }}
+      smoke_status: ${{ steps.mac_smoke_status.outputs.status }}
 
     steps:
       - name: Checkout
@@ -113,7 +202,165 @@ jobs:
           node -e "const s=require('./package.json').scripts||{}; process.stdout.write(`build_mac=${!!s['build:mac']}\n`);" >> $GITHUB_OUTPUT
 
       - name: Build macOS package
+        id: mac_build
         if: ${{ steps.mac_script.outputs.build_mac == 'true' }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: pnpm build:mac
+
+      - name: Record macOS build status
+        if: always()
+        id: mac_build_status
+        run: |
+          if [ "${{ steps.mac_script.outputs.build_mac }}" != "true" ]; then
+            echo "status=BLOCKED" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.mac_build.outcome }}" = "success" ]; then
+            echo "status=PASS" >> $GITHUB_OUTPUT
+          else
+            echo "status=FAIL" >> $GITHUB_OUTPUT
+          fi
+
+      - name: macOS boot smoke
+        id: mac_smoke
+        if: ${{ steps.mac_build.outcome == 'success' }}
+        run: pnpm verify:release-smoke --platform macos --report release-gate-macos-smoke.json
+
+      - name: Record macOS boot smoke status
+        if: always()
+        id: mac_smoke_status
+        run: |
+          if [ "${{ steps.mac_build_status.outputs.status }}" != "PASS" ]; then
+            echo "status=BLOCKED" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.mac_smoke.outcome }}" = "success" ]; then
+            echo "status=PASS" >> $GITHUB_OUTPUT
+          else
+            echo "status=FAIL" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload macOS release artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-platform-macos-artifacts
+          path: |
+            dist
+            release-gate-macos-smoke.json
+          if-no-files-found: ignore
+
+  build-windows:
+    name: Platform Gate Windows
+    runs-on: windows-latest
+    outputs:
+      build_status: ${{ steps.win_build_status.outputs.status }}
+      smoke_status: ${{ steps.win_smoke_status.outputs.status }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Detect build:win script
+        id: win_script
+        shell: pwsh
+        run: |
+          node -e "const s=require('./package.json').scripts||{}; process.stdout.write(`build_win=${!!s['build:win']}\n`);" >> $env:GITHUB_OUTPUT
+
+      - name: Build Windows package
+        id: win_build
+        if: ${{ steps.win_script.outputs.build_win == 'true' }}
+        run: pnpm build:win
+
+      - name: Record Windows build status
+        if: always()
+        id: win_build_status
+        shell: pwsh
+        run: |
+          if ("${{ steps.win_script.outputs.build_win }}" -ne "true") {
+            "status=BLOCKED" >> $env:GITHUB_OUTPUT
+          } elseif ("${{ steps.win_build.outcome }}" -eq "success") {
+            "status=PASS" >> $env:GITHUB_OUTPUT
+          } else {
+            "status=FAIL" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Windows boot smoke
+        id: win_smoke
+        if: ${{ steps.win_build.outcome == 'success' }}
+        run: pnpm verify:release-smoke --platform windows --report release-gate-windows-smoke.json
+
+      - name: Record Windows boot smoke status
+        if: always()
+        id: win_smoke_status
+        shell: pwsh
+        run: |
+          if ("${{ steps.win_build_status.outputs.status }}" -ne "PASS") {
+            "status=BLOCKED" >> $env:GITHUB_OUTPUT
+          } elseif ("${{ steps.win_smoke.outcome }}" -eq "success") {
+            "status=PASS" >> $env:GITHUB_OUTPUT
+          } else {
+            "status=FAIL" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Upload Windows release artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-platform-windows-artifacts
+          path: |
+            dist
+            release-gate-windows-smoke.json
+          if-no-files-found: ignore
+
+  release-gate-summary:
+    name: Release Gate Summary
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - release-agent-gates
+      - build-macos
+      - build-windows
+
+    steps:
+      - name: Summarize layered release gates
+        env:
+          RLS_BUILD_WIN: ${{ needs.build-windows.outputs.build_status }}
+          RLS_BUILD_MAC: ${{ needs.build-macos.outputs.build_status }}
+          RLS_BOOT_WIN: ${{ needs.build-windows.outputs.smoke_status }}
+          RLS_BOOT_MAC: ${{ needs.build-macos.outputs.smoke_status }}
+          RLS_FLOW_CHAT: ${{ needs.release-agent-gates.outputs.chat_status }}
+          RLS_FLOW_DELEGATE: ${{ needs.release-agent-gates.outputs.delegate_status }}
+          RLS_FLOW_BROWSER: ${{ needs.release-agent-gates.outputs.browser_status }}
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<EOF
+          # Release Gate Summary
+          | Gate | Layer | Status |
+          |---|---|---|
+          | RLS-BUILD-WIN | platform | ${RLS_BUILD_WIN:-BLOCKED} |
+          | RLS-BUILD-MAC | platform | ${RLS_BUILD_MAC:-BLOCKED} |
+          | RLS-BOOT-WIN | platform | ${RLS_BOOT_WIN:-BLOCKED} |
+          | RLS-BOOT-MAC | platform | ${RLS_BOOT_MAC:-BLOCKED} |
+          | RLS-FLOW-CHAT | agent-capability | ${RLS_FLOW_CHAT:-BLOCKED} |
+          | RLS-FLOW-DELEGATE | agent-capability | ${RLS_FLOW_DELEGATE:-BLOCKED} |
+          | RLS-FLOW-BROWSER | agent-capability | ${RLS_FLOW_BROWSER:-BLOCKED} |
+          EOF
+
+          statuses=("${RLS_BUILD_WIN:-BLOCKED}" "${RLS_BUILD_MAC:-BLOCKED}" "${RLS_BOOT_WIN:-BLOCKED}" "${RLS_BOOT_MAC:-BLOCKED}" "${RLS_FLOW_CHAT:-BLOCKED}" "${RLS_FLOW_DELEGATE:-BLOCKED}" "${RLS_FLOW_BROWSER:-BLOCKED}")
+          for status in "${statuses[@]}"; do
+            if [ "$status" != "PASS" ]; then
+              echo "Release gate failed because status=$status"
+              exit 1
+            fi
+          done

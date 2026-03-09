@@ -1,13 +1,14 @@
 import { create } from 'zustand'
-import type { Agent, Model } from '@renderer/types/domain'
+import type { Agent } from '@renderer/types/domain'
+import type { PersistedModel } from '@shared/ipc-contract'
 
 interface ConfigState {
-  models: Model[]
+  models: PersistedModel[]
   agents: Agent[]
   settings: Record<string, unknown>
-  loadModels: (models: Model[]) => void
-  addModel: (model: Model) => void
-  updateModel: (model: Model) => void
+  loadModels: (models: PersistedModel[]) => void
+  addModel: (model: PersistedModel) => void
+  updateModel: (model: PersistedModel) => void
   deleteModel: (modelId: string) => void
   setAgents: (agents: Agent[]) => void
   updateSettings: (settings: Record<string, unknown>) => void

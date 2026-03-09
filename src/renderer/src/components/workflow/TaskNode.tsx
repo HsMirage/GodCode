@@ -1,8 +1,14 @@
 import { memo } from 'react'
 import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
-import type { Task } from '@/types/domain'
+import type { Task } from '@renderer/types/domain'
 import { useTraceNavigationStore } from '../../store/trace-navigation.store'
+import {
+  getModelSelectionReasonLabel,
+  getModelSelectionSourceLabel,
+  type ModelSelectionSnapshot,
+  type ModelSelectionSource
+} from '@shared/model-selection-contract'
 
 export interface TaskNodeData extends Record<string, unknown> {
   task: Task
@@ -14,6 +20,7 @@ export interface TaskNodeData extends Record<string, unknown> {
 const statusColors = {
   pending: 'border-slate-600 bg-slate-900/50',
   running: 'border-sky-500 bg-sky-950/50 shadow-[0_0_12px_rgba(14,165,233,0.3)]',
+  pending_approval: 'border-violet-500 bg-violet-950/40 shadow-[0_0_12px_rgba(139,92,246,0.22)]',
   completed: 'border-emerald-500 bg-emerald-950/50',
   failed: 'border-rose-500 bg-rose-950/50',
   cancelled: 'border-amber-500 bg-amber-950/50'
@@ -22,6 +29,7 @@ const statusColors = {
 const statusTextColors = {
   pending: 'text-slate-400',
   running: 'text-sky-300',
+  pending_approval: 'text-violet-300',
   completed: 'text-emerald-300',
   failed: 'text-rose-300',
   cancelled: 'text-amber-300'
@@ -33,6 +41,21 @@ export const TaskNode = memo((props: NodeProps) => {
   const requestNavigate = useTraceNavigationStore(state => state.requestNavigate)
   const colorClass = statusColors[task.status]
   const textColorClass = statusTextColors[task.status]
+  const metadata = (task.metadata || {}) as Record<string, unknown>
+  const runtimeBindingSnapshot =
+    metadata.runtimeBindingSnapshot && typeof metadata.runtimeBindingSnapshot === 'object'
+      ? (metadata.runtimeBindingSnapshot as Record<string, unknown>)
+      : undefined
+  const nodeSelection =
+    (runtimeBindingSnapshot?.modelSelection as ModelSelectionSnapshot | undefined) ||
+    (metadata.modelSelection as ModelSelectionSnapshot | undefined) ||
+    (metadata.workflowSelectionSnapshot as ModelSelectionSnapshot | undefined)
+  const nodeModelSource =
+    nodeSelection?.modelSelectionSource ||
+    (typeof runtimeBindingSnapshot?.modelSource === 'string'
+      ? (runtimeBindingSnapshot.modelSource as ModelSelectionSource)
+      : undefined)
+  const nodeModelReason = nodeSelection?.modelSelectionReason
 
   // Add animation class for completed tasks
   const animationClass =
@@ -45,7 +68,6 @@ export const TaskNode = memo((props: NodeProps) => {
     : ''
 
   const handleOpenLinkedContext = () => {
-    const metadata = (task.metadata || {}) as Record<string, unknown>
     const runId = typeof metadata.runId === 'string' ? metadata.runId : undefined
     requestNavigate({
       source: 'workflow-node',
@@ -84,25 +106,50 @@ export const TaskNode = memo((props: NodeProps) => {
                 <span className="font-mono">{task.assignedModel}</span>
               </div>
             )}
+            {nodeModelSource && (
+              <div className="flex items-center gap-1">
+                <span className="text-slate-500">Source:</span>
+                <span>{getModelSelectionSourceLabel(nodeModelSource)}</span>
+              </div>
+            )}
+            {nodeModelReason && (
+              <div className="flex items-center gap-1">
+                <span className="text-slate-500">Reason:</span>
+                <span>{getModelSelectionReasonLabel(nodeModelReason)}</span>
+              </div>
+            )}
             {task.assignedAgent && (
               <div className="flex items-center gap-1">
                 <span className="text-slate-500">Agent:</span>
                 <span>{task.assignedAgent}</span>
               </div>
             )}
+            {nodeSelection?.modelSelectionSummary && (
+              <div className="rounded border border-slate-800/80 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-300">
+                {nodeSelection.modelSelectionSummary}
+              </div>
+            )}
           </div>
 
           <div className="mt-3 flex justify-end">
-            <button
-              type="button"
+            <span
+              role="button"
+              tabIndex={0}
               onClick={e => {
                 e.stopPropagation()
                 handleOpenLinkedContext()
               }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  handleOpenLinkedContext()
+                }
+              }}
               className="text-[11px] px-2 py-1 rounded border border-slate-700 text-slate-300 hover:bg-slate-800"
             >
               View linked logs
-            </button>
+            </span>
           </div>
         </div>
       </button>

@@ -11,7 +11,16 @@ describe('<SessionResumeIndicator />', () => {
         return {
           shouldContinue: true,
           incompleteTodos: [{ id: '1', content: 'pending', status: 'pending' }],
-          continuationPrompt: 'continue now'
+          continuationPrompt: 'continue now',
+          totalTodos: 3,
+          completedTodos: 1,
+          recoveryContext: {
+            recoverySource: 'manual-resume',
+            recoveryStage: 'prompt-ready',
+            resumeReason: 'pending-todos',
+            resumeAction: 'send-resume-prompt',
+            recoveryUpdatedAt: '2026-03-06T00:00:00.000Z'
+          }
         }
       }
       if (channel === 'session-recovery:list') {
@@ -40,7 +49,14 @@ describe('<SessionResumeIndicator />', () => {
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith('message:send', {
         sessionId: 'session-1',
-        content: 'continue now'
+        content: 'continue now',
+        resumeContext: {
+          recoverySource: 'manual-resume',
+          recoveryStage: 'prompt-ready',
+          resumeReason: 'pending-todos',
+          resumeAction: 'send-resume-prompt',
+          recoveryUpdatedAt: '2026-03-06T00:00:00.000Z'
+        }
       })
     })
   })
@@ -51,7 +67,16 @@ describe('<SessionResumeIndicator />', () => {
         return {
           shouldContinue: false,
           incompleteTodos: [{ id: '1', content: 'pending', status: 'pending' }],
-          continuationPrompt: 'should not send'
+          continuationPrompt: 'should not send',
+          totalTodos: 1,
+          completedTodos: 0,
+          recoveryContext: {
+            recoverySource: 'manual-resume',
+            recoveryStage: 'prompt-ready',
+            resumeReason: 'pending-todos',
+            resumeAction: 'send-resume-prompt',
+            recoveryUpdatedAt: '2026-03-06T00:00:00.000Z'
+          }
         }
       }
       if (channel === 'session-recovery:list') {
@@ -82,7 +107,10 @@ describe('<SessionResumeIndicator />', () => {
       if (channel === 'task-continuation:get-status') {
         return {
           shouldContinue: false,
-          incompleteTodos: []
+          incompleteTodos: [],
+          totalTodos: 0,
+          completedTodos: 0,
+          recoveryContext: null
         }
       }
       if (channel === 'session-recovery:list') {
@@ -106,5 +134,43 @@ describe('<SessionResumeIndicator />', () => {
 
     expect(screen.queryByRole('button', { name: 'Resume Session' })).not.toBeInTheDocument()
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('renders unified recovery labels', async () => {
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === 'task-continuation:get-status') {
+        return {
+          shouldContinue: true,
+          incompleteTodos: [{ id: '1', content: 'pending', status: 'pending' }],
+          continuationPrompt: 'continue now',
+          totalTodos: 2,
+          completedTodos: 1,
+          recoveryContext: {
+            recoverySource: 'manual-resume',
+            recoveryStage: 'prompt-ready',
+            resumeReason: 'pending-todos',
+            resumeAction: 'send-resume-prompt',
+            recoveryUpdatedAt: '2026-03-06T00:00:00.000Z'
+          }
+        }
+      }
+      if (channel === 'session-recovery:list') {
+        return []
+      }
+      return null
+    })
+
+    Object.defineProperty(window, 'codeall', {
+      configurable: true,
+      value: {
+        invoke
+      }
+    })
+
+    render(<SessionResumeIndicator sessionId="session-1" />)
+
+    await screen.findByText('Manual resume')
+    expect(screen.getByText('Pending TODOs found')).toBeInTheDocument()
+    expect(screen.getByText('Send resume prompt')).toBeInTheDocument()
   })
 })

@@ -38,6 +38,15 @@ export interface BrowserTool {
 export interface BrowserToolContext {
   viewId: string
   webContents: Electron.WebContents | null
+  workspaceDir?: string
+  sessionId?: string
+  traceId?: string
+  taskId?: string
+  runId?: string
+  setActiveViewId?: (viewId: string) => void
+  waitForText?: (text: string, timeoutMs?: number) => Promise<void>
+  getPendingDialog?: () => unknown
+  handleDialog?: (accept: boolean, promptText?: string) => Promise<void>
 }
 
 export interface ToolResult {

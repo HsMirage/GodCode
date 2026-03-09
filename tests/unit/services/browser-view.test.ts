@@ -46,7 +46,7 @@ describe('BrowserViewManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    browserViewManager.initialize(mainWindowMock as any)
+    browserViewManager.initialize(mainWindowMock as unknown as Parameters<typeof browserViewManager.initialize>[0])
   })
 
   afterEach(() => {
@@ -61,6 +61,7 @@ describe('BrowserViewManager', () => {
     expect(state).toBeDefined()
     expect(state.id).toBe(viewId)
     expect(state.url).toBe(url)
+    expect(state.lifecycleState).toBe('created')
     expect(BrowserView).toHaveBeenCalledTimes(1)
 
     const wc = browserViewManager.getWebContents(viewId)
@@ -108,6 +109,7 @@ describe('BrowserViewManager', () => {
 
     expect(result).toBe(true)
     expect(mainWindowMock.addBrowserView).toHaveBeenCalled()
+    expect(browserViewManager.getState(viewId)?.lifecycleState).toBe('visible')
   })
 
   it('should hide the browser view', async () => {
@@ -118,6 +120,20 @@ describe('BrowserViewManager', () => {
     const result = browserViewManager.hide(viewId)
     expect(result).toBe(true)
     expect(mainWindowMock.removeBrowserView).toHaveBeenCalled()
+    expect(browserViewManager.getState(viewId)?.lifecycleState).toBe('hidden')
+  })
+
+  it('should not re-attach an already visible browser view', async () => {
+    const viewId = 'view-6b'
+    await browserViewManager.create(viewId)
+
+    const bounds = { x: 0, y: 0, width: 800, height: 600 }
+    const first = browserViewManager.show(viewId, bounds)
+    const second = browserViewManager.show(viewId, bounds)
+
+    expect(first).toBe(true)
+    expect(second).toBe(true)
+    expect(mainWindowMock.addBrowserView).toHaveBeenCalledTimes(1)
   })
 
   it('should search on google for non-url input', async () => {
@@ -160,5 +176,16 @@ describe('BrowserViewManager', () => {
       if (browserViewManager.getState(`view-${i}`)) count++
     }
     expect(count).toBe(5)
+  })
+
+  it('should destroy underlying web contents when destroying a view', async () => {
+    const viewId = 'view-destroy'
+    await browserViewManager.create(viewId)
+
+    const wc = browserViewManager.getWebContents(viewId)
+    browserViewManager.destroy(viewId)
+
+    expect((wc as unknown as { destroy: () => void }).destroy).toHaveBeenCalled()
+    expect(browserViewManager.getState(viewId)).toBeNull()
   })
 })

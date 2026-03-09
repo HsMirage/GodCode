@@ -10,7 +10,23 @@ const mocks = vi.hoisted(() => {
       update: vi.fn()
     },
     model: {
+      findUnique: vi.fn(),
       findFirst: vi.fn(),
+      findMany: vi.fn()
+    },
+    agentBinding: {
+      findUnique: vi.fn()
+    },
+    categoryBinding: {
+      findUnique: vi.fn()
+    },
+    systemSetting: {
+      findUnique: vi.fn()
+    },
+    run: {
+      create: vi.fn(),
+      findUnique: vi.fn(),
+      update: vi.fn(),
       findMany: vi.fn()
     },
     session: {
@@ -92,6 +108,14 @@ vi.mock('@/main/services/llm/factory', () => ({
   createLLMAdapter: vi.fn(() => mocks.mockAdapter)
 }))
 
+vi.mock('@/main/services/secure-storage.service', () => ({
+  SecureStorageService: {
+    getInstance: vi.fn(() => ({
+      decrypt: (value: string) => value
+    }))
+  }
+}))
+
 describe('DelegateEngine', () => {
   let delegateEngine: DelegateEngine
 
@@ -135,12 +159,54 @@ describe('DelegateEngine', () => {
     mocks.mockPrisma.session.findFirst.mockResolvedValue({ id: 'session-1' })
     mocks.mockPrisma.task.create.mockResolvedValue({ id: 'task-1', type: 'subtask' })
     mocks.mockPrisma.task.update.mockResolvedValue({ id: 'task-1' })
+    mocks.mockPrisma.run.create.mockResolvedValue({ id: 'run-1', status: 'running', logs: [] })
+    mocks.mockPrisma.run.findUnique.mockResolvedValue({ id: 'run-1', status: 'running', logs: [] })
+    mocks.mockPrisma.run.update.mockResolvedValue({ id: 'run-1', status: 'completed', logs: [] })
+    mocks.mockPrisma.systemSetting.findUnique.mockResolvedValue(null)
     mocks.mockPrisma.model.findFirst.mockResolvedValue({
       id: 'model-1',
       provider: 'openai-compatible',
       apiKey: 'test-key',
       baseURL: 'https://api.openai.com/v1',
       config: {}
+    })
+    mocks.mockPrisma.agentBinding.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where?.agentCode === 'qianliyan' || where?.agentCode === 'fuxi' || where?.agentCode === 'haotian') {
+        return {
+          enabled: true,
+          modelId: 'agent-model-1',
+          temperature: 0.2,
+          model: {
+            id: 'agent-model-1',
+            provider: 'openai-compatible',
+            modelName: 'claude-3-5-sonnet-20240620',
+            apiKey: 'test-key',
+            apiKeyRef: null,
+            baseURL: 'https://api.openai.com/v1',
+            config: { apiProtocol: 'responses' }
+          }
+        }
+      }
+      return null
+    })
+    mocks.mockPrisma.categoryBinding.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where?.categoryCode === 'tianbing') {
+        return {
+          enabled: true,
+          modelId: 'category-model-1',
+          temperature: 0.3,
+          model: {
+            id: 'category-model-1',
+            provider: 'openai-compatible',
+            modelName: 'claude-3-haiku-20240307',
+            apiKey: 'test-key',
+            apiKeyRef: null,
+            baseURL: 'https://api.openai.com/v1',
+            config: { apiProtocol: 'responses' }
+          }
+        }
+      }
+      return null
     })
     mocks.mockAdapter.sendMessage.mockResolvedValue({
       content: 'Task completed result',
@@ -169,7 +235,11 @@ describe('DelegateEngine', () => {
             input: input.description,
             metadata: expect.objectContaining({
               category: 'tianbing',
-              model: 'claude-3-haiku-20240307'
+              model: 'claude-3-haiku-20240307',
+              modelSelection: expect.objectContaining({
+                modelSelectionSource: 'category-binding',
+                modelSelectionReason: 'category-binding-hit'
+              })
             })
           })
         })
@@ -314,7 +384,7 @@ describe('DelegateEngine', () => {
           data: expect.objectContaining({
             metadata: expect.objectContaining({
               subagent_type: 'qianliyan',
-              model: 'claude-3-haiku-20240307'
+              model: 'claude-3-5-sonnet-20240620'
             })
           })
         })
@@ -351,9 +421,7 @@ describe('DelegateEngine', () => {
         sessionId: 'test-session-123'
       }
 
-      await expect(delegateEngine.delegateTask(input)).rejects.toThrow(
-        '任务类别「unknown-category」未配置可用模型'
-      )
+      await expect(delegateEngine.delegateTask(input)).rejects.toThrow('MODEL_NOT_CONFIGURED')
     })
 
     it('should throw error for unknown agent type', async () => {
@@ -364,9 +432,7 @@ describe('DelegateEngine', () => {
         sessionId: 'test-session-123'
       }
 
-      await expect(delegateEngine.delegateTask(input)).rejects.toThrow(
-        'Agent「unknown-agent」未配置可用模型'
-      )
+      await expect(delegateEngine.delegateTask(input)).rejects.toThrow('MODEL_NOT_CONFIGURED')
     })
 
     it('should reject unknown primary role alias in metadata payload', async () => {
@@ -634,8 +700,7 @@ describe('DelegateEngine', () => {
     })
 
     it('should handle model not found error', async () => {
-      // Force fallback to provider-level model lookup by using overrideModel without apiKey/baseURL.
-      mocks.mockPrisma.model.findFirst.mockResolvedValue(null)
+      mocks.mockPrisma.model.findMany.mockResolvedValue([])
 
       const input = {
         description: 'Test task',
@@ -644,17 +709,7 @@ describe('DelegateEngine', () => {
         sessionId: 'test-session-123'
       }
 
-      const result = await delegateEngine.delegateTask(input)
-
-      expect(result.success).toBe(false)
-      expect(result.output).toContain('No model configured for provider')
-      expect(mocks.mockPrisma.task.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            status: 'failed'
-          })
-        })
-      )
+      await expect(delegateEngine.delegateTask(input)).rejects.toThrow('MODEL_NOT_FOUND')
     })
 
     it('should handle LLM adapter error', async () => {
@@ -762,5 +817,74 @@ describe('DelegateEngine', () => {
 
       expect(mocks.mockLogger.info).toHaveBeenCalledWith('Task cancelled', { taskId: 'task-1' })
     })
+  })
+})
+
+describe('DelegateEngine trace propagation', () => {
+  let delegateEngine: DelegateEngine
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.mockAdapter.sendMessage.mockReset()
+    delegateEngine = new DelegateEngine()
+
+    bindingMocks.getCategoryBinding.mockImplementation(async () => null)
+    bindingMocks.getAgentBinding.mockImplementation(async () => null)
+    mocks.mockPrisma.session.findUnique.mockResolvedValue({
+      id: 'test-session-123',
+      space: { id: 'space-1', workDir: '/tmp/workspace-a' }
+    })
+    mocks.mockPrisma.task.create.mockResolvedValue({ id: 'task-1', type: 'subtask', metadata: {} })
+    mocks.mockPrisma.task.update.mockResolvedValue({ id: 'task-1' })
+    mocks.mockPrisma.run.create.mockResolvedValue({ id: 'run-1', status: 'running', logs: [] })
+    mocks.mockPrisma.run.findUnique.mockResolvedValue({ id: 'run-1', status: 'running', logs: [] })
+    mocks.mockPrisma.run.update.mockResolvedValue({ id: 'run-1', status: 'completed', logs: [] })
+    mocks.mockPrisma.systemSetting.findUnique.mockResolvedValue(null)
+    mocks.mockPrisma.agentBinding.findUnique.mockResolvedValue(null)
+    mocks.mockPrisma.categoryBinding.findUnique.mockImplementation(async ({ where }: any) => {
+      if (where?.categoryCode === 'tianbing') {
+        return {
+          enabled: true,
+          modelId: 'category-model-1',
+          temperature: 0.3,
+          model: {
+            id: 'category-model-1',
+            provider: 'openai-compatible',
+            modelName: 'gpt-4o-mini',
+            apiKey: 'test-key',
+            apiKeyRef: null,
+            baseURL: 'https://api.openai.com/v1',
+            config: { apiProtocol: 'responses' }
+          }
+        }
+      }
+      return null
+    })
+  })
+
+  it('persists traceId to delegated task metadata and run logs', async () => {
+    mocks.mockAdapter.sendMessage.mockResolvedValue({
+      content: 'Traceable delegate output',
+      usage: { prompt_tokens: 12, completion_tokens: 8 }
+    })
+
+    const result = await delegateEngine.delegateTask({
+      description: 'Trace task',
+      prompt: 'Implement the change and report status',
+      category: 'tianbing',
+      sessionId: 'test-session-123',
+      metadata: { traceId: 'tr-delegate-001' }
+    })
+
+    expect(result.success).toBe(true)
+    expect(mocks.mockPrisma.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            traceId: 'tr-delegate-001'
+          })
+        })
+      })
+    )
   })
 })

@@ -1,34 +1,38 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AutoResumeTriggerService } from '@/main/services/auto-resume-trigger.service'
 import { SessionIdleDetectionService } from '@/main/services/session-idle-detection.service'
-import { TodoIncompleteDetectionService } from '@/main/services/todo-incomplete-detection.service'
+import { ResumeContextRestorationService } from '@/main/services/resume-context-restoration.service'
 
-// Mock dependencies
 vi.mock('@/main/services/session-idle-detection.service')
-vi.mock('@/main/services/todo-incomplete-detection.service')
+vi.mock('@/main/services/resume-context-restoration.service')
+
+const recoverMessages = vi.fn()
+
+vi.mock('@/main/services/session-recovery-executor.service', () => ({
+  sessionRecoveryExecutorService: {
+    recoverMessages: (...args: any[]) => recoverMessages(...args)
+  }
+}))
 
 describe('AutoResumeTriggerService', () => {
   let service: AutoResumeTriggerService
   let idleServiceMock: any
-  let incompleteServiceMock: any
+  let resumeContextMock: any
 
   beforeEach(() => {
-    // Setup mocks
     idleServiceMock = {
       isSessionIdle: vi.fn(),
       getIdleDuration: vi.fn()
     }
 
-    incompleteServiceMock = {
-      detectIncompleteWork: vi.fn()
+    resumeContextMock = {
+      generateResumeContext: vi.fn()
     }
 
-    // Mock getInstance implementation
     vi.mocked(SessionIdleDetectionService.getInstance).mockReturnValue(idleServiceMock)
-    vi.mocked(TodoIncompleteDetectionService.getInstance).mockReturnValue(incompleteServiceMock)
+    vi.mocked(ResumeContextRestorationService.getInstance).mockReturnValue(resumeContextMock)
 
     service = AutoResumeTriggerService.getInstance()
-    // Reset config to defaults
     service.setConfig({
       minIdleDurationMs: 5 * 60 * 1000,
       requireIncompleteTodos: false,
@@ -41,141 +45,194 @@ describe('AutoResumeTriggerService', () => {
   })
 
   it('should be a singleton', () => {
-    const instance1 = AutoResumeTriggerService.getInstance()
-    const instance2 = AutoResumeTriggerService.getInstance()
-    expect(instance1).toBe(instance2)
+    expect(AutoResumeTriggerService.getInstance()).toBe(AutoResumeTriggerService.getInstance())
   })
 
   describe('shouldTriggerResume', () => {
-    it('should trigger resume when idle and has work', async () => {
+    it('triggers when idle and incomplete todos exist', async () => {
       idleServiceMock.isSessionIdle.mockResolvedValue(true)
-      idleServiceMock.getIdleDuration.mockResolvedValue(10 * 60 * 1000) // 10 mins
-      incompleteServiceMock.detectIncompleteWork.mockResolvedValue({
-        incompleteTodos: [{ id: '1' }],
-        incompletePlanTasks: [],
-        totalIncomplete: 1
+      idleServiceMock.getIdleDuration.mockResolvedValue(10 * 60 * 1000)
+      resumeContextMock.generateResumeContext.mockResolvedValue({
+        canResume: true,
+        recovery: {
+          recoverySource: 'manual-resume',
+          recoveryStage: 'context-rebuild',
+          resumeReason: 'pending-todos',
+          resumeAction: 'rebuild-context',
+          recoveryUpdatedAt: '2026-03-06T00:00:00.000Z'
+        },
+        workStatus: {
+          incompleteTodos: [{ id: 'todo-1', status: 'pending' }],
+          incompletePlanTasks: []
+        }
       })
 
       const result = await service.shouldTriggerResume('session-1', 'plan-1')
 
       expect(result.shouldResume).toBe(true)
       expect(result.reason).toContain('Idle for 10m')
-      expect(result.confidence).toBeGreaterThan(0)
+      expect(result.incompleteTodos).toBe(1)
+      expect(result.recoveryContext.recoverySource).toBe('auto-resume')
+      expect(result.recoveryContext.resumeReason).toBe('pending-todos')
+      expect(result.recoveryContext.resumeAction).toBe('auto-send-resume-prompt')
     })
 
-    it('should NOT trigger resume when session is active', async () => {
-      idleServiceMock.isSessionIdle.mockResolvedValue(false) // Active
+    it('does not trigger when session is still active', async () => {
+      idleServiceMock.isSessionIdle.mockResolvedValue(false)
       idleServiceMock.getIdleDuration.mockResolvedValue(1000)
-      incompleteServiceMock.detectIncompleteWork.mockResolvedValue({
-        incompleteTodos: [{ id: '1' }],
-        incompletePlanTasks: [],
-        totalIncomplete: 1
+      resumeContextMock.generateResumeContext.mockResolvedValue({
+        canResume: true,
+        recovery: {
+          recoverySource: 'manual-resume',
+          recoveryStage: 'context-rebuild',
+          resumeReason: 'pending-todos',
+          resumeAction: 'rebuild-context',
+          recoveryUpdatedAt: '2026-03-06T00:00:00.000Z'
+        },
+        workStatus: {
+          incompleteTodos: [{ id: 'todo-1', status: 'pending' }],
+          incompletePlanTasks: []
+        }
       })
 
       const result = await service.shouldTriggerResume('session-1', 'plan-1')
 
       expect(result.shouldResume).toBe(false)
-      expect(result.reason).toContain('Session is still active')
+      expect(result.reason).toBe('Session is still active')
       expect(result.confidence).toBe(0)
     })
 
-    it('should NOT trigger resume if todos required but missing', async () => {
+    it('does not trigger if todos are required but missing', async () => {
       service.setConfig({ requireIncompleteTodos: true })
-
       idleServiceMock.isSessionIdle.mockResolvedValue(true)
       idleServiceMock.getIdleDuration.mockResolvedValue(10 * 60 * 1000)
-      incompleteServiceMock.detectIncompleteWork.mockResolvedValue({
-        incompleteTodos: [], // No todos
-        incompletePlanTasks: [{ id: '1' }], // Has plan tasks
-        totalIncomplete: 1
+      resumeContextMock.generateResumeContext.mockResolvedValue({
+        canResume: true,
+        recovery: {
+          recoverySource: 'manual-resume',
+          recoveryStage: 'context-rebuild',
+          resumeReason: 'pending-plan-tasks',
+          resumeAction: 'rebuild-context',
+          recoveryUpdatedAt: '2026-03-06T00:00:00.000Z'
+        },
+        workStatus: {
+          incompleteTodos: [],
+          incompletePlanTasks: [{ id: 'task-1' }]
+        }
       })
 
       const result = await service.shouldTriggerResume('session-1', 'plan-1')
 
       expect(result.shouldResume).toBe(false)
-      expect(result.reason).toContain('No incomplete TODOs')
+      expect(result.reason).toBe('No incomplete TODOs')
     })
 
-    it('should trigger resume if plan tasks required and present', async () => {
+    it('triggers if plan tasks are required and present', async () => {
       service.setConfig({ requireIncompletePlanTasks: true })
-
       idleServiceMock.isSessionIdle.mockResolvedValue(true)
       idleServiceMock.getIdleDuration.mockResolvedValue(10 * 60 * 1000)
-      incompleteServiceMock.detectIncompleteWork.mockResolvedValue({
-        incompleteTodos: [],
-        incompletePlanTasks: [{ id: '1' }], // Has plan tasks
-        totalIncomplete: 1
+      resumeContextMock.generateResumeContext.mockResolvedValue({
+        canResume: true,
+        recovery: {
+          recoverySource: 'manual-resume',
+          recoveryStage: 'context-rebuild',
+          resumeReason: 'pending-plan-tasks',
+          resumeAction: 'rebuild-context',
+          recoveryUpdatedAt: '2026-03-06T00:00:00.000Z'
+        },
+        workStatus: {
+          incompleteTodos: [],
+          incompletePlanTasks: [{ id: 'task-1' }]
+        }
       })
 
       const result = await service.shouldTriggerResume('session-1', 'plan-1')
 
       expect(result.shouldResume).toBe(true)
+      expect(result.incompletePlanTasks).toBe(1)
+      expect(result.recoveryContext.resumeReason).toBe('pending-plan-tasks')
     })
 
-    it('should calculate confidence correctly', async () => {
-      // 30 mins idle = 1.0 idle score
-      // 10 items = 1.0 work score
-      // Average = 1.0
-
+    it('calculates confidence from idle duration and work size', async () => {
       idleServiceMock.isSessionIdle.mockResolvedValue(true)
       idleServiceMock.getIdleDuration.mockResolvedValue(30 * 60 * 1000)
-      incompleteServiceMock.detectIncompleteWork.mockResolvedValue({
-        incompleteTodos: Array(5).fill({}),
-        incompletePlanTasks: Array(5).fill({}),
-        totalIncomplete: 10
+      resumeContextMock.generateResumeContext.mockResolvedValue({
+        canResume: true,
+        recovery: {
+          recoverySource: 'manual-resume',
+          recoveryStage: 'context-rebuild',
+          resumeReason: 'pending-todos',
+          resumeAction: 'rebuild-context',
+          recoveryUpdatedAt: '2026-03-06T00:00:00.000Z'
+        },
+        workStatus: {
+          incompleteTodos: Array.from({ length: 5 }, () => ({ status: 'pending' })),
+          incompletePlanTasks: Array.from({ length: 5 }, () => ({ id: 'task' }))
+        }
       })
 
       const result = await service.shouldTriggerResume('session-1', 'plan-1')
 
-      expect(result.confidence).toBe(1.0)
+      expect(result.confidence).toBe(1)
     })
 
-    it('should handle "no work" scenario with low confidence if not required', async () => {
+    it('does not trigger when no pending work exists', async () => {
       idleServiceMock.isSessionIdle.mockResolvedValue(true)
       idleServiceMock.getIdleDuration.mockResolvedValue(5 * 60 * 1000)
-      incompleteServiceMock.detectIncompleteWork.mockResolvedValue({
-        incompleteTodos: [],
-        incompletePlanTasks: [],
-        totalIncomplete: 0
+      resumeContextMock.generateResumeContext.mockResolvedValue({
+        canResume: false,
+        recovery: {
+          recoverySource: 'manual-resume',
+          recoveryStage: 'context-rebuild',
+          resumeReason: 'no-pending-work',
+          resumeAction: 'rebuild-context',
+          recoveryUpdatedAt: '2026-03-06T00:00:00.000Z'
+        },
+        workStatus: {
+          incompleteTodos: [],
+          incompletePlanTasks: []
+        }
       })
 
       const result = await service.shouldTriggerResume('session-1', 'plan-1')
 
-      // Should still resume because we didn't require work, but confidence is low
-      expect(result.shouldResume).toBe(true)
-      expect(result.reason).toContain('No detected work')
-      expect(result.confidence).toBe(0.2)
+      expect(result.shouldResume).toBe(false)
+      expect(result.reason).toBe('Idle for 5m but no resumable work detected')
+      expect(result.recoveryContext.resumeReason).toBe('no-pending-work')
     })
   })
 
   describe('prevention and recording', () => {
-    it('should prevent duplicate resume within cooldown', () => {
-      const sessionId = 'session-dupe'
-      service.recordResume(sessionId)
-
-      const isPrevented = service.preventDuplicateResume(sessionId, 5000) // 5s cooldown
-      expect(isPrevented).toBe(true)
+    it('prevents duplicate resume within cooldown', () => {
+      service.recordResume('session-dupe')
+      expect(service.preventDuplicateResume('session-dupe', 5000)).toBe(true)
     })
 
-    it('should allow resume after cooldown', async () => {
-      const sessionId = 'session-ok'
-      service.recordResume(sessionId)
-
-      const isPrevented = service.preventDuplicateResume(sessionId, 0)
-      expect(isPrevented).toBe(false)
+    it('allows resume after cooldown', () => {
+      vi.useFakeTimers()
+      try {
+        const sessionId = 'session-ok'
+        service.recordResume(sessionId)
+        vi.advanceTimersByTime(6000)
+        expect(service.preventDuplicateResume(sessionId, 5000)).toBe(false)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
-    it('should record resume time', () => {
-      const sessionId = 'session-rec'
-      service.recordResume(sessionId)
-      expect(service.preventDuplicateResume(sessionId, 1000)).toBe(true)
-    })
-  })
+    it('completes recovery by synchronizing messages and recording resume time', async () => {
+      recoverMessages.mockResolvedValueOnce([{ id: 'message-1' }, { id: 'message-2' }])
 
-  describe('configuration', () => {
-    it('should update config', () => {
-      service.setConfig({ minIdleDurationMs: 999 })
-      expect(service.getConfig().minIdleDurationMs).toBe(999)
+      const result = await service.completeRecovery('session-recovered')
+
+      expect(recoverMessages).toHaveBeenCalledWith('session-recovered', {
+        emit: 'recovered'
+      })
+      expect(result).toEqual({
+        sessionId: 'session-recovered',
+        messageCount: 2
+      })
+      expect(service.preventDuplicateResume('session-recovered', 5000)).toBe(true)
     })
   })
 })

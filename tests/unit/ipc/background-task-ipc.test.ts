@@ -5,6 +5,7 @@ import { registerBackgroundTaskHandlers } from '../../../src/main/ipc/handlers/b
 const mockGetAllTasks = vi.fn()
 const mockGetTask = vi.fn()
 const mockGetOutputChunks = vi.fn()
+const mockGetOutputSize = vi.fn()
 const mockCancelTask = vi.fn()
 
 vi.mock('electron', () => ({
@@ -19,6 +20,7 @@ vi.mock('../../../src/main/services/tools/background', () => ({
     getTask: (...args: any[]) => mockGetTask(...args)
   },
   getOutputChunks: (...args: any[]) => mockGetOutputChunks(...args),
+  getOutputSize: (...args: any[]) => mockGetOutputSize(...args),
   cancelTask: (...args: any[]) => mockCancelTask(...args)
 }))
 
@@ -100,6 +102,12 @@ describe('background task IPC handlers', () => {
       ],
       nextIndex: 1
     })
+    mockGetOutputSize.mockReturnValue({
+      total: 1,
+      stdout: 1,
+      stderr: 0,
+      truncated: false
+    })
 
     registerBackgroundTaskHandlers()
     const outputHandler = (ipcMain.handle as any).mock.calls.find(
@@ -114,6 +122,12 @@ describe('background task IPC handlers', () => {
       stream: 'stdout',
       data: 'line-1\n',
       timestamp: '2026-02-21T10:00:02.000Z'
+    })
+    expect(result.data?.outputMeta).toEqual({
+      total: 1,
+      stdout: 1,
+      stderr: 0,
+      truncated: false
     })
   })
 

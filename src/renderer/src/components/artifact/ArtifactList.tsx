@@ -16,7 +16,7 @@ import {
   Loader2,
   Link2
 } from 'lucide-react'
-import type { Artifact } from '@/types/domain'
+import type { Artifact } from '@renderer/types/domain'
 import { useTraceNavigationStore } from '../../store/trace-navigation.store'
 
 type IpcActionResult = { success: boolean; error?: string }

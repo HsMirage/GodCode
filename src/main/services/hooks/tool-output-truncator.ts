@@ -183,6 +183,8 @@ export function createToolOutputTruncatorHook(options?: {
     id: 'tool-output-truncator',
     name: 'Tool Output Truncator',
     event: 'onToolEnd',
+    source: 'builtin',
+    scope: 'tool',
     description: 'Truncates large tool outputs to prevent context window overflow',
     priority: 50, // 在其他 hooks 之后执行
 

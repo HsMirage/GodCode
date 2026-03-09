@@ -1,6 +1,19 @@
 import { BoulderStateService } from './boulder-state.service'
+import { DatabaseService } from './database'
 import { PlanFileService, PlanTask } from './plan-file.service'
+import { sessionContinuityService } from './session-continuity.service'
 import { TodoTrackingService, TodoItem, TodoStats } from './todo-tracking.service'
+import { type WorkflowEvent, workflowEvents } from './workforce/events'
+import {
+  derivePlanResumeReason,
+  deriveTodoResumeReason,
+  getRecoverySourceLabel,
+  getResumeReasonLabel,
+  type RecoverySource,
+  type RecoveryStage,
+  type ResumeAction,
+  type ResumeReason
+} from '@/shared/recovery-contract'
 
 export interface SessionSnapshot {
   // Session identification
@@ -39,7 +52,10 @@ export interface SessionSnapshot {
   // Recovery context
   recoveryContext: {
     shouldResume: boolean
-    resumeReason: string
+    recoverySource: RecoverySource
+    recoveryStage: RecoveryStage
+    resumeReason: ResumeReason
+    resumeAction: ResumeAction
     interruptionDetected: boolean
     lastActivity: string
     nextSteps: string[]
@@ -49,6 +65,10 @@ export interface SessionSnapshot {
 export interface RecoveryContext {
   canResume: boolean
   reason: string
+  recoverySource: RecoverySource
+  recoveryStage: RecoveryStage
+  resumeReason: ResumeReason
+  resumeAction: ResumeAction
   incompleteTasks: number
   nextTask: PlanTask | null
   todosPending: number
@@ -56,10 +76,21 @@ export interface RecoveryContext {
   resumePrompt: string
 }
 
+type SerializedTodoItem = Omit<TodoItem, 'createdAt' | 'updatedAt'> & {
+  createdAt: string
+  updatedAt: string
+}
+
+type SerializedSessionSnapshot = Omit<SessionSnapshot, 'todoState'> & {
+  todoState: Omit<SessionSnapshot['todoState'], 'incompleteTodos'> & {
+    incompleteTodos: SerializedTodoItem[]
+  }
+}
+
 export class SessionStateRecoveryService {
   private static instance: SessionStateRecoveryService | null = null
-  // In-memory storage for snapshots (could be persisted to DB/File later)
   private snapshots: Map<string, SessionSnapshot> = new Map()
+  private initialized = false
 
   private constructor() {}
 
@@ -68,6 +99,25 @@ export class SessionStateRecoveryService {
       SessionStateRecoveryService.instance = new SessionStateRecoveryService()
     }
     return SessionStateRecoveryService.instance
+  }
+
+  async initialize(): Promise<number> {
+    if (this.initialized) {
+      return this.snapshots.size
+    }
+
+    this.initialized = true
+
+    try {
+      await this.hydrateSnapshotsFromDatabase()
+    } catch (error) {
+      console.warn('[SessionStateRecovery] Failed to hydrate snapshots from database:', error)
+    }
+
+    this.registerTaskStatusListeners()
+    console.log(`[SessionStateRecovery] Initialized with ${this.snapshots.size} persisted snapshot(s)`)
+
+    return this.snapshots.size
   }
 
   // State capture
@@ -96,18 +146,25 @@ export class SessionStateRecoveryService {
     const interruptionDetected = await this.detectInterruption(sessionId)
 
     // Determine resume reason and steps
-    const resumeReason = this.determineResumeReason(
-      incompleteTodos,
-      currentPhaseTasks,
-      interruptionDetected
-    )
+    const hasPendingPlanTasks = planMetadata.pendingTasks > 0
+    const resumeReason = this.determineResumeReason(incompleteTodos, hasPendingPlanTasks, interruptionDetected)
     const nextSteps = this.generateNextSteps(currentPhaseTasks, incompleteTodos, nextActionable)
+    const shouldResume = incompleteTodos.length > 0 || hasPendingPlanTasks || interruptionDetected
+    const recoveryStage: RecoveryStage = shouldResume ? 'task-resumption' : 'context-rebuild'
+    const recoverySource: RecoverySource = 'manual-resume'
+    const resumeAction: ResumeAction = interruptionDetected
+      ? 'resume-tasks'
+      : shouldResume
+        ? 'send-resume-prompt'
+        : 'rebuild-context'
 
     // Build recovery context
     const recoveryContext = {
-      shouldResume:
-        incompleteTodos.length > 0 || currentPhaseTasks.length > 0 || interruptionDetected,
+      shouldResume,
+      recoverySource,
+      recoveryStage,
       resumeReason,
+      resumeAction,
       interruptionDetected,
       lastActivity: new Date().toISOString(),
       nextSteps
@@ -145,12 +202,61 @@ export class SessionStateRecoveryService {
     return snapshot
   }
 
+  async captureAndPersistSessionState(
+    sessionId: string,
+    planName?: string
+  ): Promise<SessionSnapshot | null> {
+    const resolvedPlanName = await this.resolvePlanName(planName)
+    if (!resolvedPlanName) {
+      return null
+    }
+
+    const snapshot = await this.captureSessionState(sessionId, resolvedPlanName)
+    await this.saveSnapshot(snapshot)
+    return snapshot
+  }
+
   async saveSnapshot(snapshot: SessionSnapshot): Promise<void> {
+    if (!this.validateSnapshot(snapshot)) {
+      throw new Error(`Invalid session snapshot for ${snapshot.sessionId}`)
+    }
+
     this.snapshots.set(snapshot.sessionId, snapshot)
+
+    const existingState = await sessionContinuityService.getSessionState(snapshot.sessionId)
+    const status = existingState?.status || 'active'
+
+    await sessionContinuityService.saveSessionState(snapshot.sessionId, status, {}, {
+      sessionSnapshot: this.serializeSnapshot(snapshot) as unknown as Record<string, unknown>,
+      suggestedNextAction: snapshot.recoveryContext.nextSteps[0],
+      recoverySource: snapshot.recoveryContext.recoverySource,
+      recoveryStage: snapshot.recoveryContext.recoveryStage,
+      resumeReason: snapshot.recoveryContext.resumeReason,
+      resumeAction: snapshot.recoveryContext.resumeAction,
+      recoveryUpdatedAt: snapshot.capturedAt
+    })
   }
 
   async loadSnapshot(sessionId: string): Promise<SessionSnapshot | null> {
-    return this.snapshots.get(sessionId) || null
+    const cached = this.snapshots.get(sessionId)
+    if (cached) {
+      return cached
+    }
+
+    const state = await sessionContinuityService.getSessionState(sessionId)
+    const serialized = state?.context?.sessionSnapshot
+
+    if (!serialized || typeof serialized !== 'object') {
+      return null
+    }
+
+    const snapshot = this.deserializeSnapshot(serialized as Record<string, unknown>)
+    if (!this.validateSnapshot(snapshot)) {
+      return null
+    }
+
+    this.snapshots.set(sessionId, snapshot)
+    return snapshot
   }
 
   // Recovery operations
@@ -163,7 +269,7 @@ export class SessionStateRecoveryService {
     const nextTask = snapshot.planState.nextActionableTasks[0] || null
 
     const canResume = snapshot.recoveryContext.shouldResume
-    const reason = snapshot.recoveryContext.resumeReason
+    const reason = getResumeReasonLabel(snapshot.recoveryContext.resumeReason)
 
     let suggestedAction = 'No pending work detected'
     if (canResume) {
@@ -181,6 +287,10 @@ export class SessionStateRecoveryService {
     return {
       canResume,
       reason,
+      recoverySource: snapshot.recoveryContext.recoverySource,
+      recoveryStage: snapshot.recoveryContext.recoveryStage,
+      resumeReason: snapshot.recoveryContext.resumeReason,
+      resumeAction: snapshot.recoveryContext.resumeAction,
       incompleteTasks,
       nextTask,
       todosPending,
@@ -200,6 +310,9 @@ export class SessionStateRecoveryService {
     const parts: string[] = []
 
     parts.push(`# Session Recovery - ${planName}`)
+    parts.push(
+      `\nRecovery Source: ${getRecoverySourceLabel(snapshot.recoveryContext.recoverySource)} · ${snapshot.recoveryContext.recoveryStage}`
+    )
     parts.push(
       `\nProject: ${snapshot.projectState.completionPercentage} complete (${snapshot.projectState.completedTasks}/${snapshot.projectState.totalTasks} tasks)`
     )
@@ -226,6 +339,8 @@ export class SessionStateRecoveryService {
     if (snapshot.recoveryContext.nextSteps.length > 0) {
       parts.push(`\n## Suggested Action:\n${snapshot.recoveryContext.nextSteps.join('\n')}`)
     }
+
+    parts.push(`\nResume Reason: ${getResumeReasonLabel(snapshot.recoveryContext.resumeReason)}`)
 
     return parts.join('\n')
   }
@@ -259,13 +374,13 @@ export class SessionStateRecoveryService {
 
   private determineResumeReason(
     incompleteTodos: TodoItem[],
-    currentPhaseTasks: PlanTask[],
+    hasPendingPlanTasks: boolean,
     interrupted: boolean
-  ): string {
-    if (interrupted) return 'Session was interrupted (in-progress tasks detected)'
-    if (incompleteTodos.length > 0) return 'Pending TODO items found'
-    if (currentPhaseTasks.length > 0) return 'Incomplete tasks in current phase'
-    return 'No active work detected'
+  ): ResumeReason {
+    if (interrupted) return 'interrupted-tasks'
+    if (incompleteTodos.length > 0) return deriveTodoResumeReason(incompleteTodos)
+    if (hasPendingPlanTasks) return derivePlanResumeReason(true)
+    return 'no-pending-work'
   }
 
   private generateNextSteps(
@@ -301,4 +416,104 @@ export class SessionStateRecoveryService {
     }
     return true
   }
+
+  private async hydrateSnapshotsFromDatabase(): Promise<void> {
+    const db = DatabaseService.getInstance().getClient()
+    const states = await db.sessionState.findMany({
+      select: {
+        sessionId: true,
+        context: true
+      }
+    })
+
+    for (const state of states) {
+      const sessionSnapshot =
+        state.context && typeof state.context === 'object'
+          ? (state.context as Record<string, unknown>).sessionSnapshot
+          : null
+
+      if (!sessionSnapshot || typeof sessionSnapshot !== 'object') {
+        continue
+      }
+
+      const snapshot = this.deserializeSnapshot(sessionSnapshot as Record<string, unknown>)
+      if (!this.validateSnapshot(snapshot)) {
+        continue
+      }
+
+      this.snapshots.set(state.sessionId, snapshot)
+    }
+  }
+
+  private registerTaskStatusListeners(): void {
+    const trackedEvents: WorkflowEvent['type'][] = [
+      'task:assigned',
+      'task:started',
+      'task:completed',
+      'task:failed'
+    ]
+
+    for (const eventType of trackedEvents) {
+      workflowEvents.on(eventType, event => {
+        const sessionId = this.extractSessionId(event)
+        if (!sessionId) {
+          return
+        }
+
+        void this.captureAndPersistSessionState(sessionId).catch(error => {
+          console.warn(
+            `[SessionStateRecovery] Failed to persist snapshot for ${sessionId} on ${event.type}:`,
+            error
+          )
+        })
+      })
+    }
+  }
+
+  private extractSessionId(event: WorkflowEvent): string | null {
+    if (typeof event.data?.sessionId === 'string' && event.data.sessionId.trim().length > 0) {
+      return event.data.sessionId
+    }
+
+    if (typeof event.workflowId === 'string' && event.workflowId.trim().length > 0) {
+      return event.workflowId
+    }
+
+    return null
+  }
+
+  private async resolvePlanName(planName?: string): Promise<string | null> {
+    if (typeof planName === 'string' && planName.trim().length > 0) {
+      return planName
+    }
+
+    const state = await BoulderStateService.getInstance().getState()
+    if (typeof state.active_plan === 'string' && state.active_plan.trim().length > 0) {
+      return state.active_plan
+    }
+
+    return null
+  }
+
+  private serializeSnapshot(snapshot: SessionSnapshot): SerializedSessionSnapshot {
+    return JSON.parse(JSON.stringify(snapshot)) as SerializedSessionSnapshot
+  }
+
+  private deserializeSnapshot(raw: Record<string, unknown>): SessionSnapshot {
+    const serialized = raw as SerializedSessionSnapshot
+
+    return {
+      ...serialized,
+      todoState: {
+        ...serialized.todoState,
+        incompleteTodos: (serialized.todoState?.incompleteTodos || []).map(todo => ({
+          ...todo,
+          createdAt: new Date(todo.createdAt),
+          updatedAt: new Date(todo.updatedAt)
+        }))
+      }
+    }
+  }
 }
+
+export const sessionStateRecoveryService = SessionStateRecoveryService.getInstance()

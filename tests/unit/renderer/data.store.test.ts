@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../../src/renderer/src/api', () => ({
-  safeInvoke: vi.fn()
+  safeInvoke: vi.fn(),
+  sessionApi: {
+    update: vi.fn()
+  }
 }))
 
-import { safeInvoke } from '../../../src/renderer/src/api'
+import { safeInvoke, sessionApi } from '../../../src/renderer/src/api'
 import { useDataStore } from '../../../src/renderer/src/store/data.store'
 
 type Space = { id: string; name: string; workDir: string; createdAt: Date; updatedAt: Date }
@@ -87,5 +90,36 @@ describe('useDataStore', () => {
 
     const list = useDataStore.getState().sessionsBySpaceId['sp_1']
     expect(list?.[0]?.id).toBe('ses_2')
+  })
+
+  it('updateSessionTitle delegates to sessionApi.update and updates store state', async () => {
+    const createdAt = new Date('2026-03-07T00:00:00.000Z')
+    const updatedAt = new Date('2026-03-07T00:01:00.000Z')
+    const original: Session = {
+      id: 'ses_1',
+      spaceId: 'sp_1',
+      title: 'Before',
+      status: 'active',
+      createdAt,
+      updatedAt: createdAt
+    }
+    const renamed: Session = {
+      ...original,
+      title: 'After',
+      updatedAt
+    }
+
+    useDataStore.setState({
+      sessionsBySpaceId: { sp_1: [original] }
+    })
+
+    ;(sessionApi.update as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(renamed)
+
+    await useDataStore.getState().updateSessionTitle('sp_1', 'ses_1', 'After')
+
+    expect(sessionApi.update).toHaveBeenCalledWith('ses_1', { title: 'After' })
+    expect(useDataStore.getState().sessionsBySpaceId['sp_1']).toEqual([renamed])
+    expect(useDataStore.getState().isLoading).toBe(false)
+    expect(useDataStore.getState().error).toBe(null)
   })
 })

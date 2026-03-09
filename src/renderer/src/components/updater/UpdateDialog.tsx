@@ -1,6 +1,7 @@
 import { Dialog } from '@headlessui/react'
 import { X, Download, RotateCcw } from 'lucide-react'
 import { useUpdaterStore } from '../../store/updater.store'
+import { UI_TEXT } from '../../constants/i18n'
 
 export function UpdateDialog() {
   const { status, updateInfo, progress, setStatus } = useUpdaterStore()
@@ -17,21 +18,6 @@ export function UpdateDialog() {
   }
 
   const handleClose = () => {
-    // If downloading, we can't easily cancel, but we can hide the dialog
-    // Ideally we should have a "minimize" or "hide" option
-    // For now, if downloading, we prevent closing or show warning
-    // But since it's a modal, user might want to hide it
-    // Let's allow closing only if not mandatory (which isn't implemented)
-    // Here we just hide the dialog by resetting status? No, that stops the flow logic visually
-    // Better to have a separate 'dialogOpen' state or just close it and show Toast
-    // For MVP, we allow closing if available (Later) or downloaded (Install later)
-    if (status === 'downloading') {
-      // Allow hiding, progress continues in background (and toast should show)
-    }
-    // We don't reset status because process is ongoing
-    // But this dialog relies on status to show.
-    // If we want to hide it, we need a separate "showDialog" state.
-    // Since we don't have it, "Close" = "Later"
     setStatus('idle')
   }
 
@@ -45,7 +31,9 @@ export function UpdateDialog() {
         <Dialog.Panel className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
           <div className="flex items-center justify-between">
             <Dialog.Title className="text-lg font-medium text-white">
-              {status === 'downloaded' ? 'Update Ready' : 'Update Available'}
+              {status === 'downloaded'
+                ? UI_TEXT.updater.dialogTitleReady
+                : UI_TEXT.updater.dialogTitleAvailable}
             </Dialog.Title>
             {status !== 'downloading' && (
               <button onClick={handleClose} className="text-slate-400 hover:text-white">
@@ -60,19 +48,18 @@ export function UpdateDialog() {
                 <RotateCcw className="h-6 w-6" />
               </div>
               <div>
-                <p className="font-medium text-white">CodeAll v{updateInfo.version}</p>
+                <p className="font-medium text-white">{UI_TEXT.updater.versionLabel(updateInfo.version)}</p>
                 <p className="text-sm text-slate-400">
                   {status === 'downloaded'
-                    ? 'New version is downloaded and ready to install.'
-                    : 'A new version is available for download.'}
+                    ? UI_TEXT.updater.downloadedDescription
+                    : UI_TEXT.updater.availableDescription}
                 </p>
               </div>
             </div>
 
-            {/* Release Notes */}
             {updateInfo.releaseNotes && (
               <div className="mt-4 max-h-40 overflow-y-auto rounded-lg bg-slate-950 p-3 text-sm text-slate-300">
-                <p className="mb-1 font-semibold text-slate-200">Release Notes:</p>
+                <p className="mb-1 font-semibold text-slate-200">{UI_TEXT.updater.releaseNotes}</p>
                 <div
                   dangerouslySetInnerHTML={{
                     __html:
@@ -84,11 +71,10 @@ export function UpdateDialog() {
               </div>
             )}
 
-            {/* Progress Bar */}
             {status === 'downloading' && progress && (
               <div className="mt-4 space-y-2">
                 <div className="flex justify-between text-xs text-slate-400">
-                  <span>Downloading...</span>
+                  <span>{UI_TEXT.updater.downloading}</span>
                   <span>{Math.round(progress.percent)}%</span>
                 </div>
                 <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
@@ -111,14 +97,14 @@ export function UpdateDialog() {
                   onClick={handleClose}
                   className="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
                 >
-                  Later
+                  {UI_TEXT.updater.later}
                 </button>
                 <button
                   onClick={handleDownload}
                   className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500"
                 >
                   <Download className="h-4 w-4" />
-                  Download Update
+                  {UI_TEXT.updater.downloadUpdate}
                 </button>
               </>
             )}
@@ -129,7 +115,7 @@ export function UpdateDialog() {
                 className="flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-slate-400 cursor-not-allowed"
               >
                 <Download className="h-4 w-4 animate-bounce" />
-                Downloading...
+                {UI_TEXT.updater.downloading}
               </button>
             )}
 
@@ -139,14 +125,14 @@ export function UpdateDialog() {
                   onClick={handleClose}
                   className="rounded-lg px-4 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
                 >
-                  Install Later
+                  {UI_TEXT.updater.installLater}
                 </button>
                 <button
                   onClick={handleInstall}
                   className="flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-500"
                 >
                   <RotateCcw className="h-4 w-4" />
-                  Restart & Install
+                  {UI_TEXT.updater.restartAndInstall}
                 </button>
               </>
             )}

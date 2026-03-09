@@ -43,6 +43,8 @@ export function createStopSignalHook(): HookConfig<'onToolStart'> {
     id: 'stop-signal-hook',
     name: 'Stop Signal Hook',
     event: 'onToolStart',
+    source: 'builtin',
+    scope: 'session',
     description:
       'Skips new tool calls after stop/abort signals and requests running task cancellation',
     priority: 1,

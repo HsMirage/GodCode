@@ -50,13 +50,13 @@ const DEFAULT_TOTAL_CHAR_BUDGET = 6_000
 const DEFAULT_ITEM_CHAR_BUDGET = 2_000
 
 export const DEFAULT_SENSITIVE_PATH_PATTERNS: RegExp[] = [
-  /(?:^|[\/])\.env(?:\.|$|[\/])/i,
-  /(?:^|[\/])certs?(?:[\/]|$)/i,
-  /(?:^|[\/])secrets?(?:[\/]|$)/i,
-  /(?:^|[\/])credentials?(?:\.json|[\/]|$)/i,
-  /(?:^|[\/])id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?$/i,
+  /(?:^|[/])\.env(?:\.|$|[/])/i,
+  /(?:^|[/])certs?(?:[/]|$)/i,
+  /(?:^|[/])secrets?(?:[/]|$)/i,
+  /(?:^|[/])credentials?(?:\.json|[/]|$)/i,
+  /(?:^|[/])id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?$/i,
   /\.(?:pem|p12|pfx|key)$/i,
-  /(?:^|[\/])ssh(?:[\/]|$)/i
+  /(?:^|[/])ssh(?:[/]|$)/i
 ]
 
 const DEFAULT_PRIORITY_BY_TYPE: Record<ContextInjectionType, number> = {

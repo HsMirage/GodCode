@@ -1,74 +1,144 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Dialog, Transition } from '@headlessui/react'
 import { Fragment } from 'react'
 import clsx from 'clsx'
+import { useDataStore } from '../../store/data.store'
+import {
+  createRecoveryTrackingMetadata,
+  getRecoverySourceLabel,
+  getResumeReasonLabel,
+  type RecoveryTrackingMetadata
+} from '@shared/recovery-contract'
 
-// Define IPC response types locally since they might not be in shared types yet
-interface RecoverySession {
+type SessionRecoveryRecord = {
   sessionId: string
-  spaceName: string
-  lastActive: Date
-  todoProgress: string
+  status: 'active' | 'idle' | 'interrupted' | 'crashed' | 'completed' | 'recovering'
+  checkpoint: {
+    inProgressTasks?: string[]
+    pendingTasks?: string[]
+    completedTasks?: string[]
+    lastActivityAt?: string | Date
+    checkpointAt?: string | Date
+  }
+  context?: {
+    spaceId?: string
+    workDir?: string
+    recoverySource?: RecoveryTrackingMetadata['recoverySource']
+    recoveryStage?: RecoveryTrackingMetadata['recoveryStage']
+    resumeReason?: RecoveryTrackingMetadata['resumeReason']
+    resumeAction?: RecoveryTrackingMetadata['resumeAction']
+    recoveryUpdatedAt?: string
+  }
 }
 
-interface RecoveryInfo {
-  hasRecoverable: boolean
-  sessions: RecoverySession[]
+function toIso(value?: string | Date): string {
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'string' && value.trim().length > 0) return value
+  return new Date().toISOString()
+}
+
+function buildRecoveryContext(session: SessionRecoveryRecord): RecoveryTrackingMetadata {
+  if (
+    session.context?.recoverySource &&
+    session.context.recoveryStage &&
+    session.context.resumeReason &&
+    session.context.resumeAction
+  ) {
+    return createRecoveryTrackingMetadata({
+      recoverySource: session.context.recoverySource,
+      recoveryStage: session.context.recoveryStage,
+      resumeReason: session.context.resumeReason,
+      resumeAction: session.context.resumeAction,
+      recoveryUpdatedAt: session.context.recoveryUpdatedAt
+    })
+  }
+
+  return createRecoveryTrackingMetadata({
+    recoverySource: 'crash-recovery',
+    recoveryStage: session.status === 'recovering' ? 'executing' : 'session-recovery',
+    resumeReason: session.status === 'crashed' ? 'crash-detected' : 'interrupted-tasks',
+    resumeAction: 'restore-session'
+  })
 }
 
 export function SessionRecoveryPrompt() {
   const [isOpen, setIsOpen] = useState(false)
-  const [recoveryInfo, setRecoveryInfo] = useState<RecoveryInfo | null>(null)
+  const [sessions, setSessions] = useState<SessionRecoveryRecord[]>([])
   const [isRecovering, setIsRecovering] = useState(false)
+  const selectSession = useDataStore(state => state.selectSession)
+  const setCurrentSession = useDataStore(state => state.setCurrentSession)
 
   useEffect(() => {
-    const checkRecovery = async () => {
-      // Skip if not running in Electron environment
+    let mounted = true
+
+    const loadRecoverable = async () => {
       if (!window.codeall) return
       try {
-        const info = (await window.codeall.invoke('session:check-recovery')) as RecoveryInfo
-        if (info && info.hasRecoverable && info.sessions.length > 0) {
-          setRecoveryInfo(info)
-          setIsOpen(true)
-        }
+        const items = (await window.codeall.invoke('session-recovery:list')) as SessionRecoveryRecord[]
+        const recoverable = items.filter(item =>
+          ['crashed', 'interrupted', 'recovering'].includes(item.status)
+        )
+
+        if (!mounted) return
+        setSessions(recoverable)
+        setIsOpen(recoverable.length > 0)
       } catch (error) {
-        console.error('Failed to check for session recovery:', error)
+        console.error('Failed to load recoverable sessions:', error)
       }
     }
 
-    checkRecovery()
+    void loadRecoverable()
+
+    return () => {
+      mounted = false
+    }
   }, [])
 
+  const session = sessions[0] || null
+  const recoveryContext = useMemo(
+    () => (session ? buildRecoveryContext(session) : null),
+    [session]
+  )
+
   const handleRecover = async () => {
-    if (!recoveryInfo?.sessions[0] || !window.codeall) return
+    if (!session || !window.codeall || !recoveryContext) return
 
     setIsRecovering(true)
-    const session = recoveryInfo.sessions[0]
 
     try {
-      await window.codeall.invoke('session:recover', { sessionId: session.sessionId })
-      setIsOpen(false)
-      // Navigate to the session using the session ID
-      // Assuming the route pattern /session/:sessionId based on typical patterns
-      // If MainLayout handles session selection via state, this might need adjustment,
-      // but usually navigation is the way to switch context.
-      // However, looking at App.tsx routes, there isn't a direct /session/:id route visible
-      // It likely uses internal state or query params.
-      // Let's assume standard navigation for now, or emit an event.
-      // Given the requirement "Recover successfully and jump to the session page",
-      // we'll assume the recover IPC call might handle some state restoration,
-      // but frontend navigation is usually needed.
+      const result = (await window.codeall.invoke('session-recovery:execute', session.sessionId)) as {
+        success: boolean
+        error?: string
+      }
 
-      // Wait a tick to ensure backend state is ready
-      setTimeout(() => {
-        // Since we don't see exact routes, we'll try to use the router to go to root
-        // and let the app state pick up the active session if the backend set it.
-        // OR if there is a specific route.
-        // Let's look at Sidebar.tsx or similar to see how sessions are opened.
-        // For now, closing the dialog is the primary UI action.
-      }, 100)
+      if (!result?.success) {
+        throw new Error(result?.error || 'Failed to execute session recovery')
+      }
+
+      if (session.context?.spaceId) {
+        await selectSession(session.context.spaceId, session.sessionId)
+      } else {
+        setCurrentSession(session.sessionId)
+      }
+
+      const prompt = (await window.codeall.invoke(
+        'session-recovery:resume-prompt',
+        session.sessionId
+      )) as string
+
+      if (prompt) {
+        await window.codeall.invoke('message:send', {
+          sessionId: session.sessionId,
+          content: prompt,
+          resumeContext: recoveryContext
+        })
+      }
+
+      setIsOpen(false)
+      setSessions(prev => prev.slice(1))
     } catch (error) {
       console.error('Failed to recover session:', error)
+    } finally {
       setIsRecovering(false)
     }
   }
@@ -77,10 +147,14 @@ export function SessionRecoveryPrompt() {
     setIsOpen(false)
   }
 
-  if (!recoveryInfo || !recoveryInfo.sessions[0]) return null
+  if (!session || !recoveryContext) return null
 
-  const session = recoveryInfo.sessions[0]
-  const lastActiveDate = new Date(session.lastActive).toLocaleString()
+  const lastActiveDate = new Date(
+    toIso(session.checkpoint.lastActivityAt || session.checkpoint.checkpointAt)
+  ).toLocaleString()
+  const completedTasks = session.checkpoint.completedTasks?.length || 0
+  const interruptedTasks = session.checkpoint.inProgressTasks?.length || 0
+  const pendingTasks = session.checkpoint.pendingTasks?.length || 0
 
   return (
     <Transition appear show={isOpen} as={Fragment}>
@@ -114,34 +188,46 @@ export function SessionRecoveryPrompt() {
                   className="text-lg font-medium leading-6 text-white flex items-center gap-2"
                 >
                   <span className="text-purple-400">⚡</span>
-                  Restore Previous Session?
+                  Restore Interrupted Session?
                 </Dialog.Title>
                 <div className="mt-4 space-y-4">
                   <p className="text-sm text-zinc-400">
-                    We found an interrupted session in <strong>{session.spaceName}</strong>. Would
-                    you like to pick up where you left off?
+                    {getRecoverySourceLabel(recoveryContext.recoverySource)} is available for this
+                    session. Restore the checkpoint and continue where the run stopped.
                   </p>
 
-                  <div className="bg-zinc-800/50 rounded-lg p-4 border border-zinc-700/50">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                  <div className="rounded-lg border border-zinc-700/50 bg-zinc-800/50 p-4 space-y-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium uppercase tracking-wider text-zinc-500">
                         Last Active
                       </span>
-                      <span className="text-xs text-zinc-300">{lastActiveDate}</span>
+                      <span className="text-zinc-300">{lastActiveDate}</span>
                     </div>
-                    {session.todoProgress && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                          Progress
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-emerald-400 font-mono">
-                            {session.todoProgress}
-                          </span>
-                          <span className="text-xs text-zinc-500">tasks completed</span>
-                        </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium uppercase tracking-wider text-zinc-500">
+                        Resume Reason
+                      </span>
+                      <span className="text-amber-300">
+                        {getResumeReasonLabel(recoveryContext.resumeReason)}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 text-xs">
+                      <div className="rounded-md bg-zinc-900/70 p-3">
+                        <div className="text-zinc-500">Completed</div>
+                        <div className="mt-1 text-emerald-400 font-mono">{completedTasks}</div>
                       </div>
-                    )}
+                      <div className="rounded-md bg-zinc-900/70 p-3">
+                        <div className="text-zinc-500">Interrupted</div>
+                        <div className="mt-1 text-amber-300 font-mono">{interruptedTasks}</div>
+                      </div>
+                      <div className="rounded-md bg-zinc-900/70 p-3">
+                        <div className="text-zinc-500">Pending</div>
+                        <div className="mt-1 text-sky-300 font-mono">{pendingTasks}</div>
+                      </div>
+                    </div>
+                    {session.context?.workDir ? (
+                      <div className="text-xs text-zinc-500 break-all">{session.context.workDir}</div>
+                    ) : null}
                   </div>
                 </div>
 

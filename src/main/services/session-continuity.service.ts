@@ -9,8 +9,16 @@
  * 4. Task breakpoint resumption
  */
 
+import { AutoResumeTriggerService } from './auto-resume-trigger.service'
 import { DatabaseService } from './database'
+import { sessionRecoveryExecutorService } from './session-recovery-executor.service'
 import { v4 as uuidv4 } from 'uuid'
+import {
+  createRecoveryTrackingMetadata,
+  type RecoveryTrackingMetadata,
+  type ResumeReason
+} from '@/shared/recovery-contract'
+import type { PersistedExecutionEvent } from '@/shared/execution-event-contract'
 
 // ============================================================================
 // Types
@@ -60,6 +68,9 @@ export interface SessionContext {
   spaceId: string
   workDir: string
 
+  // Persisted recovery snapshot
+  sessionSnapshot?: Record<string, unknown>
+
   // Conversation context summary
   conversationSummary?: string
   recentTopics?: string[]
@@ -71,6 +82,12 @@ export interface SessionContext {
   // Recovery hints
   recoveryHints?: string[]
   suggestedNextAction?: string
+  recoverySource?: RecoveryTrackingMetadata['recoverySource']
+  recoveryStage?: RecoveryTrackingMetadata['recoveryStage']
+  resumeReason?: RecoveryTrackingMetadata['resumeReason']
+  resumeAction?: RecoveryTrackingMetadata['resumeAction']
+  recoveryUpdatedAt?: string
+  executionEvents?: PersistedExecutionEvent[]
 }
 
 export interface RecoveryPlan {
@@ -430,14 +447,17 @@ export class SessionContinuityService {
    * Mark sessions as crashed
    */
   private async markSessionsAsCrashed(sessionIds: string[]): Promise<void> {
-    const db = DatabaseService.getInstance().getClient()
-
     for (const sessionId of sessionIds) {
       try {
-        await db.sessionState.update({
-          where: { sessionId },
-          data: { status: 'crashed', updatedAt: new Date() }
-        })
+        await this.saveSessionState(
+          sessionId,
+          'crashed',
+          {},
+          this.toRecoveryContext(
+            this.createCrashRecoveryMetadata('detected', 'show-recovery-dialog'),
+            ['Unexpected shutdown detected; crash recovery is available.']
+          )
+        )
       } catch (error) {
         console.warn(`[SessionContinuity] Failed to mark session ${sessionId} as crashed:`, error)
       }
@@ -590,45 +610,51 @@ export class SessionContinuityService {
     console.log(`[SessionContinuity] Recovery type: ${plan.recoveryType}, steps: ${plan.steps.length}`)
 
     // Mark as recovering
-    await this.saveSessionState(sessionId, 'recovering', {}, {})
+    await this.saveSessionState(
+      sessionId,
+      'recovering',
+      {},
+      this.toRecoveryContext(this.createCrashRecoveryMetadata('session-recovery', 'restore-session'))
+    )
 
     try {
-      for (const step of plan.steps) {
-        console.log(`[SessionContinuity] Step ${step.order}: ${step.description}`)
-
-        switch (step.type) {
-          case 'load_messages':
-            await this.recoverMessages(sessionId)
-            break
-          case 'restore_tasks':
-            await this.restoreTasks(sessionId, plan.checkpoint)
-            break
-          case 'rebuild_context':
-            await this.rebuildContext(sessionId)
-            break
-          case 'resume_task':
-            if (step.taskId) {
-              await this.resumeTask(sessionId, step.taskId)
-            }
-            break
-          case 'notify_user':
-            // This would be handled by the UI layer
-            break
+      await sessionRecoveryExecutorService.executePlan(sessionId, plan, {
+        onContextRebuilt: async context => {
+          await this.saveSessionState(sessionId, 'recovering', {}, {
+            ...this.toRecoveryContext(
+              this.createCrashRecoveryMetadata('context-rebuild', 'rebuild-context')
+            ),
+            ...context
+          })
         }
-      }
+      })
+
+      await AutoResumeTriggerService.getInstance().completeRecovery(sessionId)
 
       // Mark as active after successful recovery
-      await this.saveSessionState(sessionId, 'active', {}, {
-        recoveryHints: [`Recovered from ${plan.recoveryType} at ${new Date().toISOString()}`]
-      })
+      await this.saveSessionState(
+        sessionId,
+        'active',
+        {},
+        this.toRecoveryContext(
+          this.createCrashRecoveryMetadata('completed', 'restore-session'),
+          [`Recovered from ${plan.recoveryType} at ${new Date().toISOString()}`]
+        )
+      )
 
       console.log(`[SessionContinuity] Recovery completed for session ${sessionId}`)
       return true
     } catch (error) {
       console.error(`[SessionContinuity] Recovery failed for session ${sessionId}:`, error)
-      await this.saveSessionState(sessionId, 'interrupted', {}, {
-        recoveryHints: [`Recovery failed: ${error instanceof Error ? error.message : String(error)}`]
-      })
+      await this.saveSessionState(
+        sessionId,
+        'interrupted',
+        {},
+        this.toRecoveryContext(
+          this.createCrashRecoveryMetadata('failed', 'restore-session', 'recovery-failed'),
+          [`Recovery failed: ${error instanceof Error ? error.message : String(error)}`]
+        )
+      )
       return false
     }
   }
@@ -636,87 +662,6 @@ export class SessionContinuityService {
   // ============================================================================
   // Recovery Operations
   // ============================================================================
-
-  private async recoverMessages(sessionId: string): Promise<void> {
-    const db = DatabaseService.getInstance().getClient()
-
-    // Messages are already in database, just verify they're accessible
-    const messages = await db.message.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: 'asc' },
-      select: { id: true }
-    })
-
-    console.log(`[SessionContinuity] Recovered ${messages.length} messages`)
-  }
-
-  private async restoreTasks(sessionId: string, checkpoint: SessionCheckpoint): Promise<void> {
-    const db = DatabaseService.getInstance().getClient()
-
-    // Reset in-progress tasks to pending (they were interrupted)
-    for (const taskId of checkpoint.inProgressTasks) {
-      try {
-        await db.task.update({
-          where: { id: taskId },
-          data: {
-            status: 'pending',
-            startedAt: null
-          }
-        })
-      } catch (error) {
-        console.warn(`[SessionContinuity] Failed to restore task ${taskId}:`, error)
-      }
-    }
-
-    console.log(`[SessionContinuity] Restored ${checkpoint.inProgressTasks.length} interrupted tasks`)
-  }
-
-  private async rebuildContext(sessionId: string): Promise<void> {
-    const db = DatabaseService.getInstance().getClient()
-
-    // Get recent messages for context summary
-    const messages = await db.message.findMany({
-      where: { sessionId },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-      select: { role: true, content: true }
-    })
-
-    // Extract topics from recent messages
-    const topics: string[] = []
-    for (const msg of messages.slice(0, 5)) {
-      // Simple topic extraction - in production, use LLM
-      const words = msg.content.split(/\s+/).slice(0, 5).join(' ')
-      if (words.length > 10) {
-        topics.push(words + '...')
-      }
-    }
-
-    await this.saveSessionState(sessionId, 'recovering', {}, {
-      recentTopics: topics.slice(0, 5),
-      conversationSummary: `Recovered conversation with ${messages.length} messages`
-    })
-
-    console.log(`[SessionContinuity] Rebuilt context with ${topics.length} topics`)
-  }
-
-  private async resumeTask(sessionId: string, taskId: string): Promise<void> {
-    const db = DatabaseService.getInstance().getClient()
-
-    // Mark task as ready for resumption
-    await db.task.update({
-      where: { id: taskId },
-      data: {
-        status: 'pending',
-        metadata: {
-          resumedAt: new Date().toISOString(),
-          resumedFrom: 'crash_recovery'
-        }
-      }
-    })
-
-    console.log(`[SessionContinuity] Task ${taskId} marked for resumption`)
-  }
 
   // ============================================================================
   // Periodic Checkpointing
@@ -834,6 +779,33 @@ export class SessionContinuityService {
   // ============================================================================
   // Helpers
   // ============================================================================
+
+  private createCrashRecoveryMetadata(
+    recoveryStage: RecoveryTrackingMetadata['recoveryStage'],
+    resumeAction: RecoveryTrackingMetadata['resumeAction'],
+    resumeReason: ResumeReason = 'crash-detected'
+  ): RecoveryTrackingMetadata {
+    return createRecoveryTrackingMetadata({
+      recoverySource: 'crash-recovery',
+      recoveryStage,
+      resumeReason,
+      resumeAction
+    })
+  }
+
+  private toRecoveryContext(
+    recovery: RecoveryTrackingMetadata,
+    recoveryHints?: string[]
+  ): Partial<SessionContext> {
+    return {
+      recoverySource: recovery.recoverySource,
+      recoveryStage: recovery.recoveryStage,
+      resumeReason: recovery.resumeReason,
+      resumeAction: recovery.resumeAction,
+      recoveryUpdatedAt: recovery.recoveryUpdatedAt,
+      ...(recoveryHints ? { recoveryHints } : {})
+    }
+  }
 
   private mapToSessionState(dbRecord: any): SessionState {
     return {

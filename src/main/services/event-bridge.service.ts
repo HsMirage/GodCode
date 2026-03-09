@@ -133,10 +133,11 @@ export function initEventBridge() {
   })
 
   hookManager.onExecutionAuditAppended(record => {
+    const timestamp = new Date(record.timestamp)
     const payload = {
       record: {
         ...record,
-        timestamp: record.timestamp.toISOString()
+        timestamp: Number.isNaN(timestamp.getTime()) ? String(record.timestamp) : timestamp.toISOString()
       }
     }
     for (const win of getLiveWindows()) {

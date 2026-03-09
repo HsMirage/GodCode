@@ -37,8 +37,53 @@ interface AgentState {
   fetchAgents: (sessionId?: string | null) => Promise<void>
 }
 
+export const AGENT_STORE_DEDUPE_MAX_SIZE = 1000
+const AGENT_STORE_DEDUPE_TRIM_SIZE = AGENT_STORE_DEDUPE_MAX_SIZE / 2
+
 const taskStatusLogDedupe = new Set<string>()
 const orchestratorCheckpointLogDedupe = new Set<string>()
+
+function trimDedupeEntries(entries: Set<string>) {
+  if (entries.size <= AGENT_STORE_DEDUPE_MAX_SIZE) {
+    return
+  }
+
+  const entriesToRemove = entries.size - AGENT_STORE_DEDUPE_TRIM_SIZE
+  let removedCount = 0
+
+  for (const entry of entries) {
+    entries.delete(entry)
+    removedCount += 1
+
+    if (removedCount >= entriesToRemove) {
+      break
+    }
+  }
+}
+
+function registerDedupeEntry(entries: Set<string>, key: string) {
+  if (entries.has(key)) {
+    return false
+  }
+
+  entries.add(key)
+  trimDedupeEntries(entries)
+  return true
+}
+
+export function resetAgentStoreDedupeState() {
+  taskStatusLogDedupe.clear()
+  orchestratorCheckpointLogDedupe.clear()
+}
+
+export function getAgentStoreDedupeState() {
+  return {
+    maxSize: AGENT_STORE_DEDUPE_MAX_SIZE,
+    trimSize: AGENT_STORE_DEDUPE_TRIM_SIZE,
+    taskStatusSize: taskStatusLogDedupe.size,
+    orchestratorCheckpointSize: orchestratorCheckpointLogDedupe.size
+  }
+}
 
 interface OrchestratorCheckpointMeta {
   timestamp?: string
@@ -169,7 +214,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const agentTasks = (tasksByAgent.get(agent.id) || []).sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       )
-      const running = agentTasks.filter(task => task.status === 'running')
+      const running = agentTasks.filter(
+        task => task.status === 'running' || task.status === 'pending_approval'
+      )
       const failed = agentTasks.filter(task => task.status === 'failed')
       const completed = agentTasks.filter(task => task.status === 'completed')
       const latest = agentTasks[0]
@@ -191,11 +238,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const agentCode = toAgentCode(task)
       if (!agentCode) continue
       const logKey = `${agentCode}:${task.id}:${task.status}`
-      if (taskStatusLogDedupe.has(logKey)) continue
-
-      taskStatusLogDedupe.add(logKey)
+      if (!registerDedupeEntry(taskStatusLogDedupe, logKey)) continue
       const message =
-        task.status === 'running'
+        task.status === 'running' || task.status === 'pending_approval'
           ? `开始执行: ${task.input}`
           : task.status === 'completed'
             ? `完成任务: ${task.input}`
@@ -203,7 +248,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
               ? `任务失败: ${task.input}`
               : `任务状态更新: ${task.input}`
       const type: WorkLogEntry['type'] =
-        task.status === 'running'
+        task.status === 'running' || task.status === 'pending_approval'
           ? 'action'
           : task.status === 'completed'
             ? 'result'
@@ -241,8 +286,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         const phase = checkpoint.phase || 'unknown'
         const status = checkpoint.status || 'unknown'
         const logKey = `${orchestratorAgent}:checkpoint:${task.id}:${stableId}:${phase}:${status}`
-        if (orchestratorCheckpointLogDedupe.has(logKey)) continue
-        orchestratorCheckpointLogDedupe.add(logKey)
+        if (!registerDedupeEntry(orchestratorCheckpointLogDedupe, logKey)) continue
 
         const message =
           status === 'halt'

@@ -1,3 +1,14 @@
+import type {
+  HookExecutionAuditRecord,
+  HookExecutionContextSnapshot,
+  HookExecutionOutcome,
+  HookExecutionStatus,
+  HookExecutionStrategySnapshot,
+  HookGovernanceScope,
+  HookGovernanceSource,
+  HookReliabilityPolicy
+} from '@/shared/hook-governance-contract'
+
 /**
  * Hook 生命周期框架类型定义
  *
@@ -38,6 +49,7 @@ export interface HookContext {
   sessionId: string
   workspaceDir: string
   userId?: string
+  traceId?: string
 }
 
 /**
@@ -196,6 +208,12 @@ export interface HookConfig<T extends HookEventType = HookEventType> {
   enabled?: boolean
   /** Hook 描述 */
   description?: string
+  /** Hook 来源 */
+  source?: HookGovernanceSource
+  /** Hook 作用范围 */
+  scope?: HookGovernanceScope
+  /** Hook 可靠性策略 */
+  strategy?: Partial<HookReliabilityPolicy>
 }
 
 /**
@@ -233,8 +251,6 @@ export type HookFactory = (input: HookFactoryInput) => HookConfig | HookConfig[]
 /**
  * Hook 执行结果
  */
-export type HookExecutionStatus = 'success' | 'error' | 'timeout' | 'circuit_open'
-
 export interface HookExecutionResult {
   hookId: string
   success: boolean
@@ -255,46 +271,10 @@ export interface EventEmitResult {
   aggregatedReturn?: unknown
 }
 
-export interface HookExecutionStrategySnapshot {
-  hookId: string
-  hookName: string
-  event: HookEventType
-  priority: number
-  enabled: boolean
-}
-
-export interface HookExecutionContextSnapshot {
-  sessionId: string
-  workspaceDir: string
-  userId?: string
-  tool?: string
-  callId?: string
-  messageId?: string
-  messageRole?: MessageInfo['role']
-  currentTokens?: number
-  maxTokens?: number
-  usagePercentage?: number
-  filePath?: string
-  errorType?: EditErrorInfo['errorType']
-  workflowId?: string
-  taskId?: string
-  taskStatus?: TaskLifecycleStatus
-}
-
-export interface HookExecutionOutcome {
-  success: boolean
-  duration: number
-  status?: HookExecutionStatus
-  degraded?: boolean
-  error?: string
-  returnValuePreview?: string
-  circuitOpenUntil?: Date
-}
-
-export interface HookExecutionAuditRecord {
-  id: string
-  timestamp: Date
-  strategy: HookExecutionStrategySnapshot
-  execution: HookExecutionContextSnapshot
-  result: HookExecutionOutcome
+export type {
+  HookExecutionAuditRecord,
+  HookExecutionContextSnapshot,
+  HookExecutionOutcome,
+  HookExecutionStatus,
+  HookExecutionStrategySnapshot
 }

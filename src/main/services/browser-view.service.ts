@@ -17,6 +17,8 @@
 
 import { BrowserView, BrowserWindow } from 'electron'
 
+export type BrowserViewLifecycleState = 'created' | 'attached' | 'visible' | 'hidden' | 'disposed'
+
 export interface BrowserViewState {
   id: string
   url: string
@@ -26,6 +28,7 @@ export interface BrowserViewState {
   canGoBack: boolean
   canGoForward: boolean
   zoomLevel: number
+  lifecycleState?: BrowserViewLifecycleState
   error?: string
 }
 
@@ -44,9 +47,35 @@ class BrowserViewManager {
   private states: Map<string, BrowserViewState> = new Map()
   private mainWindow: BrowserWindow | null = null
   private activeViewId: string | null = null
+  private attachedViewIds: Set<string> = new Set()
   private stateChangeDebounceTimers: Map<string, NodeJS.Timeout> = new Map()
   private static readonly STATE_CHANGE_DEBOUNCE_MS = 50
   private static readonly MAX_TABS = 5
+
+  private debug(message: string, details?: Record<string, unknown>) {
+    if (
+      process.env.NODE_ENV === 'production' ||
+      process.env.NODE_ENV === 'test' ||
+      process.env.VITEST === 'true'
+    ) {
+      return
+    }
+
+    console.debug('[BrowserViewManager]', message, details ?? {})
+  }
+
+  private normalizeBounds(bounds: BrowserViewBounds) {
+    return {
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height)
+    }
+  }
+
+  private isValidBounds(bounds: BrowserViewBounds) {
+    return bounds.width > 0 && bounds.height > 0
+  }
 
   initialize(mainWindow: BrowserWindow) {
     this.mainWindow = mainWindow
@@ -90,7 +119,8 @@ class BrowserViewManager {
       isLoading: !!url,
       canGoBack: false,
       canGoForward: false,
-      zoomLevel: 1
+      zoomLevel: 1,
+      lifecycleState: 'created'
     }
 
     this.views.set(viewId, view)
@@ -119,18 +149,22 @@ class BrowserViewManager {
     const view = this.views.get(viewId)
     if (!view || !this.mainWindow) return false
 
+    if (!this.isValidBounds(bounds)) {
+      this.debug('skip show due to invalid bounds', { viewId, bounds })
+      return false
+    }
+
     if (this.activeViewId && this.activeViewId !== viewId) {
       this.hide(this.activeViewId)
     }
 
-    this.mainWindow.addBrowserView(view)
-
-    const intBounds = {
-      x: Math.round(bounds.x),
-      y: Math.round(bounds.y),
-      width: Math.round(bounds.width),
-      height: Math.round(bounds.height)
+    if (!this.attachedViewIds.has(viewId)) {
+      this.setLifecycleState(viewId, 'attached', 'attach-to-window')
+      this.mainWindow.addBrowserView(view)
+      this.attachedViewIds.add(viewId)
     }
+
+    const intBounds = this.normalizeBounds(bounds)
     view.setBounds(intBounds)
 
     view.setAutoResize({
@@ -141,6 +175,7 @@ class BrowserViewManager {
     })
 
     this.activeViewId = viewId
+    this.setLifecycleState(viewId, 'visible', 'show')
     return true
   }
 
@@ -148,15 +183,23 @@ class BrowserViewManager {
     const view = this.views.get(viewId)
     if (!view || !this.mainWindow) return false
 
-    try {
-      this.mainWindow.removeBrowserView(view)
-    } catch (e) {
-      // View might already be removed
+    if (this.attachedViewIds.has(viewId)) {
+      try {
+        this.mainWindow.removeBrowserView(view)
+      } catch {
+        // View might already be removed
+      }
+
+      this.attachedViewIds.delete(viewId)
+    } else {
+      this.debug('hide requested for detached view', { viewId })
     }
 
     if (this.activeViewId === viewId) {
       this.activeViewId = null
     }
+
+    this.setLifecycleState(viewId, 'hidden', 'hide')
 
     return true
   }
@@ -165,12 +208,12 @@ class BrowserViewManager {
     const view = this.views.get(viewId)
     if (!view) return false
 
-    view.setBounds({
-      x: Math.round(bounds.x),
-      y: Math.round(bounds.y),
-      width: Math.round(bounds.width),
-      height: Math.round(bounds.height)
-    })
+    if (!this.isValidBounds(bounds)) {
+      this.debug('skip resize due to invalid bounds', { viewId, bounds })
+      return false
+    }
+
+    view.setBounds(this.normalizeBounds(bounds))
 
     return true
   }
@@ -318,18 +361,24 @@ class BrowserViewManager {
     if (this.mainWindow) {
       try {
         this.mainWindow.removeBrowserView(view)
-      } catch (e) {
-        // Already removed
+      } catch {
+        // Already removed or never attached
       }
+
+      this.attachedViewIds.delete(viewId)
     }
 
     try {
       if (!view.webContents.isDestroyed()) {
         view.webContents.closeDevTools()
+        const destroy = (view.webContents as Electron.WebContents & { destroy?: () => void }).destroy
+        destroy?.call(view.webContents)
       }
     } catch {
       // View already destroyed
     }
+
+    this.setLifecycleState(viewId, 'disposed', 'destroy')
 
     this.views.delete(viewId)
     this.states.delete(viewId)
@@ -345,7 +394,7 @@ class BrowserViewManager {
     }
     this.stateChangeDebounceTimers.clear()
 
-    for (const viewId of this.views.keys()) {
+    for (const viewId of Array.from(this.views.keys())) {
       this.destroy(viewId)
     }
   }
@@ -429,6 +478,23 @@ class BrowserViewManager {
     if (state) {
       Object.assign(state, updates)
     }
+  }
+
+  private setLifecycleState(viewId: string, lifecycleState: BrowserViewLifecycleState, reason: string) {
+    const state = this.states.get(viewId)
+    if (!state || state.lifecycleState === lifecycleState) {
+      return
+    }
+
+    const previousState = state.lifecycleState
+    state.lifecycleState = lifecycleState
+
+    this.debug('lifecycle transition', {
+      viewId,
+      from: previousState,
+      to: lifecycleState,
+      reason
+    })
   }
 
   private emitStateChange(viewId: string) {

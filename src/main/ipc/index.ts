@@ -23,6 +23,7 @@ import {
   handleProviderCacheSetStatus
 } from './handlers/provider-cache'
 import { handleTaskCreate, handleTaskGet, handleTaskList, handleTaskUpdate } from './handlers/task'
+import { handleToolApprovalList, handleToolApprovalResolve } from './handlers/tool-approval'
 import {
   handleTaskContinuationAbort,
   handleTaskContinuationGetStatus,
@@ -69,6 +70,7 @@ import {
   handleHookGovernanceSet
 } from './handlers/workflow-observability'
 import { registerBackgroundTaskHandlers } from './handlers/background-task'
+import { registerUpdaterHandlers } from './handlers/updater'
 import { handleSkillCommandItems } from './handlers/skill'
 import { INVOKE_CHANNELS } from '@/shared/ipc-channels'
 
@@ -111,6 +113,8 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
   ipcMain.handle(INVOKE_CHANNELS.TASK_GET, handleTaskGet)
   ipcMain.handle(INVOKE_CHANNELS.TASK_LIST, handleTaskList)
   ipcMain.handle(INVOKE_CHANNELS.TASK_UPDATE, handleTaskUpdate)
+  ipcMain.handle(INVOKE_CHANNELS.TOOL_APPROVAL_LIST, handleToolApprovalList)
+  ipcMain.handle(INVOKE_CHANNELS.TOOL_APPROVAL_RESOLVE, handleToolApprovalResolve)
 
   // Task continuation handlers
   ipcMain.handle(INVOKE_CHANNELS.TASK_CONTINUATION_GET_STATUS, handleTaskContinuationGetStatus)
@@ -163,6 +167,7 @@ export function registerIpcHandlers(mainWindow: BrowserWindow | null): void {
 
   // Background task handlers
   registerBackgroundTaskHandlers()
+  registerUpdaterHandlers(mainWindow)
 
   // System Setting handlers
   ipcMain.handle(INVOKE_CHANNELS.SETTING_GET, handleSettingGet)

@@ -233,7 +233,14 @@ export function classifyError(error: unknown): ErrorClassification {
   }
 
   // Check for forbidden (non-retryable)
-  if (errorMessage.includes('forbidden') || errorMessage.includes('403')) {
+  if (
+    errorMessage.includes('forbidden') ||
+    errorMessage.includes('403') ||
+    errorMessage.includes('permission denied') ||
+    errorMessage.includes('access denied') ||
+    errorMessage.includes('operation not permitted') ||
+    errorMessage.includes('eacces')
+  ) {
     return NonRetryableErrorType.FORBIDDEN
   }
 

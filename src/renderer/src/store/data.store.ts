@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
-import { safeInvoke } from '../api'
+import { safeInvoke, sessionApi } from '../api'
 import type { Space, Session } from '../types/domain'
 
 interface DataState {
@@ -273,11 +273,7 @@ export const useDataStore = create<DataState>()(
       updateSessionTitle: async (spaceId: string, sessionId: string, title: string) => {
         set({ isLoading: true, error: null })
         try {
-          if (!window.codeall) throw new Error('Preload API not available')
-          const updated = (await window.codeall.invoke('session:update', {
-            id: sessionId,
-            title
-          })) as Session
+          const updated = await sessionApi.update(sessionId, { title })
 
           set(state => {
             const list = state.sessionsBySpaceId[spaceId] ?? []

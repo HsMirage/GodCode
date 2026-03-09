@@ -105,13 +105,15 @@ export const test = base.extend<ElectronFixtures>({
       `codeall-e2e-space-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     )
 
-    const launchEnv: NodeJS.ProcessEnv = {
-      ...process.env,
-      ELECTRON_DISABLE_GPU: '1',
-      CODEALL_E2E_TEST: '1',
-      CODEALL_E2E_SPACE_DIR: e2eSpaceDir,
-      NODE_ENV: 'test'
-    }
+    const launchEnv = Object.fromEntries(
+      Object.entries({
+        ...process.env,
+        ELECTRON_DISABLE_GPU: '1',
+        CODEALL_E2E_TEST: '1',
+        CODEALL_E2E_SPACE_DIR: e2eSpaceDir,
+        NODE_ENV: 'test'
+      }).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
+    )
     delete launchEnv.ELECTRON_RUN_AS_NODE
 
     const app = await electron.launch({

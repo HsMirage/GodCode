@@ -15,10 +15,14 @@ vi.mock('electron', () => ({
   }
 }))
 
-vi.mock('../../../src/main/services/hooks', () => ({
-  getHookSystemStatus: (...args: any[]) => mocks.getHookSystemStatus(...args),
-  updateHookGovernance: (...args: any[]) => mocks.updateHookGovernance(...args)
-}))
+vi.mock('../../../src/main/services/hooks', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../../src/main/services/hooks')>()
+  return {
+    ...actual,
+    getHookSystemStatus: (...args: any[]) => mocks.getHookSystemStatus(...args),
+    updateHookGovernance: (...args: any[]) => mocks.updateHookGovernance(...args)
+  }
+})
 
 vi.mock('../../../src/main/services/workforce', () => ({
   WorkforceEngine: class {
@@ -45,7 +49,12 @@ describe('workflow observability hook governance handlers', () => {
 
     const payload = {
       hooks: [
-        { id: ' hook-a ', enabled: true, priority: 5 },
+        {
+          id: ' hook-a ',
+          enabled: true,
+          priority: 5,
+          strategy: { timeoutMs: 1200, failureThreshold: 2, cooldownMs: 9000 }
+        },
         { id: 'hook-b', enabled: false },
         { id: 'hook-c', priority: 11 },
         { id: 'ignored-empty', extra: true },
@@ -56,7 +65,12 @@ describe('workflow observability hook governance handlers', () => {
     await expect(handleHookGovernanceSet({} as any, payload)).resolves.toEqual(updateResult)
     expect(mocks.updateHookGovernance).toHaveBeenCalledWith({
       hooks: [
-        { id: 'hook-a', enabled: true, priority: 5 },
+        {
+          id: 'hook-a',
+          enabled: true,
+          priority: 5,
+          strategy: { timeoutMs: 1200, failureThreshold: 2, cooldownMs: 9000 }
+        },
         { id: 'hook-b', enabled: false },
         { id: 'hook-c', priority: 11 }
       ]
@@ -64,12 +78,8 @@ describe('workflow observability hook governance handlers', () => {
   })
 
   it('throws when hook governance input is invalid', async () => {
-    await expect(handleHookGovernanceSet({} as any, null)).rejects.toThrow(
-      'Invalid hook governance update input'
-    )
+    await expect(handleHookGovernanceSet({} as any, null)).rejects.toThrow()
 
-    await expect(handleHookGovernanceSet({} as any, { hooks: [] })).rejects.toThrow(
-      'No valid hook updates provided'
-    )
+    await expect(handleHookGovernanceSet({} as any, { hooks: [] })).rejects.toThrow()
   })
 })

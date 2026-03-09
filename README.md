@@ -8,6 +8,27 @@ CodeAll 是一个多模型协作编程平台（Multi-LLM Collaborative Programmi
 
 > **项目状态**: 积极开发中。Agent 系统基于中国神话命名体系，灵感来源于 oh-my-opencode 项目。
 
+## 获取安装包
+
+- **发布页**：`https://github.com/CakeSystem/CodeAll/releases`
+- **本地构建产物**：执行 `pnpm build:mac` / `pnpm build:win` / `pnpm build:linux` 后，安装包输出到 `dist/`
+- **更新策略**：当前保持手动更新模式，`electron-builder.yml` 尚未配置远程发布源
+
+## 首次启动引导
+
+1. 启动应用后先创建一个 **Space**，并绑定本地项目目录
+2. 打开 **设置**，完成 API Key、Provider、Model 配置
+3. 进入 **Agent 绑定**，为主 Agent / 类别绑定默认模型
+4. 返回聊天页，选择会话并开始对话或提交复杂任务
+
+## 基本使用流程
+
+1. **创建空间**：将 Space 映射到你的本地仓库
+2. **配置模型**：至少配置一个可用的 LLM Provider + Model
+3. **开始对话**：在聊天窗口描述目标，普通任务可直接执行，复杂任务会由 Workforce 自动拆分
+4. **观察执行**：在任务面板中查看 Task、后台任务、产物和工作流可观测性
+5. **恢复会话**：应用异常退出后，可通过恢复提示继续会话或任务
+
 ---
 
 ## 核心功能
@@ -23,7 +44,7 @@ CodeAll 是一个多模型协作编程平台（Multi-LLM Collaborative Programmi
 - 支持任务并行执行和依赖管理
 
 ### AI 控制浏览器
-- 集成 Playwright 浏览器环境
+- 集成 Electron BrowserView 浏览器环境
 - 支持文档研究、网页自动化、E2E 测试
 - 智能体可自主进行网页操作
 
@@ -120,6 +141,11 @@ CodeAll 提供丰富的内置工具供智能体使用：
 
 ## 快速开始
 
+### 安装方式
+
+- **最终用户**：优先从 GitHub Releases 下载对应平台安装包
+- **开发者 / 本地试用**：按下面的源码方式安装并构建
+
 ### 环境要求
 
 - [Node.js](https://nodejs.org/) v20+
@@ -173,6 +199,13 @@ pnpm build:linux
 2. 添加 API 密钥（支持 OpenAI、Anthropic、自定义端点）
 3. 配置 Base URL（可选，用于自托管模型）
 4. 注册模型名称
+
+### 首次对话
+
+1. 创建或选择一个会话
+2. 在输入框中选择 Agent 预设（可选）
+3. 输入目标，例如“分析仓库并修复测试失败”
+4. 在任务面板中查看拆解后的工作流、后台任务和产物
 
 > CodeAll 接受任何 OpenAI 兼容的端点，包括 Azure OpenAI、Ollama、vLLM 等。
 

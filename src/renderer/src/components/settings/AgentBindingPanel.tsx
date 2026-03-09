@@ -75,7 +75,14 @@ const SUB_TABS: { id: SubTab; label: string; icon: React.ReactNode }[] = [
 const MANAGED_SETTING_KEYS = [
   'defaultModelId',
   'maxToolIterations',
+  'permissionTemplate',
   'workforceMaxConcurrent'
+] as const
+
+const PERMISSION_TEMPLATE_OPTIONS = [
+  { value: 'safe', label: 'Safe', description: '高风险工具默认确认，最小授权' },
+  { value: 'balanced', label: 'Balanced', description: '平衡安全与效率，推荐默认' },
+  { value: 'full', label: 'Full', description: '尽可能自动执行，仅适合受信环境' }
 ] as const
 
 type ManagedSettingKey = (typeof MANAGED_SETTING_KEYS)[number]
@@ -349,6 +356,7 @@ export function AgentBindingPanel() {
 
   const defaultModelSetting = managedSettings.defaultModelId
   const maxToolIterationsSetting = managedSettings.maxToolIterations
+  const permissionTemplateSetting = managedSettings.permissionTemplate
   const workforceMaxConcurrentSetting = managedSettings.workforceMaxConcurrent
 
   const defaultModelId =
@@ -360,6 +368,10 @@ export function AgentBindingPanel() {
     : null
 
   const maxToolIterationsValue = maxToolIterationsSetting?.inputNumberValue ?? 100
+  const permissionTemplateValue =
+    typeof permissionTemplateSetting?.resolved.value === 'string'
+      ? permissionTemplateSetting.resolved.value
+      : 'balanced'
   const workforceMaxConcurrentValue = workforceMaxConcurrentSetting?.inputNumberValue ?? 3
 
   const primaryAgents = agents.filter(a => a.agentType === 'primary')
@@ -495,6 +507,44 @@ export function AgentBindingPanel() {
               </button>
             </div>
           </div>
+
+          {permissionTemplateSetting && (
+            <div className="flex items-start justify-between gap-4 pt-3 border-t border-[var(--border-primary)]">
+              <div>
+                <h4 className="text-sm font-medium text-[var(--text-primary)]">权限模板</h4>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                  {permissionTemplateSetting.schema.description ||
+                    '配置工具权限策略（safe / balanced / full）'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={permissionTemplateValue}
+                  onChange={e =>
+                    handleUpdateSetting({
+                      key: 'permissionTemplate',
+                      value: e.target.value,
+                      scope: permissionTemplateSetting.schema.scope
+                    })
+                  }
+                  className="min-w-[220px] bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-indigo-500/50"
+                >
+                  {PERMISSION_TEMPLATE_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {permissionTemplateSetting && (
+            <div className="-mt-1 pl-0 text-xs text-[var(--text-muted)]">
+              {PERMISSION_TEMPLATE_OPTIONS.find(option => option.value === permissionTemplateValue)
+                ?.description ?? '平衡安全与效率，推荐默认'}
+            </div>
+          )}
 
           {workforceMaxConcurrentSetting && (
             <div className="flex items-start justify-between gap-4 pt-3 border-t border-[var(--border-primary)]">

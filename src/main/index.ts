@@ -1,7 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, dialog, Menu } from 'electron'
 import path from 'path'
-import pkg from 'electron-updater'
-const { autoUpdater } = pkg
 import { registerIpcHandlers } from './ipc'
 import { DatabaseService } from './services/database'
 import { BindingService } from './services/binding.service'
@@ -9,6 +7,7 @@ import { processCleanupService } from './services/process-cleanup.service'
 import { browserViewManager } from './services/browser-view.service'
 import { initEventBridge } from './services/event-bridge.service'
 import { sessionContinuityService } from './services/session-continuity.service'
+import { sessionStateRecoveryService } from './services/session-state-recovery.service'
 import { hookManager } from './services/hooks/manager'
 import { initializeDefaultHooks, restorePersistedHookGovernance } from './services/hooks'
 import { logger } from '../shared/logger'
@@ -91,8 +90,6 @@ if (!gotTheLock) {
     mainWindow = createWindow()
     registerIpcHandlers(mainWindow)
     initEventBridge()
-    if (mainWindow) initAutoUpdater(mainWindow)
-
     // Skip database initialization in E2E test environment
     if (process.env.CODEALL_E2E_TEST === '1') {
       logger.info('[E2E] Skipping database initialization in test environment')
@@ -124,6 +121,9 @@ if (!gotTheLock) {
           }
         }
         logger.info('Session continuity service initialized')
+
+        const recoveredSnapshotCount = await sessionStateRecoveryService.initialize()
+        logger.info(`Session state recovery initialized with ${recoveredSnapshotCount} snapshots`)
       } catch (error) {
         logger.error('Database initialization failed:', error)
         const locale = app.getLocale()
@@ -233,6 +233,8 @@ function createWindow() {
   console.log('[Main] VITE_DEV_SERVER_URL:', process.env.VITE_DEV_SERVER_URL)
   console.log('[Main] ELECTRON_RENDERER_URL:', process.env.ELECTRON_RENDERER_URL)
 
+  mainWindow.maximize()
+
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
     mainWindow.webContents.openDevTools()
@@ -261,49 +263,4 @@ function createWindow() {
   }
 
   return mainWindow
-}
-
-function initAutoUpdater(win: BrowserWindow) {
-  autoUpdater.autoDownload = false
-
-  // IPC Handlers
-  ipcMain.handle('updater:check-for-updates', () => autoUpdater.checkForUpdates())
-  ipcMain.handle('updater:download-update', () => autoUpdater.downloadUpdate())
-  ipcMain.handle('updater:quit-and-install', () => autoUpdater.quitAndInstall())
-
-  autoUpdater.on('checking-for-update', () => {
-    logger.info('[Updater] Checking for update...')
-    win.webContents.send('updater:checking-for-update')
-  })
-
-  autoUpdater.on('update-available', info => {
-    logger.info('[Updater] Update available:', info)
-    win.webContents.send('updater:update-available', info)
-  })
-
-  autoUpdater.on('update-not-available', info => {
-    logger.info('[Updater] Update not available:', info)
-    win.webContents.send('updater:update-not-available', info)
-  })
-
-  autoUpdater.on('error', err => {
-    logger.error('[Updater] Error in auto-updater:', err)
-    win.webContents.send('updater:error', err.message)
-  })
-
-  autoUpdater.on('download-progress', progressObj => {
-    logger.info(`[Updater] Download speed: ${progressObj.bytesPerSecond} - ${progressObj.percent}%`)
-    win.webContents.send('updater:download-progress', progressObj)
-  })
-
-  autoUpdater.on('update-downloaded', info => {
-    logger.info('[Updater] Update downloaded:', info)
-    win.webContents.send('updater:update-downloaded', info)
-  })
-
-  if (app.isPackaged) {
-    autoUpdater.checkForUpdates().catch(err => {
-      logger.warn('[Updater] Failed to check for updates:', err.message)
-    })
-  }
 }

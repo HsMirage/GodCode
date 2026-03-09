@@ -81,6 +81,8 @@ export function createRulesInjectorHook(): HookConfig<'onMessageCreate'> {
     id: 'rules-injector',
     name: 'Rules Injector',
     event: 'onMessageCreate',
+    source: 'builtin',
+    scope: 'workspace',
     description: 'Injects workspace rules into system prompt from .sisyphus/rules/*.md',
     priority: 5,
 

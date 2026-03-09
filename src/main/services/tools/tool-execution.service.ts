@@ -5,6 +5,9 @@ import { defaultPolicy, type ToolExecutionPermissionPreview } from './permission
 import { LoggerService } from '../logger'
 import { hookManager } from '../hooks'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { ToolApprovalRequiredError, toolApprovalService } from './tool-approval.service'
+import { executionEventPersistenceService } from '../execution-event-persistence.service'
+import { buildUnifiedRetryDecision, type UnifiedRetryDecision } from '../retry/retry-governance'
 import type {
   HookContext,
   ToolExecutionInput,
@@ -51,6 +54,8 @@ export interface ToolExecutionOutput {
   error?: string
   /** Execution time in milliseconds */
   durationMs: number
+  /** Unified failure handling decision for downstream retry/recovery layers */
+  retryDecision?: UnifiedRetryDecision
 }
 
 /**
@@ -311,6 +316,22 @@ export class ToolExecutionService {
       }
     }
 
+    if (permissionPreview.requiresConfirmation && !permissionPreview.allowedWithoutConfirmation) {
+      const approvalRequest = await toolApprovalService.requestApproval({
+        toolCall,
+        permissionPreview,
+        context
+      })
+
+      if (approvalRequest.status !== 'approved') {
+        throw new ToolApprovalRequiredError(
+          approvalRequest,
+          approvalRequest.decisionReason ||
+            `Tool '${requestedName}' was ${approvalRequest.status === 'expired' ? 'not approved in time' : 'rejected by user'}`
+        )
+      }
+    }
+
     const browserTool = this.browserTools.get(resolvedName)
     const registryTool = toolRegistry.get(resolvedName)
     const tool = browserTool || registryTool
@@ -368,12 +389,23 @@ export class ToolExecutionService {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       const durationMs = Date.now() - startTime
+      const retryDecision = buildUnifiedRetryDecision({
+        scope: 'tool',
+        error,
+        attempt: 1,
+        maxRetries: 0,
+        baseDelayMs: 1000
+      })
 
       this.logger.error('Tool execution failed', {
         toolName: resolvedName,
         requestedToolName: requestedName,
         error: errorMessage,
-        durationMs
+        durationMs,
+        retryClassification: retryDecision.classification,
+        retryable: retryDecision.retryable,
+        nextAction: retryDecision.nextAction,
+        manualTakeoverRequired: retryDecision.manualTakeoverRequired
       })
 
       return {
@@ -386,7 +418,8 @@ export class ToolExecutionService {
         },
         success: false,
         error: errorMessage,
-        durationMs
+        durationMs,
+        retryDecision
       }
     }
   }
@@ -409,6 +442,7 @@ export class ToolExecutionService {
       let toolCall = originalToolCall
       let hookInput = this.buildHookInput(toolCall)
       let output: ToolExecutionOutput
+      let shouldSkip = false
 
       try {
         const hookResult = await hookManager.emitToolStart(hookContext, hookInput)
@@ -421,14 +455,26 @@ export class ToolExecutionService {
           }
         }
 
-        if (hookResult.shouldSkip) {
-          this.logger.info('Tool execution skipped by hook', { toolName: toolCall.name })
-          output = this.buildSkippedOutput(toolCall)
-        } else {
-          output = await this.executeTool(toolCall, context, config)
-        }
+        shouldSkip = Boolean(hookResult.shouldSkip)
       } catch (hookError) {
         this.logger.warn('Hook error', hookError)
+      }
+
+      if (shouldSkip) {
+        this.logger.info('Tool execution skipped by hook', { toolName: toolCall.name })
+        output = this.buildSkippedOutput(toolCall)
+      } else {
+        await executionEventPersistenceService.appendEvent({
+          sessionId: 'sessionId' in context ? context.sessionId || 'unknown' : 'unknown',
+          taskId: 'taskId' in context ? context.taskId : undefined,
+          runId: 'runId' in context ? context.runId : undefined,
+          type: 'tool-call-requested',
+          payload: {
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            arguments: toolCall.arguments
+          }
+        })
         output = await this.executeTool(toolCall, context, config)
       }
 
@@ -443,6 +489,23 @@ export class ToolExecutionService {
       }
 
       outputs.push(output)
+
+      await executionEventPersistenceService.appendEvent({
+        sessionId: 'sessionId' in context ? context.sessionId || 'unknown' : 'unknown',
+        taskId: 'taskId' in context ? context.taskId : undefined,
+        runId: 'runId' in context ? context.runId : undefined,
+        type: 'tool-call-completed',
+        payload: {
+          toolCallId: output.toolCall.id,
+          toolName: output.toolCall.name,
+          success: output.success,
+          durationMs: output.durationMs,
+          error: output.error,
+          retryClassification: output.retryDecision?.classification,
+          retryNextAction: output.retryDecision?.nextAction,
+          manualTakeoverRequired: output.retryDecision?.manualTakeoverRequired
+        }
+      })
 
       if (!output.success) {
         allSucceeded = false
@@ -463,47 +526,11 @@ export class ToolExecutionService {
     }
   }
 
-  /**
-   * Create a tool execution loop callback for use with LLM adapters
-   *
-   * This returns a function that can be called repeatedly by an LLM adapter
-   * to execute tool calls and get results for the next iteration.
-   */
-  createLoopExecutor(
-    context: ToolExecutionContext | BrowserToolContext,
-    config?: ToolExecutionConfig
-  ): (toolCalls: ToolCall[]) => Promise<LoopIterationResult> {
-    const mergedConfig = { ...this.defaultConfig, ...config }
-    let iterationCount = 0
-
-    return async (toolCalls: ToolCall[]): Promise<LoopIterationResult> => {
-      iterationCount++
-
-      if (iterationCount > mergedConfig.maxIterations) {
-        this.logger.warn('Max tool iterations exceeded', {
-          maxIterations: mergedConfig.maxIterations,
-          currentIteration: iterationCount
-        })
-        return {
-          outputs: [],
-          allSucceeded: false,
-          totalDurationMs: 0
-        }
-      }
-
-      this.logger.debug('Tool loop iteration', {
-        iteration: iterationCount,
-        toolCount: toolCalls.length
-      })
-
-      return this.executeToolCalls(toolCalls, context, mergedConfig)
-    }
-  }
-
   private buildHookContext(context: ToolExecutionContext | BrowserToolContext): HookContext {
     return {
-      sessionId: 'sessionId' in context ? context.sessionId : 'unknown',
-      workspaceDir: 'workspaceDir' in context ? context.workspaceDir : process.cwd()
+      sessionId: 'sessionId' in context ? context.sessionId || 'unknown' : 'unknown',
+      workspaceDir: 'workspaceDir' in context ? context.workspaceDir || process.cwd() : process.cwd(),
+      traceId: 'traceId' in context ? context.traceId : undefined
     }
   }
 

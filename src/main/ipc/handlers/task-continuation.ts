@@ -9,10 +9,14 @@ export async function handleTaskContinuationGetStatus(
   _event: IpcMainInvokeEvent,
   sessionId: string
 ) {
+  const progress = taskContinuationService.getTodoProgress(sessionId)
   return {
     shouldContinue: taskContinuationService.shouldContinue(sessionId),
     incompleteTodos: taskContinuationService.getIncompleteTodos(sessionId),
-    continuationPrompt: taskContinuationService.getContinuationPrompt(sessionId)
+    continuationPrompt: taskContinuationService.getContinuationPrompt(sessionId),
+    totalTodos: progress.total,
+    completedTodos: progress.completed,
+    recoveryContext: taskContinuationService.getRecoveryTracking(sessionId, 'manual-resume')
   }
 }
 

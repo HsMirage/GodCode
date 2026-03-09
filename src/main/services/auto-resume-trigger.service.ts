@@ -1,5 +1,10 @@
 import { SessionIdleDetectionService } from './session-idle-detection.service'
-import { TodoIncompleteDetectionService } from './todo-incomplete-detection.service'
+import { ResumeContextRestorationService } from './resume-context-restoration.service'
+import { sessionRecoveryExecutorService } from './session-recovery-executor.service'
+import {
+  createRecoveryTrackingMetadata,
+  type RecoveryTrackingMetadata
+} from '@/shared/recovery-contract'
 
 export interface ResumeDecision {
   shouldResume: boolean
@@ -8,12 +13,18 @@ export interface ResumeDecision {
   incompleteTodos: number
   incompletePlanTasks: number
   confidence: number // 0-1 score
+  recoveryContext: RecoveryTrackingMetadata
 }
 
 export interface ResumeConfig {
   minIdleDurationMs: number
   requireIncompleteTodos: boolean
   requireIncompletePlanTasks: boolean
+}
+
+export interface RecoveryCompletionResult {
+  sessionId: string
+  messageCount: number
 }
 
 export class AutoResumeTriggerService {
@@ -47,69 +58,93 @@ export class AutoResumeTriggerService {
 
   async shouldTriggerResume(sessionId: string, planName: string): Promise<ResumeDecision> {
     const idleService = SessionIdleDetectionService.getInstance()
-    const incompleteService = TodoIncompleteDetectionService.getInstance()
+    const contextService = ResumeContextRestorationService.getInstance()
 
     // Get current state
     const isIdle = await idleService.isSessionIdle(sessionId, this.config.minIdleDurationMs)
     const idleDuration = await idleService.getIdleDuration(sessionId)
-    const incompleteWork = await incompleteService.detectIncompleteWork(sessionId, planName)
+    const resumeContext = await contextService.generateResumeContext(sessionId, planName)
+    const incompleteTodos = resumeContext.workStatus.incompleteTodos.length
+    const incompletePlanTasks = resumeContext.workStatus.incompletePlanTasks.length
+    const totalIncomplete = incompleteTodos + incompletePlanTasks
 
     // Decision criteria
     const conditions = {
       idle: isIdle,
-      hasTodos: incompleteWork.incompleteTodos.length > 0,
-      hasPlanTasks: incompleteWork.incompletePlanTasks.length > 0
+      hasTodos: incompleteTodos > 0,
+      hasPlanTasks: incompletePlanTasks > 0,
+      canResume: resumeContext.canResume
     }
 
     let shouldResume = conditions.idle
     let reason = ''
     let confidence = 0
+    let recoveryContext: RecoveryTrackingMetadata
 
     if (!conditions.idle) {
       shouldResume = false
       reason = 'Session is still active'
       confidence = 0
+      recoveryContext = createRecoveryTrackingMetadata({
+        recoverySource: 'auto-resume',
+        recoveryStage: 'detected',
+        resumeReason: 'session-active',
+        resumeAction: 'none'
+      })
     } else if (this.config.requireIncompleteTodos && !conditions.hasTodos) {
       shouldResume = false
       reason = 'No incomplete TODOs'
       confidence = 0.3
+      recoveryContext = createRecoveryTrackingMetadata({
+        recoverySource: 'auto-resume',
+        recoveryStage: 'detected',
+        resumeReason: conditions.hasPlanTasks ? 'pending-plan-tasks' : 'no-pending-work',
+        resumeAction: 'none'
+      })
     } else if (this.config.requireIncompletePlanTasks && !conditions.hasPlanTasks) {
       shouldResume = false
       reason = 'No incomplete plan tasks'
       confidence = 0.3
+      recoveryContext = createRecoveryTrackingMetadata({
+        recoverySource: 'auto-resume',
+        recoveryStage: 'detected',
+        resumeReason: conditions.hasTodos ? resumeContext.recovery.resumeReason : 'no-pending-work',
+        resumeAction: 'none'
+      })
+    } else if (!conditions.canResume) {
+      shouldResume = false
+      reason = `Idle for ${Math.floor(idleDuration / 60000)}m but no resumable work detected`
+      confidence = 0.1
+      recoveryContext = createRecoveryTrackingMetadata({
+        recoverySource: 'auto-resume',
+        recoveryStage: 'detected',
+        resumeReason: 'no-pending-work',
+        resumeAction: 'none'
+      })
     } else {
-      // Basic requirements met
-      // If we have NO work at all, maybe we shouldn't resume unless configured otherwise?
-      // Usually auto-resume implies there IS work to do.
-      if (!conditions.hasTodos && !conditions.hasPlanTasks) {
-        // Even if not strictly required by config, resuming with NO work is usually pointless
-        // But maybe the user just wants to be prompted?
-        // Let's assume low confidence if no work found but idle.
-        shouldResume = true // strictly following "idle" trigger
-        reason = `Idle for ${Math.floor(idleDuration / 60000)}m (No detected work)`
-        confidence = 0.2 // Low confidence if no work
-      } else {
-        shouldResume = true
-        reason = `Idle for ${Math.floor(idleDuration / 60000)}m with ${incompleteWork.totalIncomplete} incomplete items`
+      shouldResume = true
+      reason = `Idle for ${Math.floor(idleDuration / 60000)}m with ${totalIncomplete} incomplete items`
 
-        // Calculate confidence
-        // Idle score: increases with idle time, max at 30 mins
-        const idleScore = Math.min(idleDuration / (30 * 60 * 1000), 1)
+      const idleScore = Math.min(idleDuration / (30 * 60 * 1000), 1)
+      const workScore = Math.min(totalIncomplete / 10, 1)
 
-        // Work score: increases with amount of work, max at 10 items
-        const workScore = Math.min(incompleteWork.totalIncomplete / 10, 1)
-
-        confidence = (idleScore + workScore) / 2
-      }
+      confidence = (idleScore + workScore) / 2
+      recoveryContext = createRecoveryTrackingMetadata({
+        recoverySource: 'auto-resume',
+        recoveryStage: 'detected',
+        resumeReason: resumeContext.recovery.resumeReason,
+        resumeAction: 'auto-send-resume-prompt'
+      })
     }
 
     return {
       shouldResume,
       reason,
       idleDuration,
-      incompleteTodos: incompleteWork.incompleteTodos.length,
-      incompletePlanTasks: incompleteWork.incompletePlanTasks.length,
-      confidence
+      incompleteTodos,
+      incompletePlanTasks,
+      confidence,
+      recoveryContext
     }
   }
 
@@ -139,5 +174,18 @@ export class AutoResumeTriggerService {
 
   recordResume(sessionId: string): void {
     this.lastResumeTime.set(sessionId, new Date())
+  }
+
+  async completeRecovery(sessionId: string): Promise<RecoveryCompletionResult> {
+    const messages = await sessionRecoveryExecutorService.recoverMessages(sessionId, {
+      emit: 'recovered'
+    })
+
+    this.recordResume(sessionId)
+
+    return {
+      sessionId,
+      messageCount: messages.length
+    }
   }
 }

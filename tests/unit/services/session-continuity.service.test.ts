@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => {
       delete: vi.fn()
     },
     sessionState: {
+      findUnique: vi.fn(),
       findMany: vi.fn(),
+      create: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn()
     },
@@ -17,6 +19,7 @@ const mocks = vi.hoisted(() => {
       findMany: vi.fn()
     },
     task: {
+      findUnique: vi.fn(),
       update: vi.fn()
     },
     session: {
@@ -30,10 +33,26 @@ const mocks = vi.hoisted(() => {
   return { db }
 })
 
+const completeRecovery = vi.fn()
+
+vi.mock('electron', () => ({
+  BrowserWindow: {
+    getAllWindows: vi.fn(() => [])
+  }
+}))
+
 vi.mock('@/main/services/database', () => ({
   DatabaseService: {
     getInstance: () => ({
       getClient: () => mocks.db
+    })
+  }
+}))
+
+vi.mock('@/main/services/auto-resume-trigger.service', () => ({
+  AutoResumeTriggerService: {
+    getInstance: () => ({
+      completeRecovery: (...args: any[]) => completeRecovery(...args)
     })
   }
 }))
@@ -50,11 +69,15 @@ describe('SessionContinuityService', () => {
     mocks.db.systemSetting.delete.mockResolvedValue({})
 
     mocks.db.sessionState.findMany.mockResolvedValue([])
+    mocks.db.sessionState.findUnique.mockResolvedValue(null)
+    mocks.db.sessionState.create.mockResolvedValue({})
     mocks.db.sessionState.update.mockResolvedValue({})
     mocks.db.sessionState.updateMany.mockResolvedValue({ count: 0 })
 
     mocks.db.message.findMany.mockResolvedValue([])
+    mocks.db.task.findUnique.mockResolvedValue(null)
     mocks.db.task.update.mockResolvedValue({})
+    completeRecovery.mockResolvedValue({ sessionId: 'session-1', messageCount: 0 })
   })
 
   afterEach(async () => {
@@ -64,6 +87,7 @@ describe('SessionContinuityService', () => {
 
   it('marks active sessions as crashed during initialize when crash marker exists', async () => {
     const service = SessionContinuityService.getInstance()
+    const saveStateSpy = vi.spyOn(service, 'saveSessionState').mockResolvedValue({} as SessionState)
 
     mocks.db.systemSetting.findUnique.mockResolvedValueOnce({
       key: 'session_crash_marker',
@@ -78,11 +102,16 @@ describe('SessionContinuityService', () => {
 
     expect(crashInfo.detected).toBe(true)
     expect(crashInfo.sessionIds).toEqual(['session-a', 'session-b'])
-    expect(mocks.db.sessionState.update).toHaveBeenCalledTimes(2)
-    expect(mocks.db.sessionState.update).toHaveBeenCalledWith(
+    expect(saveStateSpy).toHaveBeenCalledTimes(2)
+    expect(saveStateSpy).toHaveBeenCalledWith(
+      'session-a',
+      'crashed',
+      {},
       expect.objectContaining({
-        where: { sessionId: 'session-a' },
-        data: expect.objectContaining({ status: 'crashed' })
+        recoverySource: 'crash-recovery',
+        recoveryStage: 'detected',
+        resumeReason: 'crash-detected',
+        resumeAction: 'show-recovery-dialog'
       })
     )
     expect(mocks.db.systemSetting.upsert).toHaveBeenCalledTimes(1)
@@ -185,20 +214,110 @@ describe('SessionContinuityService', () => {
     }
 
     vi.spyOn(service, 'createRecoveryPlan').mockResolvedValue(plan)
-    vi.spyOn(service as any, 'recoverMessages').mockRejectedValue(new Error('recover failed'))
+    mocks.db.message.findMany.mockRejectedValueOnce(new Error('recover failed'))
     const saveStateSpy = vi.spyOn(service, 'saveSessionState').mockResolvedValue({} as SessionState)
 
     const ok = await service.executeRecovery('session-1')
 
     expect(ok).toBe(false)
-    expect(saveStateSpy).toHaveBeenNthCalledWith(1, 'session-1', 'recovering', {}, {})
+    expect(saveStateSpy).toHaveBeenNthCalledWith(
+      1,
+      'session-1',
+      'recovering',
+      {},
+      expect.objectContaining({
+        recoverySource: 'crash-recovery',
+        recoveryStage: 'session-recovery',
+        resumeReason: 'crash-detected',
+        resumeAction: 'restore-session'
+      })
+    )
     expect(saveStateSpy).toHaveBeenNthCalledWith(
       2,
       'session-1',
       'interrupted',
       {},
       expect.objectContaining({
+        recoverySource: 'crash-recovery',
+        recoveryStage: 'failed',
+        resumeReason: 'recovery-failed',
         recoveryHints: [expect.stringContaining('recover failed')]
+      })
+    )
+  })
+
+  it('restores interrupted tasks and stamps unified recovery metadata', async () => {
+    const service = SessionContinuityService.getInstance()
+
+    const plan: RecoveryPlan = {
+      sessionId: 'session-1',
+      status: 'crashed',
+      canRecover: true,
+      recoveryType: 'rebuild',
+      steps: [
+        {
+          order: 0,
+          type: 'restore_tasks',
+          description: 'Restore tasks'
+        },
+        {
+          order: 1,
+          type: 'resume_task',
+          description: 'Resume task task-running',
+          taskId: 'task-running'
+        }
+      ],
+      estimatedActions: 2,
+      context: { spaceId: 'space-1', workDir: '/tmp/workdir' },
+      checkpoint: {
+        pendingTasks: ['task-pending'],
+        inProgressTasks: ['task-running'],
+        completedTasks: [],
+        messageCount: 0,
+        lastActivityAt: new Date('2026-03-01T00:00:00.000Z'),
+        checkpointAt: new Date('2026-03-01T00:00:00.000Z')
+      }
+    }
+
+    mocks.db.task.findUnique = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 'task-running', metadata: { existing: true } })
+      .mockResolvedValueOnce({ id: 'task-pending', metadata: {} })
+      .mockResolvedValueOnce({ id: 'task-running', metadata: { existing: true } })
+
+    vi.spyOn(service, 'createRecoveryPlan').mockResolvedValue(plan)
+    vi.spyOn(service, 'saveSessionState').mockResolvedValue({} as SessionState)
+
+    const ok = await service.executeRecovery('session-1')
+
+    expect(ok).toBe(true)
+    expect(completeRecovery).toHaveBeenCalledWith('session-1')
+    expect(mocks.db.task.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'task-running' },
+        data: expect.objectContaining({
+          status: 'pending',
+          metadata: expect.objectContaining({
+            recoverySource: 'crash-recovery',
+            recoveryStage: 'session-recovery',
+            resumeReason: 'crash-detected',
+            resumeAction: 'restore-session'
+          })
+        })
+      })
+    )
+    expect(mocks.db.task.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'task-running' },
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            recoverySource: 'crash-recovery',
+            recoveryStage: 'task-resumption',
+            resumeReason: 'crash-detected',
+            resumeAction: 'resume-tasks',
+            resumedFrom: 'crash_recovery'
+          })
+        })
       })
     )
   })

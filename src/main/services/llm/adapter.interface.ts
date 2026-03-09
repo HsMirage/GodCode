@@ -15,6 +15,12 @@ export interface LLMConfig {
   sessionId?: string
   /** Selected agent code */
   agentCode?: string
+  /** Unified request trace id propagated to tool execution */
+  traceId?: string
+  /** Delegate task id for tool approval / audit */
+  taskId?: string
+  /** Delegate run id for tool approval / audit */
+  runId?: string
   /** Optional external abort signal for request cancellation */
   abortSignal?: AbortSignal
   /** Optional explicit tool definitions for this request */
@@ -52,7 +58,7 @@ export interface LLMResponse {
 /**
  * Streaming chunk event types
  */
-export type StreamEventType = 'content' | 'tool_start' | 'tool_end' | 'error' | 'done'
+export type StreamEventType = 'content' | 'tool_start' | 'tool_end' | 'error' | 'done' | 'usage'
 
 export interface LLMChunk {
   /** The text content delta */
@@ -67,12 +73,29 @@ export interface LLMChunk {
     name: string
     arguments?: Record<string, unknown>
     result?: unknown
+    permissionPreview?: {
+      requestedName: string
+      resolvedName: string
+      template: 'safe' | 'balanced' | 'full'
+      permission: 'auto' | 'confirm' | 'deny'
+      source: 'default' | 'template' | 'custom' | 'fallback'
+      dangerous: boolean
+      highRisk: boolean
+      highRiskEnforced: boolean
+      requiresConfirmation: boolean
+      allowedByPolicy: boolean
+      allowedWithoutConfirmation: boolean
+      reason?: string
+      confirmReason?: string
+    }
   }
   /** Error information when type is 'error' */
   error?: {
     message: string
     code?: string
   }
+  /** Usage information when type is 'usage' */
+  usage?: StreamUsage
 }
 
 /**

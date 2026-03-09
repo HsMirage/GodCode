@@ -4,6 +4,17 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { ToolCallDisplay } from './ToolCallDisplay'
 import type { StreamingToolCall } from '../../store/streaming.store'
 
+interface SkillRuntimeMetadata {
+  id?: string
+  name?: string
+  command?: string
+  input?: string | null
+  rawInput?: string | null
+  allowedTools?: string[] | null
+  agent?: string | null
+  model?: string | null
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -31,6 +42,11 @@ export function MessageCard({ message }: MessageCardProps) {
           | Record<string, unknown>
           | undefined)
       : undefined
+  const skillRuntime =
+    !isUser && message.metadata && typeof message.metadata === 'object'
+      ? (((message.metadata as Record<string, unknown>).skill as SkillRuntimeMetadata | undefined) ??
+        undefined)
+      : undefined
 
   const summaryTitle =
     typeof contextInjectionSummary?.title === 'string'
@@ -50,6 +66,29 @@ export function MessageCard({ message }: MessageCardProps) {
     typeof contextInjectionSummary?.truncatedCount === 'number'
       ? contextInjectionSummary.truncatedCount
       : 0
+
+  const skillName = typeof skillRuntime?.name === 'string' ? skillRuntime.name : null
+  const skillCommand = typeof skillRuntime?.command === 'string' ? skillRuntime.command : null
+  const skillInput =
+    typeof skillRuntime?.input === 'string' && skillRuntime.input.trim().length > 0
+      ? skillRuntime.input
+      : null
+  const skillRawInput =
+    typeof skillRuntime?.rawInput === 'string' && skillRuntime.rawInput.trim().length > 0
+      ? skillRuntime.rawInput
+      : null
+  const skillModel = typeof skillRuntime?.model === 'string' ? skillRuntime.model : null
+  const skillAgent = typeof skillRuntime?.agent === 'string' ? skillRuntime.agent : null
+  const skillToolsCount = Array.isArray(skillRuntime?.allowedTools) ? skillRuntime.allowedTools.length : 0
+  const hasSkillSummary = !!(
+    skillName ||
+    skillCommand ||
+    skillInput ||
+    skillRawInput ||
+    skillModel ||
+    skillAgent ||
+    skillToolsCount
+  )
 
   if (isSystem) {
     return (
@@ -120,6 +159,26 @@ export function MessageCard({ message }: MessageCardProps) {
               )}
             </div>
             <p className="mt-1 ml-6">{message.error?.message}</p>
+          </div>
+        )}
+
+        {/* Skill runtime summary */}
+        {!isUser && hasSkillSummary && (
+          <div className="rounded-lg p-3 bg-[var(--bg-tertiary)] border border-[var(--border-primary)] text-xs text-[var(--text-secondary)]">
+            <div className="font-medium text-[var(--text-primary)]">技能执行摘要</div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+              {skillCommand && <code className="rounded bg-[var(--bg-secondary)] px-1.5 py-0.5">{skillCommand}</code>}
+              {skillName && <span>技能 {skillName}</span>}
+              {skillAgent && <span>Agent {skillAgent}</span>}
+              {skillModel && <span>Model {skillModel}</span>}
+              {skillToolsCount > 0 && <span>工具白名单 {skillToolsCount}</span>}
+            </div>
+            {(skillInput || skillRawInput) && (
+              <div className="mt-2 space-y-1 text-[var(--text-muted)]">
+                {skillInput && <div>输入: {skillInput}</div>}
+                {skillRawInput && <div>原始输入: {skillRawInput}</div>}
+              </div>
+            )}
           </div>
         )}
 

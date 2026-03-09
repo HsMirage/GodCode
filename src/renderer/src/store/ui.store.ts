@@ -100,7 +100,8 @@ interface UIState {
   setBrowserTabs: (
     tabs: Array<{ id: string; title: string; url: string; isLoading: boolean }>
   ) => void
-  setActiveBrowserTab: (id: string) => void
+  setActiveBrowserTab: (id: string | null) => void
+  resetBrowserWorkspace: (options?: { closePanel?: boolean }) => void
 
   // Theme Actions
   setTheme: (theme: 'light' | 'dark') => void
@@ -117,7 +118,7 @@ export const useUIStore = create<UIState>()(
       showArtifactRail: false,
       showContentCanvas: false,
       activeView: 'chat',
-      sidebarWidth: 15,
+      sidebarWidth: 18,
       chatWidth: 60,
       artifactWidth: 20,
 
@@ -222,8 +223,34 @@ export const useUIStore = create<UIState>()(
           aiOperationStatus: status,
           isAIOperating: status === 'running'
         }),
-      setBrowserTabs: tabs => set({ browserTabs: tabs }),
+      setBrowserTabs: tabs =>
+        set(state => ({
+          browserTabs: tabs,
+          activeBrowserTabId:
+            state.activeBrowserTabId && tabs.some(tab => tab.id === state.activeBrowserTabId)
+              ? state.activeBrowserTabId
+              : tabs[0]?.id ?? null
+        })),
       setActiveBrowserTab: id => set({ activeBrowserTabId: id }),
+      resetBrowserWorkspace: (options = {}) =>
+        set(state => ({
+          browserUrl: '',
+          canGoBack: false,
+          canGoForward: false,
+          isAIOperating: false,
+          isBrowserLoading: false,
+          aiOperationTool: null,
+          aiOperationStatus: 'idle',
+          browserTabs: [],
+          activeBrowserTabId: null,
+          browserOperationHistory: [],
+          browserHandoff: {
+            isManualControl: false,
+            viewId: null,
+            lastHandoffAt: null
+          },
+          isBrowserPanelOpen: options.closePanel ? false : state.isBrowserPanelOpen
+        })),
       upsertBrowserOperation: entry =>
         set(state => {
           const idx = state.browserOperationHistory.findIndex(e => e.id === entry.id)

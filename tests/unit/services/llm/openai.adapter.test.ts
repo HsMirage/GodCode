@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { OpenAIAdapter } from '@/main/services/llm/openai.adapter'
+import { OpenAICompatAdapter } from '@/main/services/llm/openai-compat.adapter'
 import OpenAI from 'openai'
 
 vi.mock('openai', () => {
@@ -130,6 +131,38 @@ describe('OpenAIAdapter', () => {
     expect(mockCreate).toHaveBeenCalledTimes(2)
   })
 
+  it('should default OpenAICompatAdapter to chat/completions when apiProtocol is missing', async () => {
+    const compatAdapter = new OpenAICompatAdapter('test-key', 'https://local-model.com/v1')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const openAIMock = OpenAI as any
+    const compatClient = openAIMock.mock.results[openAIMock.mock.results.length - 1].value
+    const compatCreate = compatClient.chat.completions.create
+    const compatResponsesCreate = compatClient.responses.create
+
+    compatCreate.mockResolvedValue({
+      choices: [{ message: { content: 'Compat hello' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 9, completion_tokens: 4 }
+    })
+
+    const result = await compatAdapter.sendMessage(
+      [
+        {
+          role: 'user',
+          content: 'Hi',
+          id: '1',
+          sessionId: 's1',
+          createdAt: new Date(),
+          metadata: {}
+        }
+      ],
+      { model: 'qwen2.5-coder' }
+    )
+
+    expect(result.content).toBe('Compat hello')
+    expect(compatCreate).toHaveBeenCalledTimes(1)
+    expect(compatResponsesCreate).not.toHaveBeenCalled()
+  })
+
   it('should throw when OpenAI-compatible response is missing choices and fallback text', async () => {
     mockCreate.mockResolvedValue({
       usage: { prompt_tokens: 10, completion_tokens: 0 }
@@ -176,7 +209,7 @@ describe('OpenAIAdapter', () => {
   })
 
   it(
-    'should keep reconnecting beyond configured maxRetries for retryable API failures',
+    'should stop retrying when configured maxRetries is exhausted',
     async () => {
       mockCreate
         .mockRejectedValueOnce(new Error('Network error 1'))
@@ -187,22 +220,23 @@ describe('OpenAIAdapter', () => {
           usage: {}
         })
 
-      const result = await adapter.sendMessage(
-        [
-          {
-            role: 'user',
-            content: 'Hi',
-            id: '1',
-            sessionId: 's1',
-            createdAt: new Date(),
-            metadata: {}
-          }
-        ],
-        { model: 'gpt-4', apiProtocol: 'chat/completions', maxRetries: 1 }
-      )
+      await expect(
+        adapter.sendMessage(
+          [
+            {
+              role: 'user',
+              content: 'Hi',
+              id: '1',
+              sessionId: 's1',
+              createdAt: new Date(),
+              metadata: {}
+            }
+          ],
+          { model: 'gpt-4', apiProtocol: 'chat/completions', maxRetries: 1 }
+        )
+      ).rejects.toThrow('Network error 2')
 
-      expect(result.content).toBe('Recovered')
-      expect(mockCreate).toHaveBeenCalledTimes(4)
+      expect(mockCreate).toHaveBeenCalledTimes(2)
     },
     15000
   )

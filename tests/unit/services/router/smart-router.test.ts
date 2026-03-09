@@ -110,7 +110,14 @@ describe('SmartRouter', () => {
       })
 
       expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
-        expect.objectContaining({ subagent_type: 'qianliyan' })
+        expect.objectContaining({
+          subagent_type: 'qianliyan',
+          metadata: expect.objectContaining({
+            routing: expect.objectContaining({
+              rationale: expect.arrayContaining([expect.stringContaining('capability boundary matched subagent')])
+            })
+          })
+        })
       )
     })
 
@@ -123,18 +130,30 @@ describe('SmartRouter', () => {
       expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
         expect.objectContaining({
           description: input,
-          prompt: context.prompt,
+          prompt: expect.stringContaining('### 任务卡'),
           category: 'zhinv',
           parentTaskId: 'parent-1',
           metadata: expect.objectContaining({
             routing: expect.objectContaining({
               strategy: 'delegate',
               complexityScore: expect.any(Number),
+              semanticScores: expect.objectContaining({
+                riskScore: expect.any(Number),
+                infoSufficiencyScore: expect.any(Number),
+                approvalScore: expect.any(Number),
+                workforceFitScore: expect.any(Number)
+              }),
               rationale: expect.any(Array)
+            }),
+            taskTemplate: expect.anything(),
+            taskBrief: expect.objectContaining({
+              goal: expect.any(String),
+              acceptanceCriteria: expect.any(Array)
             })
           })
         })
       )
+      expect(mockDelegateEngine.delegateTask.mock.calls[0]?.[0]?.prompt).toContain(context.prompt)
     })
 
     it('should execute workforce strategy correctly', async () => {
@@ -146,10 +165,21 @@ describe('SmartRouter', () => {
         input,
         expect.objectContaining({
           category: 'dayu',
+          taskBrief: expect.objectContaining({
+            strategy: 'workforce',
+            acceptanceCriteria: expect.any(Array)
+          }),
           routingContext: expect.objectContaining({
             strategy: 'workforce',
             complexityScore: expect.any(Number),
-            rationale: expect.any(Array)
+            semanticScores: expect.objectContaining({
+              riskScore: expect.any(Number),
+              infoSufficiencyScore: expect.any(Number),
+              approvalScore: expect.any(Number),
+              workforceFitScore: expect.any(Number)
+            }),
+            rationale: expect.any(Array),
+            taskBriefGenerated: true
           })
         })
       )
@@ -226,6 +256,47 @@ describe('SmartRouter', () => {
           routingContext: expect.objectContaining({
             strategy: 'workforce',
             complexityScore: 1
+          })
+        })
+      )
+    })
+
+    it('should override rule routing when semantic scores indicate orchestration risk', () => {
+      expect(router.analyzeTask('请分步执行数据库迁移、修改配置并运行 bash 验证')).toBe('workforce')
+    })
+
+    it('should route vague but complex requests to clarification delegate', async () => {
+      await router.route('跨模块整体优化这个系统，但我还没给文件和日志，先帮我判断怎么拆')
+
+      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subagent_type: 'chongming',
+          metadata: expect.objectContaining({
+            routing: expect.objectContaining({
+              rationale: expect.arrayContaining([
+                expect.stringContaining('information sufficiency score'),
+                expect.stringContaining('semantic scores =>')
+              ])
+            })
+          })
+        })
+      )
+    })
+
+    it('should attach matched task template to routing metadata and task brief', async () => {
+      await router.route('请修复登录 bug，相关文件 src/main/auth.ts')
+
+      expect(mockDelegateEngine.delegateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            taskTemplate: expect.objectContaining({
+              key: 'bug_fix',
+              label: 'Bug 修复任务'
+            }),
+            taskBrief: expect.objectContaining({
+              templateKey: 'bug_fix',
+              templateLabel: 'Bug 修复任务'
+            })
           })
         })
       )

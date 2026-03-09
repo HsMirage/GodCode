@@ -2,6 +2,12 @@ import * as React from 'react'
 import { useEffect, useState } from 'react'
 import { Play, RotateCw, History, CheckCircle2, AlertCircle } from 'lucide-react'
 import clsx from 'clsx'
+import {
+  getRecoverySourceLabel,
+  getResumeActionLabel,
+  getResumeReasonLabel,
+  type RecoveryTrackingMetadata
+} from '@shared/recovery-contract'
 
 interface TodoItem {
   id: string
@@ -13,6 +19,9 @@ interface ContinuationStatus {
   shouldContinue: boolean
   incompleteTodos: TodoItem[]
   continuationPrompt?: string
+  totalTodos?: number
+  completedTodos?: number
+  recoveryContext?: RecoveryTrackingMetadata | null
 }
 
 interface ResumeHistoryItem {
@@ -23,7 +32,7 @@ interface ResumeHistoryItem {
 
 interface SessionRecoveryRecord {
   sessionId: string
-  status: 'active' | 'interrupted' | 'recovering' | 'recovered'
+  status: 'active' | 'interrupted' | 'recovering' | 'recovered' | 'crashed' | 'completed'
   checkpoint: {
     inProgressTasks?: string[]
     pendingTasks?: string[]
@@ -125,7 +134,8 @@ export function SessionResumeIndicator({ sessionId }: SessionResumeIndicatorProp
       if (status.continuationPrompt) {
         await window.codeall.invoke('message:send', {
           sessionId,
-          content: status.continuationPrompt
+          content: status.continuationPrompt,
+          resumeContext: status.recoveryContext
         })
       }
     } catch (error) {
@@ -139,9 +149,18 @@ export function SessionResumeIndicator({ sessionId }: SessionResumeIndicatorProp
     return null
   }
 
-  const totalTasks = 10
-  const completedTasks = totalTasks - status.incompleteTodos.length
+  const totalTasks = Math.max(status.totalTodos || status.incompleteTodos.length, status.incompleteTodos.length)
+  const completedTasks = Math.max(status.completedTodos || 0, 0)
   const progressPercent = Math.round((completedTasks / totalTasks) * 100)
+  const sourceLabel = status.recoveryContext
+    ? getRecoverySourceLabel(status.recoveryContext.recoverySource)
+    : 'Manual resume'
+  const reasonLabel = status.recoveryContext
+    ? getResumeReasonLabel(status.recoveryContext.resumeReason)
+    : 'Pending TODOs found'
+  const actionLabel = status.recoveryContext
+    ? getResumeActionLabel(status.recoveryContext.resumeAction)
+    : 'Send resume prompt'
 
   return (
     <div className="w-full bg-amber-500/10 border-b border-amber-500/20 backdrop-blur-sm transition-all duration-300">
@@ -158,7 +177,13 @@ export function SessionResumeIndicator({ sessionId }: SessionResumeIndicatorProp
                   {status.incompleteTodos.length} items pending
                 </span>
                 <span className="text-xs text-amber-500/80">•</span>
-                <span className="text-xs text-amber-400/80">Session interrupted</span>
+                <span className="text-xs text-amber-400/80">{sourceLabel}</span>
+              </div>
+
+              <div className="mb-2 flex items-center gap-2 text-xs text-amber-300/80">
+                <span>{reasonLabel}</span>
+                <span>•</span>
+                <span>{actionLabel}</span>
               </div>
 
               <div className="w-full max-w-xs h-1.5 bg-slate-800 rounded-full overflow-hidden">

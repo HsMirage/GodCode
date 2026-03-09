@@ -81,6 +81,7 @@ describe('Browser Tools Integration', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    defaultPolicy.reset()
 
     // Some mocks use `.mockReturnValueOnce(...)` which leaves a queue behind. Clear those queues
     // so tests don't leak state into each other.
@@ -111,8 +112,6 @@ describe('Browser Tools Integration', () => {
     // Default to view exists for most tests
     mocks.browserViewManager.getState.mockReturnValue({ id: viewId, isLoading: false })
 
-    // Reset permission policy
-    vi.spyOn(defaultPolicy, 'isAllowed').mockReturnValue(true)
   })
 
   afterEach(() => {
@@ -239,7 +238,7 @@ describe('Browser Tools Integration', () => {
 
   describe('Permission Policy', () => {
     it('should block tool when denied', async () => {
-      vi.spyOn(defaultPolicy, 'isAllowed').mockReturnValue(false)
+      defaultPolicy.deny('browser_navigate')
 
       const result = await toolExecutor.execute(
         'browser_navigate',
@@ -253,7 +252,7 @@ describe('Browser Tools Integration', () => {
     })
 
     it('should allow tool when permitted', async () => {
-      vi.spyOn(defaultPolicy, 'isAllowed').mockReturnValue(true)
+      defaultPolicy.allow('browser_navigate')
 
       const result = await toolExecutor.execute(
         'browser_navigate',

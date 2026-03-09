@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { WorkforceEngine } from '@/main/services/workforce/workforce-engine'
 import { calculateBackoffDelay, RetryableErrorType } from '@/main/services/workforce/retry'
-import { DatabaseService } from '@/main/services/database'
-import { LoggerService } from '@/main/services/logger'
 import { createLLMAdapter } from '@/main/services/llm/factory'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -1990,6 +1988,11 @@ describe('WorkforceEngine', () => {
           workflowId: 'workflow-1',
           model: 'openai-compatible::gpt-4o-mini',
           modelSource: 'system-default',
+          modelSelection: expect.objectContaining({
+            modelSelectionSource: 'system-default',
+            modelSelectionReason: 'system-default-hit',
+            modelSelectionSummary: expect.any(String)
+          }),
           concurrencyKey: expect.any(String),
           fallbackTrail: expect.any(Array)
         })
@@ -2551,5 +2554,101 @@ describe('WorkforceEngine', () => {
         })
       )
     })
+  })
+})
+
+describe('WorkforceEngine trace propagation', () => {
+  let workforceEngine: WorkforceEngine
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    delete process.env.WORKFORCE_STRICT_BINDING
+    workforceEngine = new WorkforceEngine()
+    vi.spyOn(fs, 'existsSync').mockReturnValue(false)
+    vi.spyOn(fs, 'readFileSync').mockImplementation(() => '')
+    mockBoulderService.getState.mockResolvedValue({})
+    mockBoulderService.isSessionTracked.mockResolvedValue(false)
+    mockPrisma.session.findUnique.mockResolvedValue({
+      id: 'test-session-123',
+      space: { id: 'space-1', workDir: '/tmp/workspace-a' }
+    })
+    mockPrisma.task.create.mockResolvedValue({ id: 'workflow-1', type: 'workflow', metadata: {} })
+    mockPrisma.task.update.mockResolvedValue({ id: 'workflow-1' })
+    mockPrisma.task.findUnique.mockResolvedValue(null)
+    mockPrisma.model.findMany.mockResolvedValue([
+      {
+        id: 'model-1',
+        provider: 'anthropic',
+        modelName: 'claude-3-5-sonnet-20240620',
+        apiKey: 'test-key',
+        apiKeyRef: null,
+        baseURL: null,
+        config: {}
+      }
+    ])
+    mockPrisma.systemSetting.findUnique.mockResolvedValue({ key: 'defaultModelId', value: 'model-1' })
+    mockPrisma.model.findUnique.mockResolvedValue({
+      id: 'model-1',
+      provider: 'anthropic',
+      modelName: 'claude-3-5-sonnet-20240620',
+      apiKey: 'test-key',
+      baseURL: null,
+      config: {},
+      apiKeyRef: null,
+      updatedAt: new Date()
+    })
+    mockPrisma.agentBinding.findUnique.mockResolvedValue(null)
+    mockPrisma.categoryBinding.findUnique.mockResolvedValue(null)
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('propagates traceId to workflow metadata and delegated subtasks', async () => {
+    mockAdapter.sendMessage.mockResolvedValue({
+      content: JSON.stringify({
+        subtasks: [{ id: 'task-trace', description: '实现网站主页', dependencies: [] }]
+      })
+    })
+
+    mockWorkerDispatcher.dispatch.mockResolvedValue({
+      taskId: 'subtask-trace-1',
+      output: 'Traceable workflow output',
+      success: true,
+      runId: 'run-trace-1',
+      model: 'openai-compatible::gpt-4o-mini',
+      modelSource: 'system-default'
+    })
+
+    const result = await workforceEngine.executeWorkflow('实现网站主页', 'test-session-123', {
+      enableRetry: false,
+      traceContext: {
+        traceId: 'tr-workflow-001',
+        startedAt: '2026-03-06T00:00:00.000Z'
+      }
+    })
+
+    expect(result.success).toBe(true)
+    expect(mockPrisma.task.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            traceId: 'tr-workflow-001'
+          })
+        })
+      })
+    )
+    expect(mockWorkerDispatcher.dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          traceId: 'tr-workflow-001'
+        })
+      })
+    )
+
+    const finalUpdate = mockPrisma.task.update.mock.calls.at(-1)?.[0]
+    expect(finalUpdate?.data?.metadata?.traceId).toBe('tr-workflow-001')
+    expect(finalUpdate?.data?.metadata?.correlation?.traceId).toBe('tr-workflow-001')
   })
 })

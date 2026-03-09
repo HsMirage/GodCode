@@ -4,8 +4,31 @@ import { toolRegistry } from '@/main/services/tools/tool-registry'
 import { defaultPolicy } from '@/main/services/tools/permission-policy'
 import type { BrowserTool, BrowserToolContext, ToolResult } from '@/main/services/ai-browser/types'
 
+const { requestApproval } = vi.hoisted(() => ({
+  requestApproval: vi.fn()
+}))
+const { appendEvent } = vi.hoisted(() => ({
+  appendEvent: vi.fn()
+}))
+
 vi.mock('@/main/services/tools/tool-registry')
 vi.mock('@/main/services/tools/permission-policy')
+vi.mock('@/main/services/tools/tool-approval.service', () => ({
+  ToolApprovalRequiredError: class ToolApprovalRequiredError extends Error {
+    constructor(public request: unknown, message: string) {
+      super(message)
+      this.name = 'ToolApprovalRequiredError'
+    }
+  },
+  toolApprovalService: {
+    requestApproval
+  }
+}))
+vi.mock('@/main/services/execution-event-persistence.service', () => ({
+  executionEventPersistenceService: {
+    appendEvent
+  }
+}))
 vi.mock('@/main/services/logger', () => ({
   LoggerService: {
     getInstance: vi.fn(() => ({
@@ -77,6 +100,8 @@ describe('ToolExecutionService', () => {
     )
     vi.mocked(toolRegistry.get).mockReturnValue(undefined)
     vi.mocked(toolRegistry.list).mockReturnValue([])
+    requestApproval.mockReset()
+    appendEvent.mockReset()
 
     service = new ToolExecutionService()
   })
@@ -250,6 +275,71 @@ describe('ToolExecutionService', () => {
 
       expect(output.success).toBe(false)
       expect(output.error).toContain('Execution failed')
+      expect(output.retryDecision?.classification).toBe('UNKNOWN')
+      expect(output.retryDecision?.nextAction).toBe('manual-takeover')
+    })
+
+    it('should wait for approval before executing confirm tool', async () => {
+      service.registerBrowserTools([mockBrowserTool])
+      vi.mocked(defaultPolicy.getExecutionPreview).mockReturnValue({
+        requestedName: 'browser_test',
+        resolvedName: 'browser_test',
+        template: 'balanced',
+        permission: 'confirm',
+        source: 'default',
+        dangerous: true,
+        highRisk: false,
+        highRiskEnforced: false,
+        requiresConfirmation: true,
+        allowedByPolicy: true,
+        allowedWithoutConfirmation: false,
+        confirmReason: 'Needs approval'
+      })
+      requestApproval.mockResolvedValue({ status: 'approved' })
+      vi.mocked(mockBrowserTool.execute).mockResolvedValue({ success: true })
+
+      const output = await service.executeTool(
+        { id: 'call-1', name: 'browser_test', arguments: { url: 'https://test.com' } },
+        { ...mockContext, sessionId: 'session-1', taskId: 'task-1', runId: 'run-1' }
+      )
+
+      expect(requestApproval).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolCall: expect.objectContaining({ id: 'call-1', name: 'browser_test' })
+        })
+      )
+      expect(mockBrowserTool.execute).toHaveBeenCalledTimes(1)
+      expect(output.success).toBe(true)
+    })
+
+    it('should reject execution when approval is denied', async () => {
+      service.registerBrowserTools([mockBrowserTool])
+      vi.mocked(defaultPolicy.getExecutionPreview).mockReturnValue({
+        requestedName: 'browser_test',
+        resolvedName: 'browser_test',
+        template: 'balanced',
+        permission: 'confirm',
+        source: 'default',
+        dangerous: true,
+        highRisk: true,
+        highRiskEnforced: true,
+        requiresConfirmation: true,
+        allowedByPolicy: true,
+        allowedWithoutConfirmation: false,
+        confirmReason: 'Needs approval'
+      })
+      requestApproval.mockResolvedValue({
+        status: 'rejected',
+        decisionReason: 'Denied by user'
+      })
+
+      await expect(
+        service.executeTool(
+          { id: 'call-1', name: 'browser_test', arguments: {} },
+          { ...mockContext, sessionId: 'session-1', taskId: 'task-1', runId: 'run-1' }
+        )
+      ).rejects.toThrow('Denied by user')
+      expect(mockBrowserTool.execute).not.toHaveBeenCalled()
     })
 
     it('should timeout long-running tools', async () => {
@@ -347,6 +437,23 @@ describe('ToolExecutionService', () => {
       expect(mockBrowserTool.execute).toHaveBeenCalledTimes(2)
     })
 
+    it('should persist tool request and completion events', async () => {
+      service.registerBrowserTools([mockBrowserTool])
+      vi.mocked(mockBrowserTool.execute).mockResolvedValue({ success: true })
+
+      await service.executeToolCalls(
+        [{ id: 'call-1', name: 'browser_test', arguments: { url: 'https://test.com' } }],
+        { ...mockContext, sessionId: 'session-1', taskId: 'task-1', runId: 'run-1' }
+      )
+
+      expect(appendEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'tool-call-requested', taskId: 'task-1', runId: 'run-1' })
+      )
+      expect(appendEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'tool-call-completed', taskId: 'task-1', runId: 'run-1' })
+      )
+    })
+
     it('should allow alias in scoped allowlist', async () => {
       service.registerBrowserTools([mockBrowserTool])
       vi.mocked(toolRegistry.resolveName).mockImplementation((name: string) => {
@@ -362,34 +469,6 @@ describe('ToolExecutionService', () => {
         )
         expect(result.allSucceeded).toBe(true)
       })
-    })
-  })
-
-  describe('createLoopExecutor', () => {
-    it('should return a function that executes tool calls', async () => {
-      service.registerBrowserTools([mockBrowserTool])
-      vi.mocked(mockBrowserTool.execute).mockResolvedValue({ success: true })
-
-      const executor = service.createLoopExecutor(mockContext)
-
-      const result = await executor([{ id: 'call-1', name: 'browser_test', arguments: {} }])
-
-      expect(result.outputs).toHaveLength(1)
-      expect(result.allSucceeded).toBe(true)
-    })
-
-    it('should track iteration count and stop when max exceeded', async () => {
-      service.registerBrowserTools([mockBrowserTool])
-      vi.mocked(mockBrowserTool.execute).mockResolvedValue({ success: true })
-
-      const executor = service.createLoopExecutor(mockContext, { maxIterations: 2 })
-
-      await executor([{ id: 'call-1', name: 'browser_test', arguments: {} }])
-      await executor([{ id: 'call-2', name: 'browser_test', arguments: {} }])
-      const result = await executor([{ id: 'call-3', name: 'browser_test', arguments: {} }])
-
-      expect(result.outputs).toHaveLength(0)
-      expect(result.allSucceeded).toBe(false)
     })
   })
 

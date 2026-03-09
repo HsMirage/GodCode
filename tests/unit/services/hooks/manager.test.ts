@@ -275,6 +275,55 @@ describe('HookManager execution audits', () => {
     expect(circuitAudit?.result.circuitOpenUntil).toBeDefined()
   })
 
+  it('should expose configured strategy and runtime state for governed hooks', async () => {
+    const governedHook: HookConfig<'onToolStart'> = {
+      id: 'governed-strategy-hook',
+      name: 'Governed Strategy Hook',
+      event: 'onToolStart',
+      strategy: {
+        timeoutMs: 150,
+        failureThreshold: 2,
+        cooldownMs: 5000
+      },
+      callback: async () => {
+        throw new Error('configured failure')
+      }
+    }
+
+    manager.register(governedHook)
+
+    const context = {
+      sessionId: 'session-governed',
+      workspaceDir: '/tmp/workspace-governed'
+    }
+
+    const input = {
+      tool: 'bash',
+      callId: 'call-governed',
+      params: {}
+    }
+
+    await manager.emitToolStart(context, input)
+    await manager.emitToolStart(context, input)
+    await manager.emitToolStart(context, input)
+
+    const latestAudit = manager.getRecentExecutionAudits(10)[0]
+    expect(latestAudit.strategy).toMatchObject({
+      hookId: 'governed-strategy-hook',
+      timeoutMs: 150,
+      failureThreshold: 2,
+      cooldownMs: 5000
+    })
+    expect(latestAudit.result.status).toBe('circuit_open')
+
+    expect(manager.getHookRuntimeSnapshot('governed-strategy-hook')).toMatchObject({
+      circuitState: 'open',
+      lastStatus: 'circuit_open',
+      lastError: expect.stringContaining('circuit is open'),
+      circuitOpenUntil: expect.any(Date)
+    })
+  })
+
   it('should clear execution audits when manager is cleared', async () => {
     const hook: HookConfig<'onMessageCreate'> = {
       id: 'audit-message-create',

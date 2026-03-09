@@ -544,7 +544,7 @@ function readApiProtocol(config: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-async function ensureBindingSchemaCompatibility(
+export async function ensureBindingSchemaCompatibility(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   client: any
 ): Promise<void> {
@@ -818,7 +818,7 @@ function resolvePrismaMigrationsDir(): string {
   )
 }
 
-async function ensureBaseSchema(
+export async function ensureBaseSchema(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   client: any
 ): Promise<void> {

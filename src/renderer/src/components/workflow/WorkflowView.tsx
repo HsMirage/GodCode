@@ -10,7 +10,7 @@ import {
   useEdgesState
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { Task } from '@/types/domain'
+import type { Task } from '@renderer/types/domain'
 import { useTraceNavigationStore } from '../../store/trace-navigation.store'
 import { TaskNode, type TaskNodeData } from './TaskNode'
 import { EdgeWithLabel } from './EdgeWithLabel'
@@ -38,6 +38,15 @@ interface CheckpointTimelineItem {
 interface WorkflowRuntimeLookup {
   byTaskId: Record<string, { runId?: string; agentId?: string }>
   byRunId: Record<string, { taskId: string; agentId?: string }>
+}
+
+interface WorkflowNodeSelectionSnapshot {
+  modelSource?: string
+  modelSelectionReason?: string
+  modelSelectionSummary?: string
+  fallbackReason?: string
+  fallbackAttemptSummary?: Array<{ summary?: string }>
+  fallbackTrail?: string[]
 }
 
 type WorkflowLoadState = 'idle' | 'loading' | 'ready' | 'error'
@@ -199,7 +208,17 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
           )) as {
             workflowId?: string
             continuationSnapshot?: { status?: string }
-            assignments?: Array<{ persistedTaskId?: string; runId?: string; assignedAgent?: string }>
+            assignments?: Array<{
+              persistedTaskId?: string
+              runId?: string
+              assignedAgent?: string
+              modelSource?: string
+              modelSelectionReason?: string
+              modelSelectionSummary?: string
+              fallbackReason?: string
+              fallbackAttemptSummary?: Array<{ summary?: string }>
+              fallbackTrail?: string[]
+            }>
           } | null
 
           const snapshotWorkflowId =
@@ -217,6 +236,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
 
           const byTaskId: Record<string, { runId?: string; agentId?: string }> = {}
           const byRunId: Record<string, { taskId: string; agentId?: string }> = {}
+          const selectionByTaskId: Record<string, WorkflowNodeSelectionSnapshot> = {}
 
           const assignments = Array.isArray(safeSnapshot?.assignments) ? safeSnapshot.assignments : []
           for (const assignment of assignments) {
@@ -239,9 +259,81 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
             if (runId) {
               byRunId[runId] = { taskId, agentId }
             }
+
+            selectionByTaskId[taskId] = {
+              modelSource: typeof assignment?.modelSource === 'string' ? assignment.modelSource : undefined,
+              modelSelectionReason:
+                typeof assignment?.modelSelectionReason === 'string' ? assignment.modelSelectionReason : undefined,
+              modelSelectionSummary:
+                typeof assignment?.modelSelectionSummary === 'string' ? assignment.modelSelectionSummary : undefined,
+              fallbackReason:
+                typeof assignment?.fallbackReason === 'string' ? assignment.fallbackReason : undefined,
+              fallbackAttemptSummary: Array.isArray(assignment?.fallbackAttemptSummary)
+                ? assignment.fallbackAttemptSummary
+                : undefined,
+              fallbackTrail: Array.isArray(assignment?.fallbackTrail) ? assignment.fallbackTrail : undefined
+            }
           }
 
           nextRuntimeLookup = { byTaskId, byRunId }
+          runtimeLookupRef.current = nextRuntimeLookup
+          setRuntimeLookup(nextRuntimeLookup)
+
+          const enrichedTasks = tasks.map(task => {
+            const selection = selectionByTaskId[task.id]
+            if (!selection) {
+              return task
+            }
+
+            return {
+              ...task,
+              metadata: {
+                ...(task.metadata || {}),
+                workflowSelectionSnapshot: selection
+              }
+            }
+          })
+
+          const currentNavigationTarget = navigationTargetRef.current
+          const highlightedTaskId =
+            selectedTaskIdRef.current ||
+            currentNavigationTarget?.taskId ||
+            (currentNavigationTarget?.runId
+              ? nextRuntimeLookup.byRunId[currentNavigationTarget.runId]?.taskId
+              : undefined) ||
+            null
+
+          const checkpointTimeline = tasks
+            .filter(task => task.type === 'workflow')
+            .flatMap(task => {
+              const raw = task.metadata?.orchestratorCheckpoints
+              if (!Array.isArray(raw)) {
+                return []
+              }
+              return raw
+                .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+                .map((item, index) => ({
+                  key: `${task.id}-${String(item.persistedTaskId || item.timestamp || index)}`,
+                  phase: typeof item.phase === 'string' ? item.phase : 'unknown',
+                  status: typeof item.status === 'string' ? item.status : 'unknown',
+                  timestamp: typeof item.timestamp === 'string' ? item.timestamp : undefined,
+                  reason: typeof item.reason === 'string' ? item.reason : undefined
+                }))
+            })
+            .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime())
+
+          const { nodes: flowNodes, edges: flowEdges } = convertTasksToFlow(enrichedTasks, highlightedTaskId)
+
+          if (requestId !== latestRequestIdRef.current) {
+            return
+          }
+
+          setNodes(flowNodes)
+          setEdges(flowEdges)
+          setCheckpoints(checkpointTimeline)
+          setLoadState('ready')
+          setLoadError(null)
+          return
         }
 
         runtimeLookupRef.current = nextRuntimeLookup
@@ -453,6 +545,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
             const colors = {
               pending: '#475569',
               running: '#0ea5e9',
+              pending_approval: '#8b5cf6',
               completed: '#10b981',
               failed: '#f43f5e',
               cancelled: '#f59e0b'

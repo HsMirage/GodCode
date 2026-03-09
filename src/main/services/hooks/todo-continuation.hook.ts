@@ -3,8 +3,7 @@ import type {
   HookContext,
   ToolExecutionInput,
   ToolExecutionOutput,
-  MessageInfo,
-  MessageInjectionResult
+  MessageInfo
 } from './types'
 
 const CONTINUATION_REMINDER = `[SYSTEM REMINDER - TODO CONTINUATION]
@@ -60,6 +59,8 @@ export function createTodoContinuationToolHook(): HookConfig<'onToolEnd'> {
     id: 'todo-continuation-flagger',
     name: 'Todo Continuation Flagger',
     event: 'onToolEnd',
+    source: 'builtin',
+    scope: 'session',
     description: 'Flags sessions for continuation reminder after todowrite with in_progress todos',
     priority: 20,
     callback: async (
@@ -84,6 +85,8 @@ export function createTodoContinuationMessageHook(): HookConfig<'onMessageCreate
     id: 'todo-continuation-injector',
     name: 'Todo Continuation Injector',
     event: 'onMessageCreate',
+    source: 'builtin',
+    scope: 'session',
     description: 'Injects one-shot continuation reminder when session is flagged',
     priority: 6,
     callback: async (context: HookContext, _message: MessageInfo): Promise<{ inject?: string }> => {

@@ -7,7 +7,12 @@
  */
 
 import type { BrowserTool, NavigateParams, ToolResult } from '../types'
-import { browserViewManager } from '../../browser-view.service'
+import {
+  browserViewManager,
+  type BrowserViewState as BrowserPageState
+} from '../../browser-view.service'
+
+const getBrowserStates = (): BrowserPageState[] => browserViewManager.getAllStates()
 
 /**
  * list_pages - List all open browser pages/tabs
@@ -21,8 +26,7 @@ export const listPagesTool: BrowserTool = {
     properties: {}
   },
   execute: async (_params, _context): Promise<ToolResult> => {
-    // Get all view states from the manager
-    const states = (browserViewManager as any).getAllStates?.() || []
+    const states = getBrowserStates()
 
     if (states.length === 0) {
       return {
@@ -32,7 +36,7 @@ export const listPagesTool: BrowserTool = {
     }
 
     const lines = ['Open browser pages:']
-    states.forEach((state: any, index: number) => {
+    states.forEach((state, index) => {
       lines.push(`[${index}] ${state.title || 'Untitled'} - ${state.url || 'about:blank'}`)
     })
 
@@ -70,7 +74,7 @@ export const selectPageTool: BrowserTool = {
   },
   execute: async (params, context): Promise<ToolResult> => {
     const pageIdx = params.pageIdx as number
-    const states = (browserViewManager as any).getAllStates?.() || []
+    const states = getBrowserStates()
 
     if (pageIdx < 0 || pageIdx >= states.length) {
       return {
@@ -81,8 +85,7 @@ export const selectPageTool: BrowserTool = {
 
     const state = states[pageIdx]
 
-    // We need to access setActiveViewId on context - cast to any
-    ;(context as any).setActiveViewId?.(state.id)
+    context.setActiveViewId?.(state.id)
 
     // Also update browserViewManager if needed
     if (params.bringToFront) {
@@ -132,7 +135,7 @@ export const newPageTool: BrowserTool = {
       await browserViewManager.create(viewId, url)
 
       // Set as active view in context
-      ;(context as any).setActiveViewId?.(viewId)
+      context.setActiveViewId?.(viewId)
 
       // Wait for page load with timeout
       const startTime = Date.now()
@@ -180,7 +183,7 @@ export const closePageTool: BrowserTool = {
   },
   execute: async (params, _context): Promise<ToolResult> => {
     const pageIdx = params.pageIdx as number
-    const states = (browserViewManager as any).getAllStates?.() || []
+    const states = getBrowserStates()
 
     if (pageIdx < 0 || pageIdx >= states.length) {
       return {
@@ -328,10 +331,9 @@ export const waitForTool: BrowserTool = {
   execute: async (params, context): Promise<ToolResult> => {
     const text = params.text as string
     const timeout = (params.timeout as number) || 30000
-    const ctx = context as any
 
     try {
-      await ctx.waitForText?.(text, timeout)
+      await context.waitForText?.(text, timeout)
       return {
         success: true,
         data: {
@@ -373,9 +375,8 @@ export const handleDialogTool: BrowserTool = {
   execute: async (params, context): Promise<ToolResult> => {
     const action = params.action as 'accept' | 'dismiss'
     const promptText = params.promptText as string | undefined
-    const ctx = context as any
 
-    const dialog = ctx.getPendingDialog?.()
+    const dialog = context.getPendingDialog?.()
     if (!dialog) {
       return {
         success: false,
@@ -384,7 +385,7 @@ export const handleDialogTool: BrowserTool = {
     }
 
     try {
-      await ctx.handleDialog?.(action === 'accept', promptText)
+      await context.handleDialog?.(action === 'accept', promptText)
       return {
         success: true,
         data: {

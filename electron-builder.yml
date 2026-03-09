@@ -91,4 +91,4 @@ nsis:
   createDesktopShortcut: always
   createStartMenuShortcut: true
   include: build/installer.nsh
-publish: null
+publish: null # 手动更新模式：当前未配置远程发布源

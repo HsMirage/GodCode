@@ -52,7 +52,7 @@ pnpm build:linux      # Linux
 | `delegate/` | Routes tasks to specialized agents (oracle, explore, librarian) |
 | `llm/` | LLM adapters (OpenAI-compatible, factory pattern) |
 | `tools/` | Tool registry and executor (file-read, file-write, browser-tools) |
-| `ai-browser/` | Playwright-based browser automation for agents |
+| `ai-browser/` | Electron BrowserView-based browser automation for agents |
 | `database.ts` | Prisma client singleton with embedded PostgreSQL |
 
 ### IPC Communication

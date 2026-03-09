@@ -135,6 +135,8 @@ export function createEditErrorRecoveryHook(): HookConfig<'onEditError'> {
     id: 'edit-error-recovery',
     name: 'Edit Error Recovery',
     event: 'onEditError',
+    source: 'builtin',
+    scope: 'tool',
     description: 'Detects Edit tool errors and injects recovery instructions',
     priority: 10,
 
@@ -161,6 +163,8 @@ export function createEditErrorRecoveryToolHook(): HookConfig<'onToolEnd'> {
     id: 'edit-error-recovery-tool',
     name: 'Edit Error Recovery (Tool)',
     event: 'onToolEnd',
+    source: 'builtin',
+    scope: 'tool',
     description: 'Detects Edit tool errors from tool output and injects recovery instructions',
     priority: 10,
 

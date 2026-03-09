@@ -8,6 +8,13 @@ import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { logger } from '../../../shared/logger'
 import { AuditLogService } from '../audit-log.service'
+import {
+  DEFAULT_HOOK_COOLDOWN_MS,
+  DEFAULT_HOOK_FAILURE_THRESHOLD,
+  DEFAULT_HOOK_TIMEOUT_MS,
+  type HookGovernanceRuntimeSnapshot,
+  type HookReliabilityPolicy
+} from '@/shared/hook-governance-contract'
 import type {
   HookEventType,
   HookConfig,
@@ -43,6 +50,26 @@ class HookTimeoutError extends Error {
 interface HookRuntimeState {
   consecutiveFailures: number
   circuitOpenUntil?: number
+  lastStatus?: HookExecutionStatus
+  lastDurationMs?: number
+  lastError?: string
+  lastExecutedAt?: Date
+}
+
+function normalizePositiveInteger(value: number | undefined, fallback: number): number {
+  if (!Number.isFinite(value)) {
+    return fallback
+  }
+
+  return Math.max(1, Math.floor(value as number))
+}
+
+function resolveHookReliabilityPolicy(strategy?: Partial<HookReliabilityPolicy>): HookReliabilityPolicy {
+  return {
+    timeoutMs: normalizePositiveInteger(strategy?.timeoutMs, DEFAULT_HOOK_TIMEOUT_MS),
+    failureThreshold: normalizePositiveInteger(strategy?.failureThreshold, DEFAULT_HOOK_FAILURE_THRESHOLD),
+    cooldownMs: normalizePositiveInteger(strategy?.cooldownMs, DEFAULT_HOOK_COOLDOWN_MS)
+  }
 }
 
 export class HookManager {
@@ -52,9 +79,6 @@ export class HookManager {
   private eventHooks: Map<HookEventType, Set<string>> = new Map()
   private readonly maxExecutionAudits = 200
   private executionAudits: HookExecutionAuditRecord[] = []
-  private readonly hookTimeoutMs = 2000
-  private readonly circuitBreakerFailureThreshold = 3
-  private readonly circuitBreakerCooldownMs = 30_000
   private runtimeStates: Map<string, HookRuntimeState> = new Map()
 
   private constructor() {
@@ -101,6 +125,9 @@ export class HookManager {
       ...config,
       enabled: config.enabled ?? true,
       priority: config.priority ?? 100,
+      source: config.source ?? 'custom',
+      scope: config.scope ?? 'global',
+      strategy: resolveHookReliabilityPolicy(config.strategy),
       registeredAt: new Date(),
       executionCount: 0,
       errorCount: 0
@@ -223,9 +250,10 @@ export class HookManager {
   private markHookFailure(hook: RegisteredHook): Date | undefined {
     const state = this.getRuntimeState(hook.id)
     state.consecutiveFailures += 1
+    const strategy = resolveHookReliabilityPolicy(hook.strategy)
 
-    if (state.consecutiveFailures >= this.circuitBreakerFailureThreshold) {
-      state.circuitOpenUntil = Date.now() + this.circuitBreakerCooldownMs
+    if (state.consecutiveFailures >= strategy.failureThreshold) {
+      state.circuitOpenUntil = Date.now() + strategy.cooldownMs
       state.consecutiveFailures = 0
       return new Date(state.circuitOpenUntil)
     }
@@ -233,11 +261,13 @@ export class HookManager {
     return undefined
   }
 
-  private withTimeout<T>(promise: Promise<T>, hookId: string): Promise<T> {
+  private withTimeout<T>(promise: Promise<T>, hook: RegisteredHook): Promise<T> {
+    const strategy = resolveHookReliabilityPolicy(hook.strategy)
+
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new HookTimeoutError(hookId, this.hookTimeoutMs))
-      }, this.hookTimeoutMs)
+        reject(new HookTimeoutError(hook.id, strategy.timeoutMs))
+      }, strategy.timeoutMs)
 
       promise
         .then(value => {
@@ -292,17 +322,40 @@ export class HookManager {
   }
 
   private buildStrategySnapshot(hook: RegisteredHook): HookExecutionStrategySnapshot {
+    const strategy = resolveHookReliabilityPolicy(hook.strategy)
+
     return {
       hookId: hook.id,
       hookName: hook.name,
       event: hook.event,
       priority: hook.priority ?? 100,
-      enabled: hook.enabled ?? true
+      enabled: hook.enabled ?? true,
+      source: hook.source ?? 'custom',
+      scope: hook.scope ?? 'global',
+      timeoutMs: strategy.timeoutMs,
+      failureThreshold: strategy.failureThreshold,
+      cooldownMs: strategy.cooldownMs
+    }
+  }
+
+  private updateRuntimeObservation(
+    hook: RegisteredHook,
+    result: Pick<HookExecutionOutcome, 'status' | 'duration' | 'error'>
+  ): void {
+    const state = this.getRuntimeState(hook.id)
+    state.lastStatus = result.status
+    state.lastDurationMs = result.duration
+    state.lastError = result.error
+
+    if (result.status !== 'circuit_open') {
+      state.lastExecutedAt = new Date()
     }
   }
 
   private async persistExecutionAudit(record: HookExecutionAuditRecord): Promise<void> {
     try {
+      const timestamp = new Date(record.timestamp)
+
       await AuditLogService.getInstance().log({
         action: 'hook:execution',
         entityType: 'hook',
@@ -311,7 +364,7 @@ export class HookManager {
         success: record.result.success,
         errorMsg: record.result.error,
         metadata: {
-          timestamp: record.timestamp.toISOString(),
+          timestamp: Number.isNaN(timestamp.getTime()) ? String(record.timestamp) : timestamp.toISOString(),
           strategy: record.strategy,
           execution: record.execution,
           result: record.result
@@ -360,6 +413,21 @@ export class HookManager {
     return this.executionAudits.slice(0, Math.floor(limit))
   }
 
+  getHookRuntimeSnapshot(hookId: string): HookGovernanceRuntimeSnapshot {
+    const hook = this.hooks.get(hookId)
+    const state = this.getRuntimeState(hookId)
+
+    return {
+      consecutiveFailures: state.consecutiveFailures,
+      circuitState: this.isCircuitOpen(hook ?? { id: hookId } as RegisteredHook).open ? 'open' : 'closed',
+      circuitOpenUntil: state.circuitOpenUntil ? new Date(state.circuitOpenUntil) : undefined,
+      lastStatus: state.lastStatus,
+      lastDurationMs: state.lastDurationMs,
+      lastError: state.lastError,
+      lastExecutedAt: state.lastExecutedAt ?? hook?.lastExecutedAt
+    }
+  }
+
   private async emitEvent<TPayload, TExtra extends object = Record<string, never>>(
     event: HookEventType,
     payload: TPayload,
@@ -398,13 +466,18 @@ export class HookManager {
           error: errorMessage,
           circuitOpenUntil
         })
+        this.updateRuntimeObservation(hook, {
+          status: 'circuit_open',
+          duration: 0,
+          error: errorMessage
+        })
         continue
       }
 
       const startTime = Date.now()
       try {
         const callback = callbackFactory(hook)
-        const result = await this.withTimeout(callback(payload), hook.id)
+        const result = await this.withTimeout(callback(payload), hook)
 
         hook.executionCount++
         hook.lastExecutedAt = new Date()
@@ -431,8 +504,13 @@ export class HookManager {
           degraded: false,
           returnValuePreview: this.createReturnValuePreview(result)
         })
+        this.updateRuntimeObservation(hook, {
+          status: 'success',
+          duration
+        })
       } catch (error) {
         hook.errorCount++
+        hook.lastExecutedAt = new Date()
         const duration = Date.now() - startTime
         const status = this.resolveExecutionStatus(error)
         const errorMessage = this.toErrorMessage(error)
@@ -455,6 +533,11 @@ export class HookManager {
           degraded: true,
           error: errorMessage,
           circuitOpenUntil
+        })
+        this.updateRuntimeObservation(hook, {
+          status,
+          duration,
+          error: errorMessage
         })
       }
     }
@@ -501,7 +584,7 @@ export class HookManager {
         }
       },
       {
-        shouldSkip: false,
+        shouldSkip: false as boolean,
         modifiedInput: { ...input }
       }
     )

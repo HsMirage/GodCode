@@ -105,6 +105,7 @@ vi.mock('fs', async () => {
 const mockStore: any = {
   space: [],
   model: [],
+  systemSetting: [],
   agentBinding: [],
   categoryBinding: [],
   session: [],
@@ -230,6 +231,7 @@ vi.mock('@prisma/client', () => {
     PrismaClient: class {
       space = createDelegate('space')
       model = createDelegate('model')
+      systemSetting = createDelegate('systemSetting')
       agentBinding = createDelegate('agentBinding')
       categoryBinding = createDelegate('categoryBinding')
       session = createDelegate('session')
@@ -326,7 +328,7 @@ describe('Full Workflow Integration', () => {
         provider: 'openai-compatible',
         modelName: 'claude-3-5-sonnet-20240620',
         apiKey: 'sk-ant-test-key',
-        config: {}
+        config: { apiProtocol: 'chat/completions' }
       }
     })
     createdModelIds.push(model1.id)
@@ -336,10 +338,17 @@ describe('Full Workflow Integration', () => {
         provider: 'openai-compatible',
         modelName: 'gpt-4o',
         apiKey: 'sk-proj-test-key',
-        config: {}
+        config: { apiProtocol: 'chat/completions' }
       }
     })
     createdModelIds.push(model2.id)
+
+    await prisma.systemSetting.create({
+      data: {
+        key: 'defaultModelId',
+        value: model1.id
+      }
+    })
 
     const session = await prisma.session.create({
       data: {
@@ -474,6 +483,22 @@ describe('Full Workflow Integration', () => {
       sendMessage: vi.fn().mockRejectedValue(new Error('LLM API failure'))
     } as any)
 
+    const model = await prisma.model.create({
+      data: {
+        provider: 'openai-compatible',
+        modelName: 'gpt-4o',
+        apiKey: 'sk-error-test-key',
+        config: { apiProtocol: 'chat/completions' }
+      }
+    })
+
+    await prisma.systemSetting.create({
+      data: {
+        key: 'defaultModelId',
+        value: model.id
+      }
+    })
+
     const space = await prisma.space.create({ data: { name: 'Error Test', workDir: '/tmp/err' } })
     const session = await prisma.session.create({
       data: { spaceId: space.id, title: 'Error Session', status: 'active' }
@@ -485,6 +510,8 @@ describe('Full Workflow Integration', () => {
     )
 
     // Cleanup
+    await prisma.systemSetting.deleteMany({ where: { key: 'defaultModelId' } })
+    await prisma.model.delete({ where: { id: model.id } })
     await prisma.session.delete({ where: { id: session.id } })
     await prisma.space.delete({ where: { id: space.id } })
   })

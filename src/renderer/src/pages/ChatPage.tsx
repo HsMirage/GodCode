@@ -1,31 +1,27 @@
 import * as React from 'react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { MessageList } from '../components/chat/MessageList'
-import { MessageInput, type MessageInputSendPayload } from '../components/chat/MessageInput'
+import { MessageInput } from '../components/chat/MessageInput'
 import { TypingIndicator } from '../components/chat/TypingIndicator'
 import { WorkflowView } from '../components/workflow/WorkflowView'
 import { ContentCanvas } from '../components/canvas/ContentCanvas'
 import { useCanvasLifecycle } from '../hooks/useCanvasLifecycle'
-import { Message } from '../components/chat/MessageCard'
 import { SessionResumeIndicator } from '../components/session/SessionResumeIndicator'
 import { AgentWorkViewer } from '../components/agents/AgentWorkViewer'
 import { AgentList } from '../components/agents/AgentList'
 import { useAgentStore } from '../store/agent.store'
 import { useUIStore } from '../store/ui.store'
-import { AGENT_DEFINITIONS, type AgentRoutingStrategy } from '@shared/agent-definitions'
 import { FileCode2, Globe, ListTodo } from 'lucide-react'
 import { useDataStore } from '../store/data.store'
 import { useTraceNavigationStore } from '../store/trace-navigation.store'
+import { useChatMessages } from '../hooks/useChatMessages'
+import { workflowApi } from '../api'
+import { useToolApprovals } from '../hooks/useToolApprovals'
+import { ToolApprovalDialog } from '../components/tools/ToolApprovalDialog'
 
 type ViewMode = 'chat' | 'workflow' | 'agent'
 
 export function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [sendError, setSendError] = useState<string | null>(null)
-  const [retryNotice, setRetryNotice] = useState<string | null>(null)
-  const streamingContentRef = useRef('')
-  const [streamingContent, setStreamingContent] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('chat')
   const { isOpen: canvasIsOpen } = useCanvasLifecycle()
   const { selectedAgentId, fetchAgents, selectAgent } = useAgentStore()
@@ -38,21 +34,29 @@ export function ChatPage() {
     toggleArtifactRail
   } = useUIStore()
   const { currentSpaceId, currentSessionId, bumpSessionActivity, fetchSpaces } = useDataStore()
-  const activeSessionIdRef = useRef<string | null>(null)
   const messageScrollRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const [isNarrow, setIsNarrow] = useState(false)
   const navigationTarget = useTraceNavigationStore(state => state.target)
   const clearNavigate = useTraceNavigationStore(state => state.clearNavigate)
+  const { activeRequest, resolvingId, approve, reject } = useToolApprovals(currentSessionId)
 
-  // Helper to determine agent strategy
-  const getAgentStrategy = (agentCode?: string): AgentRoutingStrategy | undefined => {
-    if (!agentCode || agentCode === 'default') return undefined
-    const agent = AGENT_DEFINITIONS.find(a => a.code === agentCode)
-    return agent?.defaultStrategy
-  }
+  const onWorkforceDetected = useCallback(() => setViewMode('workflow'), [])
 
-  // When ContentCanvas is visible, avoid shrinking the chat column too far.
+  const {
+    messages: displayMessages,
+    isLoading,
+    sendError,
+    retryNotice,
+    handleSend,
+    handleStop
+  } = useChatMessages({
+    sessionId: currentSessionId,
+    spaceId: currentSpaceId,
+    bumpSessionActivity,
+    onWorkforceDetected
+  })
+
   useEffect(() => {
     const el = rootRef.current
     if (!el) return
@@ -67,24 +71,16 @@ export function ChatPage() {
   }, [])
 
   useEffect(() => {
-    activeSessionIdRef.current = currentSessionId
-  }, [currentSessionId])
-
-  useEffect(() => {
     if (viewMode !== 'agent') return
     void fetchAgents(currentSessionId)
   }, [viewMode, currentSessionId, fetchAgents])
 
   useEffect(() => {
-    if (!navigationTarget) {
-      return
-    }
+    if (!navigationTarget) return
 
     if (navigationTarget.preferredView === 'agent') {
       setViewMode('agent')
-      if (navigationTarget.agentId) {
-        selectAgent(navigationTarget.agentId)
-      }
+      if (navigationTarget.agentId) selectAgent(navigationTarget.agentId)
       return
     }
 
@@ -93,287 +89,29 @@ export function ChatPage() {
       return
     }
 
-    const timer = setTimeout(() => {
-      clearNavigate()
-    }, 2400)
-
+    const timer = setTimeout(() => clearNavigate(), 2400)
     return () => clearTimeout(timer)
   }, [navigationTarget, selectAgent, clearNavigate])
 
-  // Ensure base data exists (spaces -> currentSpace).
   useEffect(() => {
-    if (!window.codeall) {
-      console.warn('[ChatPage] window.codeall not available, chat will be disabled')
-      return
-    }
-
+    if (!window.codeall) return
     if (!currentSpaceId) {
       void fetchSpaces()
-      return
     }
   }, [currentSpaceId, fetchSpaces])
 
   useEffect(() => {
     if (!window.codeall || !currentSessionId) return
 
-    const removeListener = window.codeall.on('task:status-changed', (_payload: any) => {
-      // Only auto-switch once (if still in chat mode) when a task event occurs
-      // This acts as a backup trigger if the initial switch didn't happen
-      // or if tasks are generated later in the process
-      if (viewMode === 'chat') {
-        setViewMode('workflow')
-      }
-      if (viewMode === 'agent') {
-        void fetchAgents(currentSessionId)
-      }
+    const removeListener = workflowApi.onTaskStatusChanged(() => {
+      if (viewMode === 'chat') setViewMode('workflow')
+      if (viewMode === 'agent') void fetchAgents(currentSessionId)
     })
 
-    return () => removeListener()
+    return removeListener
   }, [currentSessionId, viewMode, fetchAgents])
 
   const chatDisabled = !currentSessionId
-
-  // Load message history for the active session
-  useEffect(() => {
-    if (!window.codeall) return
-
-    streamingContentRef.current = ''
-    setStreamingContent('')
-    setIsLoading(false)
-    setSendError(null)
-    setRetryNotice(null)
-
-    if (!currentSessionId) {
-      setMessages([])
-      return
-    }
-
-    const load = async () => {
-      try {
-        const existingMessages = await window.codeall.invoke('message:list', currentSessionId)
-        if (!Array.isArray(existingMessages)) {
-          setMessages([])
-          return
-        }
-
-        setMessages(
-          existingMessages
-            .filter(msg => msg.role !== 'system')
-            .map(msg => ({
-              id: msg.id,
-              role: msg.role as 'user' | 'assistant',
-              content: msg.content,
-              metadata:
-                msg.metadata && typeof msg.metadata === 'object'
-                  ? (msg.metadata as Record<string, unknown>)
-                  : undefined,
-              createdAt: msg.createdAt || new Date().toISOString()
-            }))
-        )
-      } catch (error) {
-        console.error('Failed to load messages:', error)
-      }
-    }
-
-    void load()
-  }, [currentSessionId])
-
-  useEffect(() => {
-    if (!window.codeall) return
-
-    const removeListener = window.codeall.on('message:stream-chunk', payload => {
-      const { content, done, sessionId } = payload as {
-        content: string
-        done: boolean
-        sessionId?: string
-      }
-
-      // Ignore chunks for sessions that aren't currently visible.
-      if (sessionId && sessionId !== activeSessionIdRef.current) return
-
-      if (done) {
-        const finalContent = streamingContentRef.current + content
-        if (finalContent.trim()) {
-          setMessages(prev => [
-            ...prev,
-            {
-              id: Date.now().toString(),
-              role: 'assistant',
-              content: finalContent,
-              createdAt: new Date().toISOString()
-            }
-          ])
-        }
-        streamingContentRef.current = ''
-        setStreamingContent('')
-        setIsLoading(false)
-        setRetryNotice(null)
-      } else {
-        streamingContentRef.current += content
-        setStreamingContent(streamingContentRef.current)
-      }
-    })
-
-    return () => {
-      removeListener()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!window.codeall) return
-
-    const removeListener = window.codeall.on('message:stream-error', payload => {
-      const { sessionId, message, code } = payload as {
-        sessionId?: string
-        message: string
-        code?: string
-      }
-      if (sessionId && sessionId !== activeSessionIdRef.current) return
-
-      if (code === 'API_RETRYING') {
-        setRetryNotice(message)
-        return
-      }
-
-      setRetryNotice(null)
-      setSendError(message)
-      setIsLoading(false)
-    })
-
-    return () => {
-      removeListener()
-    }
-  }, [])
-
-  const handleSend = async (payload: MessageInputSendPayload, agentCode?: string) => {
-    const { content, skillCommand } = payload
-    if (!currentSessionId || !currentSpaceId || !window.codeall) return false
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content,
-      createdAt: new Date().toISOString()
-    }
-    setMessages(prev => [...prev, userMessage])
-    setIsLoading(true)
-    setSendError(null)
-    setRetryNotice(null)
-    bumpSessionActivity(currentSpaceId, currentSessionId)
-
-    streamingContentRef.current = ''
-    setStreamingContent('')
-
-    // Auto-switch to workflow view when workforce strategy is detected
-    const strategy = getAgentStrategy(agentCode)
-    if (strategy === 'workforce') {
-      setViewMode('workflow')
-    }
-
-    try {
-      const assistantMessage = await window.codeall.invoke('message:send', {
-        sessionId: currentSessionId,
-        content,
-        agentCode,
-        skillCommand
-      })
-
-      if (assistantMessage && typeof assistantMessage === 'object') {
-        const persistedAssistant = assistantMessage as {
-          id?: string
-          role?: string
-          content?: string
-          createdAt?: string
-          metadata?: unknown
-        }
-
-        if (persistedAssistant.role === 'assistant' && typeof persistedAssistant.content === 'string') {
-          setMessages(prev => {
-            const reverseIndex = [...prev]
-              .reverse()
-              .findIndex(
-                message =>
-                  message.role === 'assistant' &&
-                  message.content === persistedAssistant.content &&
-                  !message.metadata
-              )
-
-            if (reverseIndex < 0) {
-              return prev
-            }
-
-            const messageIndex = prev.length - 1 - reverseIndex
-            const next = [...prev]
-            next[messageIndex] = {
-              ...next[messageIndex],
-              id: persistedAssistant.id || next[messageIndex].id,
-              createdAt: persistedAssistant.createdAt || next[messageIndex].createdAt,
-              metadata:
-                persistedAssistant.metadata && typeof persistedAssistant.metadata === 'object'
-                  ? (persistedAssistant.metadata as Record<string, unknown>)
-                  : next[messageIndex].metadata
-            }
-            return next
-          })
-        }
-      }
-
-      return true
-    } catch (error) {
-      console.error('Failed to send message:', error)
-      setIsLoading(false)
-      setRetryNotice(null)
-      setSendError(error instanceof Error ? error.message : String(error))
-
-      // Reconcile with DB state: message:send may have already persisted the user message
-      // before failing to produce an assistant reply.
-      try {
-        const existingMessages = await window.codeall.invoke('message:list', currentSessionId)
-        if (Array.isArray(existingMessages)) {
-          setMessages(
-            existingMessages
-              .filter(msg => msg.role !== 'system')
-              .map(msg => ({
-                id: msg.id,
-                role: msg.role as 'user' | 'assistant',
-                content: msg.content,
-                metadata:
-                  msg.metadata && typeof msg.metadata === 'object'
-                    ? (msg.metadata as Record<string, unknown>)
-                    : undefined,
-                createdAt: msg.createdAt || new Date().toISOString()
-              }))
-          )
-        }
-      } catch {
-        // ignore
-      }
-      return true
-    }
-  }
-
-  const handleStop = async () => {
-    if (!currentSessionId || !window.codeall) return
-
-    try {
-      await window.codeall.invoke('message:abort', { sessionId: currentSessionId })
-    } catch (error) {
-      console.error('Failed to stop active session:', error)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const displayMessages = [...messages]
-  if (streamingContent) {
-    displayMessages.push({
-      id: 'streaming',
-      role: 'assistant',
-      content: streamingContent,
-      createdAt: new Date().toISOString(),
-      isStreaming: true
-    })
-  }
 
   return (
     <div
@@ -615,6 +353,13 @@ export function ChatPage() {
           <ContentCanvas />
         </div>
       )}
+
+      <ToolApprovalDialog
+        request={activeRequest}
+        busy={Boolean(activeRequest && resolvingId === activeRequest.id)}
+        onApprove={approve}
+        onReject={reject}
+      />
     </div>
   )
 }

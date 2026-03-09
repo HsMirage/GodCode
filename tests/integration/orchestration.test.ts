@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => {
     categoryBinding: {
       findUnique: vi.fn()
     },
+    systemSetting: {
+      findUnique: vi.fn()
+    },
     session: {
       create: vi.fn(),
       findFirst: vi.fn(),
@@ -27,6 +30,7 @@ const mocks = vi.hoisted(() => {
       findFirst: vi.fn()
     },
     model: {
+      findUnique: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn()
     },
@@ -100,6 +104,8 @@ describe('Orchestration Engines Integration', () => {
     mocks.llmAdapter.streamMessage.mockReset()
     mocks.prisma.task.create.mockReset()
     mocks.prisma.task.update.mockReset()
+    mocks.prisma.systemSetting.findUnique.mockReset()
+    mocks.prisma.model.findUnique.mockReset()
     mocks.prisma.model.findMany.mockReset()
     mocks.prisma.model.findFirst.mockReset()
     mocks.prisma.session.findFirst.mockReset()
@@ -116,6 +122,15 @@ describe('Orchestration Engines Integration', () => {
       space: { id: 'space_123', workDir: '/tmp/workspace-a' }
     })
     mocks.prisma.space.findFirst.mockResolvedValue({ id: 'space_123' })
+    mocks.prisma.systemSetting.findUnique.mockResolvedValue({ key: 'defaultModelId', value: 'model_123' })
+    mocks.prisma.model.findUnique.mockResolvedValue({
+      id: 'model_123',
+      provider: 'anthropic',
+      apiKey: 'test-key',
+      baseURL: null,
+      config: {},
+      modelName: 'claude-3-5-sonnet-20240620'
+    })
     mocks.prisma.model.findFirst.mockResolvedValue({
       id: 'model_123',
       provider: 'anthropic',

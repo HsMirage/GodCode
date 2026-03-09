@@ -20,11 +20,45 @@ export type {
   SharedContextEntry,
   SharedContextQuery,
   SharedContextStore,
-  WorkflowObservabilitySnapshot
-} from './workforce-engine'
+  WorkflowObservabilitySnapshot,
+  WorkflowTaskExecution,
+  WorkflowPhase,
+  WorkflowLifecycleStage,
+  TaskIntent,
+  OrchestratorCheckpointPhase,
+  OrchestratorCheckpointRecord,
+  TaskPromptContract,
+  WorkflowTaskResolution
+} from './workflow-types'
+export {
+  PHASE_ORDER,
+  isValidPhaseDependency,
+  KNOWN_SUBAGENT_CODES,
+  KNOWN_CATEGORY_CODES,
+  PRIMARY_ORCHESTRATORS,
+  SPECIALIST_WORKERS,
+  resolveCanonicalSubagent,
+  resolveCanonicalCategory,
+  isPrimaryOrchestrator
+} from './workflow-types'
 export { WorkforceWorkerDispatcher } from './worker-dispatcher'
 export type { WorkerDispatchInput } from './worker-dispatcher'
 export type { WorkflowEvent } from './events'
+
+// Decomposer exports
+export {
+  normalizeDecomposedSubtasks,
+  parsePlanSubtasks,
+  parsePlanSubtasksFromContent,
+  extractPlanPathFromInput,
+  normalizePlanPath,
+  shouldPreferPlanExecution,
+  extractMarkdownPathCandidates,
+  shouldRequireReferencedFiles,
+  buildReferencedMarkdownDecompositionContext,
+  extractDependencyIds,
+  extractTaskExecutionHint
+} from './workflow-decomposer'
 
 // Retry mechanism exports
 export {

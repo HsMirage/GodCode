@@ -392,6 +392,10 @@ export function MessageInput({
     try {
       const ok = await onSend(payload, selectedAgent)
       if (ok) {
+        const usedCommand = payload.skillCommand?.command
+        if (usedCommand && usedCommand.length > 1) {
+          recordSlashCommandUse(usedCommand.toLowerCase())
+        }
         return
       }
 

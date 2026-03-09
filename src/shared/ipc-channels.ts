@@ -48,6 +48,8 @@ export const INVOKE_CHANNELS = {
   TASK_GET: 'task:get',
   TASK_LIST: 'task:list',
   TASK_UPDATE: 'task:update',
+  TOOL_APPROVAL_LIST: 'tool-approval:list',
+  TOOL_APPROVAL_RESOLVE: 'tool-approval:resolve',
 
   // Task Continuation
   TASK_CONTINUATION_GET_STATUS: 'task-continuation:get-status',
@@ -90,6 +92,7 @@ export const INVOKE_CHANNELS = {
   BROWSER_RELOAD: 'browser:reload',
   BROWSER_STOP: 'browser:stop',
   BROWSER_GET_STATE: 'browser:get-state',
+  BROWSER_LIST_TABS: 'browser:list-tabs',
   BROWSER_CAPTURE: 'browser:capture',
   BROWSER_EXECUTE_JS: 'browser:execute-js',
   BROWSER_ZOOM: 'browser:zoom',
@@ -190,6 +193,7 @@ export const EVENT_CHANNELS = {
 
   // Task Events
   TASK_STATUS_CHANGED: 'task:status-changed',
+  TOOL_APPROVAL_UPDATED: 'tool-approval:updated',
   BACKGROUND_TASK_STARTED: 'background-task:started',
   BACKGROUND_TASK_OUTPUT: 'background-task:output',
   BACKGROUND_TASK_COMPLETED: 'background-task:completed',

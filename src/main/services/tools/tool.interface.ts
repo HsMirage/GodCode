@@ -26,6 +26,9 @@ export interface ToolExecutionContext {
   workspaceDir: string
   sessionId: string
   userId?: string
+  traceId?: string
+  taskId?: string
+  runId?: string
 }
 
 export interface ToolExecutionResult {

@@ -45,6 +45,17 @@ export class MockLLMAdapter implements LLMAdapter {
         done: isLast
       }
     }
+
+    yield {
+      content: '',
+      done: false,
+      type: 'usage',
+      usage: {
+        promptTokens: response.usage.prompt_tokens,
+        completionTokens: response.usage.completion_tokens,
+        totalTokens: response.usage.prompt_tokens + response.usage.completion_tokens
+      }
+    }
   }
 
   private getLastUserMessage(messages: Message[]): string {

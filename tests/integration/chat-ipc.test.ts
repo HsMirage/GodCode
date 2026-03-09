@@ -251,6 +251,7 @@ vi.mock('@prisma/client', () => {
 
 let lastLLMConfig: any = null
 let lastLLMMessages: any[] | null = null
+let lastUsageEvents: any[] = []
 
 // Mock LLM factory so tests can assert on resolved model config without real network calls.
 vi.mock('@/main/services/llm/factory', () => ({
@@ -265,6 +266,16 @@ vi.mock('@/main/services/llm/factory', () => ({
         content += '\n\n[Tool Execution Result]\nfile1.ts\nfile2.ts'
       }
       yield { content, done: true }
+      yield {
+        content: '',
+        done: false,
+        type: 'usage',
+        usage: {
+          promptTokens: 11,
+          completionTokens: 7,
+          totalTokens: 18
+        }
+      }
     }
   }))
 }))
@@ -342,16 +353,22 @@ describe('Chat IPC Integration - handleMessageSend', () => {
   let sessionId: string
   let spaceId: string
   let streamChunks: Array<{ content: string; done: boolean }>
+  let streamUsages: Array<{ promptTokens: number; completionTokens: number; totalTokens: number }>
   let mockEvent: IpcMainInvokeEvent
 
   // Create a fresh mock event for each test
   const createMockEvent = () => {
     streamChunks = []
+    streamUsages = []
     return {
       sender: {
         send: vi.fn((channel: string, data: any) => {
           if (channel === 'message:stream-chunk') {
             streamChunks.push(data)
+          }
+          if (channel === EVENT_CHANNELS.MESSAGE_STREAM_USAGE) {
+            streamUsages.push(data)
+            lastUsageEvents.push(data)
           }
         })
       },
@@ -383,6 +400,7 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     uuidCounter = 0
     lastLLMConfig = null
     lastLLMMessages = null
+    lastUsageEvents = []
     mockBoulderState.getState.mockClear()
     mockBoulderState.isSessionTracked.mockClear()
     mockBoulderState.updateState.mockClear()
@@ -536,6 +554,34 @@ describe('Chat IPC Integration - handleMessageSend', () => {
       hookManager.clear()
       hookManager.registerMany(originalHooks)
     }
+  })
+
+
+  test('emits usage event for direct message streaming', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    await handleMessageSend(mockEvent, {
+      sessionId,
+      content: 'Track usage for this message',
+      agentCode: 'luban'
+    })
+
+    expect(streamUsages).toHaveLength(1)
+    expect(streamUsages[0]).toEqual({
+      sessionId,
+      promptTokens: 11,
+      completionTokens: 7,
+      totalTokens: 18
+    })
+    expect((mockEvent.sender.send as any).mock.calls).toContainEqual([
+      EVENT_CHANNELS.MESSAGE_STREAM_USAGE,
+      {
+        sessionId,
+        promptTokens: 11,
+        completionTokens: 7,
+        totalTokens: 18
+      }
+    ])
   })
 
   test('send normal message - assistant response contains "Mock Response"', async () => {

@@ -1,6 +1,13 @@
 import { logger } from '../../shared/logger'
 import fs from 'fs'
 import path from 'path'
+import {
+  createRecoveryTrackingMetadata,
+  deriveTodoResumeReason,
+  type RecoverySource,
+  type RecoveryTrackingMetadata,
+  type ResumeAction
+} from '@/shared/recovery-contract'
 
 export interface Todo {
   id: string
@@ -95,6 +102,40 @@ export class TaskContinuationService {
     return state.todos.filter(t => t.status !== 'completed' && t.status !== 'cancelled')
   }
 
+  getTodoProgress(sessionId: string): { total: number; completed: number; remaining: number } {
+    const state = this.getState(sessionId)
+    const completed = state.todos.filter(t => t.status === 'completed').length
+    const remaining = state.todos.filter(
+      t => t.status !== 'completed' && t.status !== 'cancelled'
+    ).length
+
+    return {
+      total: state.todos.length,
+      completed,
+      remaining
+    }
+  }
+
+  getRecoveryTracking(
+    sessionId: string,
+    source: RecoverySource = 'manual-resume'
+  ): RecoveryTrackingMetadata | null {
+    const incomplete = this.getIncompleteTodos(sessionId)
+    if (incomplete.length === 0) {
+      return null
+    }
+
+    const resumeAction: ResumeAction =
+      source === 'auto-resume' ? 'auto-send-resume-prompt' : 'send-resume-prompt'
+
+    return createRecoveryTrackingMetadata({
+      recoverySource: source,
+      recoveryStage: 'task-resumption',
+      resumeReason: deriveTodoResumeReason(incomplete),
+      resumeAction
+    })
+  }
+
   shouldContinue(sessionId: string): boolean {
     const state = this.getState(sessionId)
     if (state.isRecovering) return false
@@ -114,9 +155,7 @@ export class TaskContinuationService {
   getContinuationPrompt(sessionId: string): string | null {
     if (!this.shouldContinue(sessionId)) return null
 
-    const state = this.getState(sessionId)
-    const incomplete = this.getIncompleteTodos(sessionId)
-    const completed = state.todos.filter(t => t.status === 'completed').length
+    const progress = this.getTodoProgress(sessionId)
     const boulder = this.readBoulderContinuationContext()
     const planHint = boulder.activePlan
       ? `- FIRST: Read plan file: ${boulder.activePlan} and recount remaining \`- [ ]\` tasks`
@@ -125,7 +164,7 @@ export class TaskContinuationService {
     return `${CONTINUATION_PROMPT.replace(
       '- FIRST: Read the active plan file and recount remaining `- [ ]` tasks',
       planHint
-    )}\n\n[Status: ${completed}/${state.todos.length} completed, ${incomplete.length} remaining]`
+    )}\n\n[Status: ${progress.completed}/${progress.total} completed, ${progress.remaining} remaining]`
   }
 
   markRecovering(sessionId: string): void {

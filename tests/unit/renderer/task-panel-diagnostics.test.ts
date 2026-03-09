@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildWorkflowStuckDiagnosticSummary,
   buildTaskDiagnosticsFromObservability,
   classifyRunLogDiagnostics,
   mergeTaskDiagnostics,
@@ -111,5 +112,92 @@ describe('task panel diagnostics merge', () => {
     expect(diagnostics.summary.total).toBe(2)
     expect(diagnostics.summary.permission).toBe(1)
     expect(diagnostics.summary.model).toBe(1)
+  })
+
+  it('builds stuck summary for pending approval tasks', () => {
+    const tasks: Task[] = [
+      createTask('task-approval', 'pending_approval', 'apply schema migration')
+    ]
+
+    const summary = buildWorkflowStuckDiagnosticSummary({
+      tasks,
+      observability: {
+        timeline: {
+          workflow: [
+            {
+              stage: 'dispatch',
+              timestamp: '2026-03-01T01:00:00.000Z'
+            }
+          ]
+        },
+        assignments: [
+          {
+            persistedTaskId: 'task-approval',
+            workflowPhase: 'execution'
+          }
+        ]
+      },
+      diagnosticsByTaskId: {},
+      approvals: [
+        {
+          id: 'approval-1',
+          sessionId: 'session-1',
+          taskId: 'task-approval',
+          toolCallId: 'call-1',
+          toolName: 'file_write',
+          requestedToolName: 'file_write',
+          resolvedToolName: 'file_write',
+          arguments: { path: 'src/main.ts' },
+          riskLevel: 'high',
+          reason: '需要写入仓库文件',
+          status: 'pending_approval',
+          requestedAt: '2026-03-01T01:02:03.000Z'
+        }
+      ]
+    })
+
+    expect(summary).toBeDefined()
+    expect(summary?.currentStage).toBe('任务分派')
+    expect(summary?.currentSubtask?.taskId).toBe('task-approval')
+    expect(summary?.currentSubtask?.phase).toBe('执行')
+    expect(summary?.blockerType).toBe('等待审批')
+    expect(summary?.waitingApproval).toBe(true)
+    expect(summary?.pendingApproval?.toolName).toBe('file_write')
+    expect(summary?.humanTakeoverRecommended).toBe(false)
+  })
+
+  it('recommends human takeover for config failures after workflow failure', () => {
+    const tasks: Task[] = [
+      createTask('task-config-failed', 'failed', '401 unauthorized api key')
+    ]
+
+    const summary = buildWorkflowStuckDiagnosticSummary({
+      tasks,
+      observability: {
+        continuationSnapshot: {
+          status: 'failed',
+          resumable: false,
+          failedTasks: ['task-config-failed'],
+          retryableTasks: [],
+          updatedAt: '2026-03-01T02:00:00.000Z'
+        }
+      },
+      diagnosticsByTaskId: {
+        'task-config-failed': {
+          category: 'config',
+          label: '配置错误',
+          reason: '401 unauthorized api key',
+          evidence: ['401 unauthorized api key'],
+          source: 'task-output',
+          score: 8
+        }
+      },
+      approvals: []
+    })
+
+    expect(summary).toBeDefined()
+    expect(summary?.blockerType).toBe('配置错误')
+    expect(summary?.humanTakeoverRecommended).toBe(true)
+    expect(summary?.humanTakeoverReason).toContain('配置')
   })
 })

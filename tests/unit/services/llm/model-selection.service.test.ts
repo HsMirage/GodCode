@@ -92,8 +92,74 @@ describe('ModelSelectionService protocol validation', () => {
 
     expect(result.protocol).toBe('responses')
     expect(result.source).toBe('override')
+    expect(result.modelSelectionSource).toBe('override')
+    expect(result.modelSelectionReason).toBe('explicit-override')
+    expect(result.fallbackAttemptSummary).toEqual([])
     expect(result.provider).toBe('openai-compatible')
     expect(result.model).toBe('gpt-4.1-mini')
+  })
+
+  it('returns agent binding explanation when agent binding is selected', async () => {
+    agentBindingFindUniqueMock.mockResolvedValue({
+      enabled: true,
+      modelId: 'model-agent',
+      temperature: 0.2,
+      model: {
+        id: 'model-agent',
+        provider: 'openai-compatible',
+        modelName: 'gpt-4.1-mini',
+        apiKey: 'enc-key',
+        apiKeyRef: null,
+        baseURL: 'https://api.example.com/v1',
+        config: { apiProtocol: 'responses' }
+      }
+    })
+
+    const service = ModelSelectionService.getInstance()
+
+    const result = await service.resolveModelSelection({
+      agentCode: 'qianliyan'
+    })
+
+    expect(result.source).toBe('agent-binding')
+    expect(result.modelSelectionSource).toBe('agent-binding')
+    expect(result.modelSelectionReason).toBe('agent-binding-hit')
+    expect(result.modelSelectionSummary).toContain('Agent 绑定')
+    expect(result.fallbackAttemptSummary.map(item => item.reason)).toEqual([
+      'override-not-requested'
+    ])
+  })
+
+  it('returns category binding explanation when category binding is selected', async () => {
+    categoryBindingFindUniqueMock.mockResolvedValue({
+      enabled: true,
+      modelId: 'model-category',
+      temperature: 0.4,
+      model: {
+        id: 'model-category',
+        provider: 'openai-compatible',
+        modelName: 'gpt-4o-mini',
+        apiKey: 'enc-key',
+        apiKeyRef: null,
+        baseURL: 'https://api.example.com/v1',
+        config: { apiProtocol: 'responses' }
+      }
+    })
+
+    const service = ModelSelectionService.getInstance()
+
+    const result = await service.resolveModelSelection({
+      categoryCode: 'zhinv'
+    })
+
+    expect(result.source).toBe('category-binding')
+    expect(result.modelSelectionSource).toBe('category-binding')
+    expect(result.modelSelectionReason).toBe('category-binding-hit')
+    expect(result.modelSelectionSummary).toContain('类别绑定')
+    expect(result.fallbackAttemptSummary.map(item => item.reason)).toEqual([
+      'override-not-requested',
+      'binding-not-requested'
+    ])
   })
 
   it('falls back to system-default when enabled category binding has empty modelId', async () => {
@@ -124,6 +190,14 @@ describe('ModelSelectionService protocol validation', () => {
     })
 
     expect(result.source).toBe('system-default')
+    expect(result.modelSelectionSource).toBe('system-default')
+    expect(result.modelSelectionReason).toBe('system-default-hit')
+    expect(result.fallbackReason).toBe('binding-model-unset')
+    expect(result.fallbackAttemptSummary.map(item => item.reason)).toEqual([
+      'override-not-requested',
+      'binding-not-requested',
+      'binding-model-unset'
+    ])
     expect(result.modelId).toBe('model-default')
     expect(result.model).toBe('gpt-4o-mini')
     expect(result.protocol).toBe('responses')

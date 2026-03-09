@@ -1,9 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+const mocks = vi.hoisted(() => ({
+  saveSessionState: vi.fn(),
+  getSessionState: vi.fn(),
+  db: {
+    sessionState: {
+      findMany: vi.fn()
+    }
+  }
+}))
+
 // Mock the three integrated services
 vi.mock('@/main/services/boulder-state.service')
 vi.mock('@/main/services/plan-file.service')
 vi.mock('@/main/services/todo-tracking.service')
+vi.mock('@/main/services/session-continuity.service', () => ({
+  sessionContinuityService: {
+    saveSessionState: (...args: any[]) => mocks.saveSessionState(...args),
+    getSessionState: (...args: any[]) => mocks.getSessionState(...args)
+  }
+}))
+vi.mock('@/main/services/database', () => ({
+  DatabaseService: {
+    getInstance: () => ({
+      getClient: () => mocks.db
+    })
+  }
+}))
 
 import { BoulderStateService } from '@/main/services/boulder-state.service'
 import { PlanFileService } from '@/main/services/plan-file.service'
@@ -13,6 +36,9 @@ import { SessionStateRecoveryService } from '@/main/services/session-state-recov
 describe('SessionStateRecoveryService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.saveSessionState.mockResolvedValue({} as any)
+    mocks.getSessionState.mockResolvedValue(null)
+    mocks.db.sessionState.findMany.mockResolvedValue([])
 
     // Mock BoulderStateService
     vi.mocked(BoulderStateService.getInstance).mockReturnValue({
@@ -103,6 +129,8 @@ describe('SessionStateRecoveryService', () => {
     expect(snapshot.planState.totalTasks).toBe(100)
     expect(snapshot.todoState.incompleteTodos).toHaveLength(1)
     expect(snapshot.recoveryContext.shouldResume).toBe(true)
+    expect(snapshot.recoveryContext.recoverySource).toBe('manual-resume')
+    expect(snapshot.recoveryContext.resumeReason).toBe('pending-todos')
   })
 
   it('should save and load snapshot', async () => {
@@ -115,6 +143,98 @@ describe('SessionStateRecoveryService', () => {
     expect(loaded).toBeDefined()
     expect(loaded?.sessionId).toBe('session-1')
     expect(loaded?.capturedAt).toBe(snapshot.capturedAt)
+    expect(mocks.saveSessionState).toHaveBeenCalledWith(
+      'session-1',
+      'active',
+      {},
+      expect.objectContaining({
+        sessionSnapshot: expect.objectContaining({
+          sessionId: 'session-1',
+          planName: 'test-plan'
+        }),
+        recoverySource: 'manual-resume',
+        recoveryStage: 'task-resumption'
+      })
+    )
+  })
+
+  it('should hydrate persisted snapshots from SessionState on initialize', async () => {
+    const service = SessionStateRecoveryService.getInstance()
+    const persistedSnapshot = {
+      sessionId: 'session-db',
+      planName: 'persisted-plan',
+      capturedAt: '2026-03-06T00:00:00.000Z',
+      projectState: {
+        completedTasks: 1,
+        totalTasks: 2,
+        completionPercentage: '50.0%',
+        currentPhase: 'Phase 1',
+        status: 'in_progress',
+        blockers: []
+      },
+      planState: {
+        totalTasks: 2,
+        completedTasks: 1,
+        pendingTasks: 1,
+        currentPhaseTasks: [],
+        nextActionableTasks: []
+      },
+      todoState: {
+        incompleteTodos: [
+          {
+            id: 'todo-db',
+            sessionId: 'session-db',
+            content: 'Persisted todo',
+            status: 'pending',
+            priority: 'medium',
+            createdAt: '2026-03-06T00:00:00.000Z',
+            updatedAt: '2026-03-06T00:00:00.000Z'
+          }
+        ],
+        totalTodos: 1,
+        pendingCount: 1,
+        inProgressCount: 0,
+        stats: {
+          total: 1,
+          pending: 1,
+          inProgress: 0,
+          completed: 0,
+          cancelled: 0,
+          byPriority: {
+            low: 0,
+            medium: 1,
+            high: 0
+          }
+        }
+      },
+      recoveryContext: {
+        shouldResume: true,
+        recoverySource: 'manual-resume',
+        recoveryStage: 'task-resumption',
+        resumeReason: 'pending-todos',
+        resumeAction: 'send-resume-prompt',
+        interruptionDetected: false,
+        lastActivity: '2026-03-06T00:00:00.000Z',
+        nextSteps: ['Resume pending TODOs']
+      }
+    }
+
+    mocks.db.sessionState.findMany.mockResolvedValueOnce([
+      {
+        sessionId: 'session-db',
+        context: {
+          sessionSnapshot: persistedSnapshot
+        }
+      }
+    ])
+
+    await service.initialize()
+
+    const loaded = await service.loadSnapshot('session-db')
+
+    expect(loaded?.sessionId).toBe('session-db')
+    expect(loaded?.planName).toBe('persisted-plan')
+    expect(loaded?.todoState.incompleteTodos[0]?.createdAt).toBeInstanceOf(Date)
   })
 
   it('should get recovery context indicating resume needed', async () => {
@@ -122,9 +242,10 @@ describe('SessionStateRecoveryService', () => {
     const context = await service.getRecoveryContext('session-1', 'test-plan')
 
     expect(context.canResume).toBe(true)
-    expect(context.reason).toContain('Pending TODO items')
+    expect(context.reason).toContain('Pending TODOs found')
     expect(context.todosPending).toBeGreaterThan(0)
     expect(context.suggestedAction).toContain('Resume pending TODOs')
+    expect(context.resumeReason).toBe('pending-todos')
   })
 
   it('should determine no resume needed if work complete', async () => {
@@ -159,7 +280,7 @@ describe('SessionStateRecoveryService', () => {
     const context = await service.getRecoveryContext('session-1', 'test-plan')
 
     expect(context.canResume).toBe(false)
-    expect(context.reason).toBe('No active work detected')
+    expect(context.reason).toBe('No pending work detected')
   })
 
   it('should generate resume prompt with TODOs', async () => {
@@ -169,6 +290,7 @@ describe('SessionStateRecoveryService', () => {
     expect(prompt).toContain('# Session Recovery - test-plan')
     expect(prompt).toContain('Pending TODOs')
     expect(prompt).toContain('Pending task')
+    expect(prompt).toContain('Resume Reason: Pending TODOs found')
   })
 
   it('should generate resume prompt with next tasks', async () => {
@@ -220,8 +342,9 @@ describe('SessionStateRecoveryService', () => {
 
     const context = await service.getRecoveryContext('session-1', 'test-plan')
     expect(context.canResume).toBe(true)
-    expect(context.reason).toContain('interrupted')
+    expect(context.reason).toContain('Interrupted work found')
     expect(context.suggestedAction).toContain('Resume interrupted work')
+    expect(context.resumeReason).toBe('interrupted-tasks')
   })
 
   it('should calculate progress correctly', async () => {

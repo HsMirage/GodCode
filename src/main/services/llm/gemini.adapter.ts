@@ -11,11 +11,13 @@ import { logger } from '@/shared/logger'
 import { browserViewManager } from '@/main/services/browser-view.service'
 import { toolExecutionService, type ToolCall } from '@/main/services/tools/tool-execution.service'
 import { resolveLLMRuntimeConfig } from './runtime-config'
+import { getLLMRetryDecision } from './retry-utils'
 import { llmRetryNotifier } from './retry-notifier'
 
 // ============= 常量配置 =============
 
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
+const MAX_GEMINI_RETRIES = 3
 
 // ============= Gemini API 类型定义 =============
 
@@ -94,13 +96,6 @@ interface GeminiStreamChunk {
 // ============= 辅助函数 =============
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
-const MAX_RECONNECT_DELAY_MS = 30_000
-
-const getReconnectDelay = (baseDelayMs: number, attempt: number): number => {
-  const safeBaseDelayMs = Math.max(500, baseDelayMs)
-  const factor = Math.min(Math.max(attempt - 1, 0), 6)
-  return Math.min(safeBaseDelayMs * Math.pow(2, factor), MAX_RECONNECT_DELAY_MS)
-}
 
 const hasUserCancellationMarker = (message: string): boolean => {
   const normalized = message.toLowerCase()
@@ -116,31 +111,6 @@ const isAbortRequested = (error: unknown, signal?: AbortSignal): boolean => {
   if (signal?.aborted) return true
   if (!(error instanceof Error)) return false
   return hasUserCancellationMarker(error.message)
-}
-
-const isRetryableApiError = (error: unknown): boolean => {
-  if (!(error instanceof Error)) return true
-  const message = error.message.toLowerCase()
-  return (
-    message.includes('timeout') ||
-    message.includes('timed out') ||
-    message.includes('network') ||
-    message.includes('fetch failed') ||
-    message.includes('econn') ||
-    message.includes('socket') ||
-    message.includes('connection') ||
-    message.includes('service unavailable') ||
-    message.includes('temporarily unavailable') ||
-    message.includes('overloaded') ||
-    message.includes('rate limit') ||
-    message.includes('too many requests') ||
-    message.includes('429') ||
-    message.includes('500') ||
-    message.includes('502') ||
-    message.includes('503') ||
-    message.includes('504') ||
-    message.includes('abort')
-  )
 }
 
 /**
@@ -306,6 +276,8 @@ export class GeminiAdapter implements LLMAdapter {
    */
   async sendMessage(messages: Message[], config: LLMConfig): Promise<LLMResponse> {
     const runtime = resolveLLMRuntimeConfig(config)
+    const maxRetries = Math.min(runtime.maxRetries, MAX_GEMINI_RETRIES)
+    const maxAttempts = maxRetries + 1
     const model = (config.model || this.fallbackModel || '').trim()
     if (!model) {
       throw new Error('No model configured. Please set a default model in Settings.')
@@ -317,7 +289,7 @@ export class GeminiAdapter implements LLMAdapter {
     const totalUsage = { prompt_tokens: 0, completion_tokens: 0 }
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
-      for (let attempt = 1; ; attempt++) {
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         let timeoutId: ReturnType<typeof setTimeout> | null = null
         let externalAbortHandler: (() => void) | null = null
         try {
@@ -407,7 +379,10 @@ export class GeminiAdapter implements LLMAdapter {
             viewId,
             webContents,
             workspaceDir: config.workspaceDir || process.cwd(),
-            sessionId: config.sessionId || ''
+            sessionId: config.sessionId || '',
+            traceId: config.traceId,
+            taskId: config.taskId,
+            runId: config.runId
           }
 
           const executionResult = await toolExecutionService.executeToolCalls(functionCalls, context)
@@ -446,25 +421,48 @@ export class GeminiAdapter implements LLMAdapter {
             logger.info('Gemini request aborted by user')
             throw error instanceof Error ? error : new Error('Request aborted by user')
           }
-          if (!isRetryableApiError(error)) {
+          const retryDecision = getLLMRetryDecision({
+            error,
+            attempt,
+            maxRetries,
+            baseDelayMs: runtime.baseDelayMs
+          })
+          if (!retryDecision.retryable) {
             throw error
           }
 
+          if (!retryDecision.retryAllowed) {
+            logger.error('Gemini request failed after max retries', {
+              error,
+              attempt,
+              maxRetries,
+              classification: retryDecision.classification,
+              nextAction: retryDecision.nextAction,
+              manualTakeoverRequired: retryDecision.manualTakeoverRequired
+            })
+            throw error instanceof Error ? error : new Error(String(error))
+          }
+
           const errorMessage = error instanceof Error ? error.message : String(error)
-          const delay = getReconnectDelay(runtime.baseDelayMs, attempt)
           logger.warn(`Gemini request failed (attempt ${attempt}), reconnecting`, {
             error,
-            delayMs: delay
+            delayMs: retryDecision.delayMs,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            maxAttempts: retryDecision.maxAttempts
           })
           llmRetryNotifier.notify({
             sessionId: config.sessionId,
             provider: 'gemini',
             attempt,
-            delayMs: delay,
+            delayMs: retryDecision.delayMs,
             error: errorMessage,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            manualTakeoverRequired: retryDecision.manualTakeoverRequired,
             occurredAt: new Date()
           })
-          await sleep(delay)
+          await sleep(retryDecision.delayMs)
         }
       }
     }
@@ -480,12 +478,15 @@ export class GeminiAdapter implements LLMAdapter {
    */
   async *streamMessage(messages: Message[], config: LLMConfig): AsyncGenerator<LLMChunk> {
     const runtime = resolveLLMRuntimeConfig(config)
+    const maxRetries = Math.min(runtime.maxRetries, MAX_GEMINI_RETRIES)
+    const maxAttempts = maxRetries + 1
     const model = (config.model || this.fallbackModel || '').trim()
     if (!model) {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
     const contents = toGeminiContents(messages)
     const tools = getGeminiTools(config.tools)
+    const totalUsage = { prompt_tokens: 0, completion_tokens: 0 }
 
     logger.info('[GeminiAdapter] streamMessage called', {
       model,
@@ -495,7 +496,7 @@ export class GeminiAdapter implements LLMAdapter {
     })
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
-      for (let attempt = 1; ; attempt++) {
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         let timeoutId: ReturnType<typeof setTimeout> | null = null
         let externalAbortHandler: (() => void) | null = null
         try {
@@ -577,6 +578,11 @@ export class GeminiAdapter implements LLMAdapter {
               try {
                 const chunk = JSON.parse(data) as GeminiStreamChunk
 
+                if (chunk.usageMetadata) {
+                  totalUsage.prompt_tokens += chunk.usageMetadata.promptTokenCount
+                  totalUsage.completion_tokens += chunk.usageMetadata.candidatesTokenCount
+                }
+
                 const candidate = chunk.candidates?.[0]
                 if (!candidate) continue
 
@@ -614,6 +620,18 @@ export class GeminiAdapter implements LLMAdapter {
 
           // 检查是否有函数调用需要执行
           if (accumulatedFunctionCalls.length === 0) {
+            if (totalUsage.prompt_tokens > 0 || totalUsage.completion_tokens > 0) {
+              yield {
+                content: '',
+                done: false,
+                type: 'usage',
+                usage: {
+                  promptTokens: totalUsage.prompt_tokens,
+                  completionTokens: totalUsage.completion_tokens,
+                  totalTokens: totalUsage.prompt_tokens + totalUsage.completion_tokens
+                }
+              }
+            }
             yield { content: '', done: true, type: 'done' }
             return
           }
@@ -631,7 +649,10 @@ export class GeminiAdapter implements LLMAdapter {
             viewId,
             webContents,
             workspaceDir: config.workspaceDir || process.cwd(),
-            sessionId: config.sessionId || ''
+            sessionId: config.sessionId || '',
+            traceId: config.traceId,
+            taskId: config.taskId,
+            runId: config.runId
           }
 
           const executionResult = await toolExecutionService.executeToolCalls(
@@ -655,7 +676,8 @@ export class GeminiAdapter implements LLMAdapter {
                 id: output.toolCall.id,
                 name: output.toolCall.name,
                 arguments: output.toolCall.arguments,
-                result: output.result
+                result: output.result,
+                permissionPreview: output.permissionPreview
               }
             }
           }
@@ -691,25 +713,48 @@ export class GeminiAdapter implements LLMAdapter {
             yield { content: '', done: true, type: 'done' }
             return
           }
-          if (!isRetryableApiError(error)) {
+          const retryDecision = getLLMRetryDecision({
+            error,
+            attempt,
+            maxRetries,
+            baseDelayMs: runtime.baseDelayMs
+          })
+          if (!retryDecision.retryable) {
             throw error
           }
 
+          if (!retryDecision.retryAllowed) {
+            logger.error('Gemini streaming failed after max retries', {
+              error,
+              attempt,
+              maxRetries,
+              classification: retryDecision.classification,
+              nextAction: retryDecision.nextAction,
+              manualTakeoverRequired: retryDecision.manualTakeoverRequired
+            })
+            throw error instanceof Error ? error : new Error(String(error))
+          }
+
           const errorMessage = error instanceof Error ? error.message : String(error)
-          const delay = getReconnectDelay(runtime.baseDelayMs, attempt)
           logger.warn(`Gemini streaming failed (attempt ${attempt}), reconnecting`, {
             error,
-            delayMs: delay
+            delayMs: retryDecision.delayMs,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            maxAttempts: retryDecision.maxAttempts
           })
           llmRetryNotifier.notify({
             sessionId: config.sessionId,
             provider: 'gemini',
             attempt,
-            delayMs: delay,
+            delayMs: retryDecision.delayMs,
             error: errorMessage,
+            classification: retryDecision.classification,
+            nextAction: retryDecision.nextAction,
+            manualTakeoverRequired: retryDecision.manualTakeoverRequired,
             occurredAt: new Date()
           })
-          await sleep(delay)
+          await sleep(retryDecision.delayMs)
         }
       }
     }

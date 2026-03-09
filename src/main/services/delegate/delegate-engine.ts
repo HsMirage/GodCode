@@ -23,6 +23,12 @@ import {
   type ModelSource,
   type ResolvedModelSelection
 } from '@/main/services/llm/model-selection.service'
+import type {
+  FallbackReason,
+  ModelSelectionAttemptSummary,
+  ModelSelectionReason,
+  ModelSelectionSnapshot
+} from '@/shared/model-selection-contract'
 import {
   listPrimaryAgentRoleAliases,
   resolvePrimaryAgentRolePolicy,
@@ -38,6 +44,8 @@ import type { ToolExecutionContext } from '@/main/services/tools/tool.interface'
 import type { BrowserToolContext } from '@/main/services/ai-browser/types'
 import type { Message } from '@/types/domain'
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { applyTraceMetadata } from '@/shared/trace-contract'
+import { renderTaskBriefMarkdown, type StructuredTaskBrief } from '@/shared/task-brief-contract'
 
 // 动态 Prompt 系统
 import { DynamicPromptBuilder, type PromptBuilderConfig } from './dynamic-prompt-builder'
@@ -89,10 +97,27 @@ export interface DelegateTaskResult {
   model?: string
   /** 模型来源：用户覆盖 / fallback chain / 系统默认 */
   modelSource?: ModelSource
+  modelSelectionReason?: ModelSelectionReason
+  modelSelectionSummary?: string
+  fallbackReason?: FallbackReason
+  fallbackAttemptSummary?: ModelSelectionAttemptSummary[]
   /** 执行记录 ID */
   runId?: string
   /** 使用的系统提示长度 (tokens 估算) */
   systemPromptTokens?: number
+}
+
+function buildModelSelectionSnapshot(selection: ResolvedModelSelection): ModelSelectionSnapshot {
+  return {
+    modelId: selection.modelId,
+    provider: selection.provider,
+    model: selection.model,
+    modelSelectionSource: selection.modelSelectionSource,
+    modelSelectionReason: selection.modelSelectionReason,
+    modelSelectionSummary: selection.modelSelectionSummary,
+    fallbackReason: selection.fallbackReason,
+    fallbackAttemptSummary: selection.fallbackAttemptSummary
+  }
 }
 
 const DEFAULT_SYSTEM_PROMPT = 'You are CodeAll, an AI coding agent.'
@@ -116,6 +141,11 @@ Server startup tasks require explicit success proof:
 const FUXI_BLOCKED_STAGES = new Set(['dispatch', 'checkpoint', 'integration', 'finalize', 'execution'])
 const IMPLEMENTATION_INTENT_PATTERN =
   /(修复|实现|新增|重构|开发|改代码|implement|fix|build|refactor)/i
+
+function resolveTraceIdFromMetadata(metadata?: Record<string, unknown>): string | undefined {
+  const traceId = typeof metadata?.traceId === 'string' ? metadata.traceId.trim() : ''
+  return traceId || undefined
+}
 
 /**
  * 旧版本系统提示解析 (兼容性保留)
@@ -204,6 +234,7 @@ export class DelegateEngine {
   private _bindingService: BindingService | null = null
   private _agentRunService: AgentRunService | null = null
   private static readonly runLogContext = new AsyncLocalStorage<{ runId: string }>()
+  private static readonly runTraceIds = new Map<string, string>()
   private static toolExecutionLoggingPatched = false
 
   // 动态 Prompt 系统
@@ -262,6 +293,7 @@ export class DelegateEngine {
     const workspaceDir = await this.resolveWorkspaceDirForSession(resolvedSessionId)
     const loadSkills = this.normalizeLoadSkills(input.loadSkills)
     const metadataInput = metadata ?? {}
+    const traceId = resolveTraceIdFromMetadata(metadataInput)
 
     if (!overrideModel && !resolvedSubagentType && !resolvedCategory) {
       throw new Error('Must provide either category or subagent_type')
@@ -275,6 +307,7 @@ export class DelegateEngine {
     })
 
     const modelSource: ModelSource = modelSelection.source
+    const modelSelectionSnapshot = buildModelSelectionSnapshot(modelSelection)
 
     const primaryRoleResolution = resolvePrimaryRolePolicyFromMetadata(metadataInput)
     if (primaryRoleResolution && 'error' in primaryRoleResolution) {
@@ -285,6 +318,10 @@ export class DelegateEngine {
         agentType: resolvedSubagentType || resolvedCategory,
         model: modelSelection.model,
         modelSource,
+        modelSelectionReason: modelSelection.modelSelectionReason,
+        modelSelectionSummary: modelSelection.modelSelectionSummary,
+        fallbackReason: modelSelection.fallbackReason,
+        fallbackAttemptSummary: modelSelection.fallbackAttemptSummary,
         systemPromptTokens: 0
       }
     }
@@ -312,6 +349,10 @@ export class DelegateEngine {
         agentType: resolvedSubagentType || resolvedCategory,
         model: modelSelection.model,
         modelSource,
+        modelSelectionReason: modelSelection.modelSelectionReason,
+        modelSelectionSummary: modelSelection.modelSelectionSummary,
+        fallbackReason: modelSelection.fallbackReason,
+        fallbackAttemptSummary: modelSelection.fallbackAttemptSummary,
         systemPromptTokens: 0
       }
     }
@@ -339,6 +380,10 @@ export class DelegateEngine {
           agentType: resolvedSubagentType || resolvedCategory,
           model: modelSelection.model,
           modelSource,
+          modelSelectionReason: modelSelection.modelSelectionReason,
+          modelSelectionSummary: modelSelection.modelSelectionSummary,
+          fallbackReason: modelSelection.fallbackReason,
+          fallbackAttemptSummary: modelSelection.fallbackAttemptSummary,
           systemPromptTokens: 0
         }
       }
@@ -365,6 +410,10 @@ export class DelegateEngine {
           agentType: 'fuxi',
           model: modelSelection.model,
           modelSource,
+          modelSelectionReason: modelSelection.modelSelectionReason,
+          modelSelectionSummary: modelSelection.modelSelectionSummary,
+          fallbackReason: modelSelection.fallbackReason,
+          fallbackAttemptSummary: modelSelection.fallbackAttemptSummary,
           systemPromptTokens: 0
         }
       }
@@ -379,18 +428,34 @@ export class DelegateEngine {
         status: runInBackground ? 'pending' : 'running',
         assignedModel: modelSelection.model,
         assignedAgent: resolvedSubagentType || resolvedCategory,
-        metadata: {
+        metadata: applyTraceMetadata({
           category: resolvedCategory,
           subagent_type: resolvedSubagentType,
           parentTaskId,
           model: modelSelection.model,
           modelSource,
+          modelSelection: modelSelectionSnapshot,
           runInBackground: Boolean(runInBackground),
           ...(rolePolicySnapshot ? { primaryAgentRolePolicy: rolePolicySnapshot } : {}),
           ...metadataInput
-        }
+        }, traceId ? { traceId, startedAt: new Date().toISOString() } : undefined)
       }
     })
+
+    if (metadataInput.taskBrief && typeof metadataInput.taskBrief === 'object') {
+      await this.prisma.task.update({
+        where: { id: task.id },
+        data: {
+          metadata: {
+            ...(task.metadata as Record<string, unknown> | undefined),
+            taskBrief: {
+              ...(metadataInput.taskBrief as Record<string, unknown>),
+              taskId: task.id
+            }
+          }
+        }
+      })
+    }
 
     this.logger.info('Delegating task', {
       taskId: task.id,
@@ -421,11 +486,28 @@ export class DelegateEngine {
         agentType: resolvedSubagentType || resolvedCategory,
         model: modelSelection.model,
         modelSource,
+        modelSelectionReason: modelSelection.modelSelectionReason,
+        modelSelectionSummary: modelSelection.modelSelectionSummary,
+        fallbackReason: modelSelection.fallbackReason,
+        fallbackAttemptSummary: modelSelection.fallbackAttemptSummary,
         systemPromptTokens: 0
       }
     }
 
     const runId = await this.safeCreateRun(task.id, resolvedSubagentType || resolvedCategory)
+    if (runId && traceId) {
+      DelegateEngine.runTraceIds.set(runId, traceId)
+      await this.prisma.task.update({
+        where: { id: task.id },
+        data: {
+          metadata: {
+            ...(task.metadata as Record<string, unknown> | undefined),
+            runId,
+            traceId
+          }
+        }
+      })
+    }
     await this.safeAddRunLog(runId, {
       timestamp: new Date().toISOString(),
       level: 'info',
@@ -436,6 +518,21 @@ export class DelegateEngine {
         subagent_type: resolvedSubagentType,
         model: modelSelection.model,
         runInBackground: false
+      }
+    })
+    await this.safeAddRunLog(runId, {
+      timestamp: new Date().toISOString(),
+      level: 'info',
+      message: 'Model selection resolved',
+      data: {
+        modelId: modelSelection.modelId,
+        provider: modelSelection.provider,
+        model: modelSelection.model,
+        modelSource,
+        modelSelectionReason: modelSelection.modelSelectionReason,
+        modelSelectionSummary: modelSelection.modelSelectionSummary,
+        fallbackReason: modelSelection.fallbackReason,
+        fallbackAttemptSummary: modelSelection.fallbackAttemptSummary
       }
     })
 
@@ -531,6 +628,27 @@ export class DelegateEngine {
         userContent = prompt
       }
 
+      const rawTaskBrief =
+        metadataInput.taskBrief && typeof metadataInput.taskBrief === 'object'
+          ? (metadataInput.taskBrief as StructuredTaskBrief)
+          : null
+      if (rawTaskBrief) {
+        const taskBrief = {
+          ...rawTaskBrief,
+          taskId: task.id
+        }
+        userContent = [
+          renderTaskBriefMarkdown(taskBrief),
+          '',
+          '#### 输出要求',
+          `- 最终回复必须包含 TASK_ID: ${task.id}`,
+          '- 最终回复必须包含 ACCEPTANCE_CHECKLIST 小节，并逐条对应验收标准。',
+          '',
+          '#### 原始任务',
+          userContent
+        ].join('\n')
+      }
+
       const messages: Message[] = [
         {
           id: 'system',
@@ -561,7 +679,10 @@ export class DelegateEngine {
         sessionId: resolvedSessionId,
         agentCode: resolvedSubagentType,
         tools: scopedToolDefinitions,
-        abortSignal
+        abortSignal,
+        traceId,
+        taskId: task.id,
+        runId: runId || undefined
       }
 
       await this.safeAddRunLog(runId, {
@@ -674,6 +795,10 @@ export class DelegateEngine {
         agentType: resolvedSubagentType || resolvedCategory,
         model: modelSelection.model,
         modelSource,
+        modelSelectionReason: modelSelection.modelSelectionReason,
+        modelSelectionSummary: modelSelection.modelSelectionSummary,
+        fallbackReason: modelSelection.fallbackReason,
+        fallbackAttemptSummary: modelSelection.fallbackAttemptSummary,
         runId: runId || undefined,
         systemPromptTokens
       }
@@ -711,6 +836,12 @@ export class DelegateEngine {
         taskId: task.id,
         output: cancelled ? 'Cancelled by user' : errorMessage,
         success: false,
+        model: modelSelection.model,
+        modelSource,
+        modelSelectionReason: modelSelection.modelSelectionReason,
+        modelSelectionSummary: modelSelection.modelSelectionSummary,
+        fallbackReason: modelSelection.fallbackReason,
+        fallbackAttemptSummary: modelSelection.fallbackAttemptSummary,
         runId: runId || undefined
       }
     }
@@ -742,6 +873,7 @@ export class DelegateEngine {
       config?: ToolExecutionConfig
     ): Promise<LoopIterationResult> => {
       const runId = DelegateEngine.runLogContext.getStore()?.runId
+      const traceId = 'traceId' in context ? context.traceId : undefined
 
       if (runId) {
         await this.safeAddRunLog(runId, {
@@ -751,6 +883,7 @@ export class DelegateEngine {
           data: {
             toolCount: toolCalls.length,
             tools: toolCalls.map(toolCall => toolCall.name),
+            traceId: traceId || undefined,
             toolResolutions: toolCalls.map(toolCall => ({
               requestedToolName: toolCall.name,
               resolvedToolName: toolExecutionService.resolveToolName(toolCall.name)
@@ -773,7 +906,8 @@ export class DelegateEngine {
               toolCallId: output.toolCall.id,
               success: output.success,
               durationMs: output.durationMs,
-              error: output.error
+              error: output.error,
+              traceId: traceId || undefined
             }
           })
         }
@@ -803,8 +937,20 @@ export class DelegateEngine {
       return
     }
 
+    const traceId = DelegateEngine.runTraceIds.get(runId)
+    const enrichedEntry =
+      traceId && (!entry.data || typeof entry.data.traceId !== 'string')
+        ? {
+            ...entry,
+            data: {
+              ...(entry.data || {}),
+              traceId
+            }
+          }
+        : entry
+
     try {
-      await this.agentRunService.addLog(runId, entry)
+      await this.agentRunService.addLog(runId, enrichedEntry)
     } catch (error) {
       this.logger.warn('Failed to append run log', {
         runId,
@@ -835,6 +981,7 @@ export class DelegateEngine {
         success: status === 'completed',
         tokenUsage
       })
+      DelegateEngine.runTraceIds.delete(runId)
     } catch (error) {
       this.logger.warn('Failed to finalize agent run', {
         runId,

@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { EVENT_CHANNELS, INVOKE_CHANNELS } from '@shared/ipc-channels'
 import { useUpdaterStore } from '../../store/updater.store'
 import { UpdateDialog } from './UpdateDialog'
 import { UpdateToast } from './UpdateToast'
@@ -14,36 +15,37 @@ export function UpdaterManager() {
     }
 
     // Listen for updater events
-    const unsubChecking = window.codeall.on('updater:checking-for-update', () => {
+    const unsubChecking = window.codeall.on(EVENT_CHANNELS.UPDATER_CHECKING_FOR_UPDATE, () => {
       setStatus('checking')
     })
 
-    const unsubAvailable = window.codeall.on('updater:update-available', info => {
+    const unsubAvailable = window.codeall.on(EVENT_CHANNELS.UPDATER_UPDATE_AVAILABLE, info => {
       setStatus('available')
       setUpdateInfo(info)
     })
 
-    const unsubNotAvailable = window.codeall.on('updater:update-not-available', () => {
+    const unsubNotAvailable = window.codeall.on(EVENT_CHANNELS.UPDATER_UPDATE_NOT_AVAILABLE, () => {
       setStatus('not-available')
     })
 
-    const unsubError = window.codeall.on('updater:error', err => {
+    const unsubError = window.codeall.on(EVENT_CHANNELS.UPDATER_ERROR, err => {
       setStatus('error')
       setError(err)
     })
 
-    const unsubProgress = window.codeall.on('updater:download-progress', progress => {
+    const unsubProgress = window.codeall.on(EVENT_CHANNELS.UPDATER_DOWNLOAD_PROGRESS, progress => {
       setStatus('downloading')
       setProgress(progress)
     })
 
-    const unsubDownloaded = window.codeall.on('updater:update-downloaded', info => {
+    const unsubDownloaded = window.codeall.on(EVENT_CHANNELS.UPDATER_UPDATE_DOWNLOADED, info => {
       setStatus('downloaded')
       setUpdateInfo(info)
     })
 
-    // Initial check (optional, main process does it on start)
-    // window.codeall.invoke('updater:check-for-updates')
+    void window.codeall.invoke(INVOKE_CHANNELS.UPDATER_CHECK_FOR_UPDATES).catch(error => {
+      console.error('[UpdaterManager] Failed to trigger update check:', error)
+    })
 
     return () => {
       unsubChecking()

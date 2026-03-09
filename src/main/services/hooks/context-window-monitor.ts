@@ -68,6 +68,8 @@ export function createContextWindowMonitorHook(options?: {
     id: 'context-window-monitor',
     name: 'Context Window Monitor',
     event: 'onContextOverflow',
+    source: 'builtin',
+    scope: 'session',
     description: 'Monitors context window usage and injects reminders when approaching limits',
     priority: 10,
 

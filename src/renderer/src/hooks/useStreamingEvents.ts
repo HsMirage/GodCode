@@ -14,6 +14,21 @@ export interface StreamChunkEvent {
     name: string
     arguments?: Record<string, unknown>
     result?: unknown
+    permissionPreview?: {
+      requestedName: string
+      resolvedName: string
+      template: 'safe' | 'balanced' | 'full'
+      permission: 'auto' | 'confirm' | 'deny'
+      source: 'default' | 'template' | 'custom' | 'fallback'
+      dangerous: boolean
+      highRisk: boolean
+      highRiskEnforced: boolean
+      requiresConfirmation: boolean
+      allowedByPolicy: boolean
+      allowedWithoutConfirmation: boolean
+      reason?: string
+      confirmReason?: string
+    }
   }
   error?: {
     message: string
@@ -45,6 +60,7 @@ export interface StreamUsageEvent {
  */
 export function useStreamingEvents(sessionId: string | null) {
   const {
+    retainCurrentSession,
     startStreaming,
     appendContent,
     toolStart,
@@ -57,6 +73,10 @@ export function useStreamingEvents(sessionId: string | null) {
   } = useStreamingStore()
 
   const streamState = sessionId ? sessions.get(sessionId) : undefined
+
+  useEffect(() => {
+    retainCurrentSession(sessionId)
+  }, [sessionId, retainCurrentSession])
 
   // Handle stream chunk events
   const handleStreamChunk = useCallback(
@@ -87,7 +107,8 @@ export function useStreamingEvents(sessionId: string | null) {
               id: event.toolCall.id,
               name: event.toolCall.name,
               arguments: event.toolCall.arguments,
-              result: event.toolCall.result
+              result: event.toolCall.result,
+              permissionPreview: event.toolCall.permissionPreview
             })
           }
           break

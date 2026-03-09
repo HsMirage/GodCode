@@ -1,7 +1,8 @@
 /**
  * IPC Channel Alignment Test
  *
- * Ensures that preload whitelist and IPC handler registrations are in sync.
+ * Ensures that the Single Source of Truth (ipc-channels.ts) is properly consumed
+ * by both the production preload (src/preload/api.ts) and IPC handler registrations.
  * This test acts as a CI guard against future mismatches.
  */
 
@@ -11,7 +12,8 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 describe('IPC Channel Alignment', () => {
-  const preloadSource = readFileSync(resolve(process.cwd(), 'src/main/preload.ts'), 'utf-8')
+  const preloadApiSource = readFileSync(resolve(process.cwd(), 'src/preload/api.ts'), 'utf-8')
+  const preloadIndexSource = readFileSync(resolve(process.cwd(), 'src/preload/index.ts'), 'utf-8')
   const mainIpcIndexSource = readFileSync(resolve(process.cwd(), 'src/main/ipc/index.ts'), 'utf-8')
   const auditLogHandlerSource = readFileSync(resolve(process.cwd(), 'src/main/ipc/handlers/audit-log.ts'), 'utf-8')
   const auditLogExportHandlerSource = readFileSync(
@@ -22,9 +24,20 @@ describe('IPC Channel Alignment', () => {
     resolve(process.cwd(), 'src/main/ipc/handlers/session-continuity.ts'),
     'utf-8'
   )
+  const updaterHandlerSource = readFileSync(
+    resolve(process.cwd(), 'src/main/ipc/handlers/updater.ts'),
+    'utf-8'
+  )
+  const browserHandlerSource = readFileSync(
+    resolve(process.cwd(), 'src/main/ipc/handlers/browser.ts'),
+    'utf-8'
+  )
 
-  const expectPreloadContains = (channel: string) => {
-    expect(preloadSource).toContain(`'${channel}'`)
+  const allInvokeChannels = new Set(Object.values(INVOKE_CHANNELS) as string[])
+  const allEventChannels = new Set(Object.values(EVENT_CHANNELS) as string[])
+
+  const expectInSSoT = (channel: string) => {
+    expect(allInvokeChannels.has(channel) || allEventChannels.has(channel)).toBe(true)
   }
 
   const expectMainIpcContains = (channel: string) => {
@@ -38,6 +51,35 @@ describe('IPC Channel Alignment', () => {
 
     expect(hasLiteral || hasConstantRef).toBe(true)
   }
+
+  describe('Production Preload Structure', () => {
+    it('should derive allowed channels from ipc-channels.ts SSoT', () => {
+      expect(preloadApiSource).toContain("from '../shared/ipc-channels'")
+      expect(preloadApiSource).toContain('INVOKE_CHANNELS')
+      expect(preloadApiSource).toContain('EVENT_CHANNELS')
+      expect(preloadApiSource).toContain('Object.values(INVOKE_CHANNELS)')
+      expect(preloadApiSource).toContain('Object.values(EVENT_CHANNELS)')
+    })
+
+    it('should not have a hardcoded channel allowlist', () => {
+      expect(preloadApiSource).not.toMatch(/ALLOWED_CHANNELS\s*=\s*\[/)
+    })
+
+    it('should expose API via contextBridge in index.ts', () => {
+      expect(preloadIndexSource).toContain('createCodeAllAPI')
+      expect(preloadIndexSource).toContain('contextBridge.exposeInMainWorld')
+    })
+
+    it('should not have a duplicate preload at src/main/preload.ts', () => {
+      let exists = true
+      try {
+        readFileSync(resolve(process.cwd(), 'src/main/preload.ts'), 'utf-8')
+      } catch {
+        exists = false
+      }
+      expect(exists).toBe(false)
+    })
+  })
 
   describe('INVOKE_CHANNELS', () => {
     it('should have all invoke channels defined', () => {
@@ -53,7 +95,6 @@ describe('IPC Channel Alignment', () => {
     it('should follow naming convention (lowercase, optional colon)', () => {
       const values = Object.values(INVOKE_CHANNELS)
       for (const value of values) {
-        // Allow simple channels like 'ping' or prefixed like 'space:create'
         expect(value).toMatch(/^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)?$/)
       }
     })
@@ -73,7 +114,6 @@ describe('IPC Channel Alignment', () => {
     it('should follow naming convention (lowercase, optional colon)', () => {
       const values = Object.values(EVENT_CHANNELS)
       for (const value of values) {
-        // Allow simple channels like 'ping' or prefixed like 'browser:state-changed'
         expect(value).toMatch(/^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)?$/)
       }
     })
@@ -81,17 +121,16 @@ describe('IPC Channel Alignment', () => {
 
   describe('Channel Separation', () => {
     it('should not have overlapping values between INVOKE and EVENT channels', () => {
-      const invokeValues = new Set(Object.values(INVOKE_CHANNELS) as string[])
       const eventValues = Object.values(EVENT_CHANNELS) as string[]
 
       for (const eventValue of eventValues) {
-        expect(invokeValues.has(eventValue)).toBe(false)
+        expect(allInvokeChannels.has(eventValue)).toBe(false)
       }
     })
   })
 
-  describe('Contract Alignment with Main/Preload', () => {
-    it('should keep selected invoke channels aligned across shared, main registration, and preload allowlist', () => {
+  describe('Contract Alignment with Main Handlers', () => {
+    it('should keep selected invoke channels registered in main IPC index', () => {
       const channels = [
         INVOKE_CHANNELS.SKILL_COMMAND_ITEMS,
         INVOKE_CHANNELS.TASK_CONTINUATION_GET_STATUS,
@@ -107,10 +146,12 @@ describe('IPC Channel Alignment', () => {
       ]
 
       for (const channel of channels) {
-        expectPreloadContains(channel)
+        expectInSSoT(channel)
         expectMainIpcContains(channel)
       }
+    })
 
+    it('should have audit log channels registered in dedicated handler files', () => {
       const auditChannels = [
         INVOKE_CHANNELS.AUDIT_LOG_QUERY,
         INVOKE_CHANNELS.AUDIT_LOG_GET_BY_ENTITY,
@@ -122,7 +163,7 @@ describe('IPC Channel Alignment', () => {
       ]
 
       for (const channel of auditChannels) {
-        expectPreloadContains(channel)
+        expectInSSoT(channel)
       }
 
       expect(mainIpcIndexSource).toContain('registerAuditLogHandlers()')
@@ -130,7 +171,9 @@ describe('IPC Channel Alignment', () => {
       expect(auditLogHandlerSource).toContain(`'${INVOKE_CHANNELS.AUDIT_LOG_QUERY}'`)
       expect(auditLogHandlerSource).toContain(`'${INVOKE_CHANNELS.AUDIT_LOG_COUNT}'`)
       expect(auditLogExportHandlerSource).toContain(`'${INVOKE_CHANNELS.AUDIT_LOG_EXPORT}'`)
+    })
 
+    it('should have session continuity channels registered in dedicated handler file', () => {
       expect(sessionContinuityHandlerSource).toContain('INVOKE_CHANNELS.SESSION_STATE_GET')
       expect(sessionContinuityHandlerSource).toContain('INVOKE_CHANNELS.SESSION_STATE_CHECKPOINT')
       expect(sessionContinuityHandlerSource).toContain('INVOKE_CHANNELS.SESSION_RECOVERY_PLAN')
@@ -139,7 +182,30 @@ describe('IPC Channel Alignment', () => {
       expect(sessionContinuityHandlerSource).toContain('INVOKE_CHANNELS.SESSION_RESUME_PROMPT')
     })
 
-    it('should keep selected event channels aligned across shared and preload allowlist', () => {
+    it('should have browser:list-tabs registered in browser handler', () => {
+      expectInSSoT(INVOKE_CHANNELS.BROWSER_LIST_TABS)
+      expect(browserHandlerSource).toContain(`'${INVOKE_CHANNELS.BROWSER_LIST_TABS}'`)
+    })
+
+    it('should have updater channels registered in dedicated handler file', () => {
+      const updaterChannels = [
+        INVOKE_CHANNELS.UPDATER_CHECK_FOR_UPDATES,
+        INVOKE_CHANNELS.UPDATER_DOWNLOAD_UPDATE,
+        INVOKE_CHANNELS.UPDATER_QUIT_AND_INSTALL
+      ]
+
+      for (const channel of updaterChannels) {
+        expectInSSoT(channel)
+      }
+
+      expect(mainIpcIndexSource).toContain('registerUpdaterHandlers(mainWindow)')
+      expect(updaterHandlerSource).toContain('EVENT_CHANNELS.UPDATER_CHECKING_FOR_UPDATE')
+      expect(updaterHandlerSource).toContain('EVENT_CHANNELS.UPDATER_UPDATE_AVAILABLE')
+      expect(updaterHandlerSource).toContain('EVENT_CHANNELS.UPDATER_DOWNLOAD_PROGRESS')
+      expect(updaterHandlerSource).toContain('EVENT_CHANNELS.UPDATER_UPDATE_DOWNLOADED')
+    })
+
+    it('should keep selected event channels in SSoT', () => {
       const eventChannels = [
         EVENT_CHANNELS.MESSAGE_STREAM_ERROR,
         EVENT_CHANNELS.MESSAGE_STREAM_USAGE,
@@ -151,7 +217,23 @@ describe('IPC Channel Alignment', () => {
       ]
 
       for (const channel of eventChannels) {
-        expectPreloadContains(channel)
+        expectInSSoT(channel)
+      }
+    })
+  })
+
+  describe('Browser Channels Presence', () => {
+    it('should include browser:list-tabs in INVOKE_CHANNELS', () => {
+      expect(INVOKE_CHANNELS.BROWSER_LIST_TABS).toBe('browser:list-tabs')
+    })
+
+    it('should include all browser invoke channels in SSoT', () => {
+      const browserChannels = Object.entries(INVOKE_CHANNELS)
+        .filter(([key]) => key.startsWith('BROWSER_'))
+        .map(([, value]) => value)
+
+      for (const channel of browserChannels) {
+        expectInSSoT(channel)
       }
     })
   })

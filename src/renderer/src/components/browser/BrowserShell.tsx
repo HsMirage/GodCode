@@ -6,11 +6,53 @@ import { Toolbar } from './Toolbar'
 import { AIIndicator } from './AIIndicator'
 import { Plus, X, List, Clock, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react'
 import { cn } from '../../utils'
+import { UI_TEXT } from '../../constants/i18n'
 import { OperationLogEntry } from '../../store/ui.store'
 import {
   createBrowserPanelLifecycle,
   type BrowserLifecycleBounds
 } from '../panels/browser-panel-lifecycle'
+
+interface BrowserTabRecord {
+  id: string
+  title: string
+  url: string
+  isLoading: boolean
+}
+
+interface BrowserTabListResponse {
+  success?: boolean
+  data?: BrowserTabRecord[]
+}
+
+interface BrowserStatePayload {
+  url: string
+  canGoBack: boolean
+  canGoForward: boolean
+  isLoading: boolean
+  zoomLevel?: number
+}
+
+interface BrowserStateResponse {
+  success?: boolean
+  data?: BrowserStatePayload | null
+}
+
+interface BrowserStateChangedEvent {
+  viewId: string
+  state: BrowserStatePayload
+}
+
+interface BrowserAIOperationEvent {
+  viewId?: string
+  toolName: string
+  status: 'idle' | 'running' | 'completed' | 'error'
+  opId?: string
+  timestamp?: number
+  args?: Record<string, unknown>
+  errorCode?: string
+  durationMs?: number
+}
 
 export function BrowserShell() {
   const browserRef = useRef<HTMLDivElement>(null)
@@ -32,6 +74,8 @@ export function BrowserShell() {
 
   const [zoomLevel, setZoomLevel] = useState(1)
   const [showLogs, setShowLogs] = useState(false)
+  const [overlayBlocking, setOverlayBlocking] = useState(false)
+  const activeTab = browserTabs.find(tab => tab.id === activeBrowserTabId) ?? null
 
   const browserLifecycleRef = useRef(
     createBrowserPanelLifecycle({
@@ -52,20 +96,55 @@ export function BrowserShell() {
       },
       destroy: async viewId => {
         await window.codeall?.invoke('browser:destroy', { viewId })
+      },
+      resize: async (viewId, bounds) => {
+        await window.codeall?.invoke('browser:resize', {
+          viewId,
+          bounds
+        })
       }
     })
   )
+
+  const getBrowserBounds = useCallback((): BrowserLifecycleBounds | null => {
+    if (!browserRef.current) {
+      return null
+    }
+
+    const rect = browserRef.current.getBoundingClientRect()
+    return {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height
+    }
+  }, [])
+
+  const syncBrowserLifecycle = useCallback(async () => {
+    if (!window.codeall) return
+
+    await browserLifecycleRef.current.sync({
+      panelOpen: isBrowserPanelOpen,
+      activeViewId: activeBrowserTabId,
+      bounds: getBrowserBounds(),
+      canShow: !overlayBlocking
+    })
+  }, [activeBrowserTabId, getBrowserBounds, isBrowserPanelOpen, overlayBlocking])
 
   // Sync tabs from backend
   const syncTabs = useCallback(async () => {
     if (!window.codeall) return
     try {
-      const result = (await window.codeall.invoke('browser:list-tabs')) as any
+      const result = (await window.codeall.invoke('browser:list-tabs')) as BrowserTabListResponse
       if (result.success) {
-        setBrowserTabs(result.data)
-        // If no active tab but we have tabs, set first as active
-        if (!activeBrowserTabId && result.data.length > 0) {
-          setActiveBrowserTab(result.data[0].id)
+        const tabs = result.data ?? []
+        setBrowserTabs(tabs)
+
+        const hasActiveTab =
+          !!activeBrowserTabId && tabs.some(tab => tab.id === activeBrowserTabId)
+
+        if (!hasActiveTab) {
+          setActiveBrowserTab(tabs[0]?.id ?? null)
         }
       }
     } catch (e) {
@@ -79,8 +158,8 @@ export function BrowserShell() {
 
     const init = async () => {
       // Read source-of-truth tabs list from backend (avoid stale closure on browserTabs)
-      const result = (await window.codeall.invoke('browser:list-tabs')) as any
-      const tabs = result?.success ? (result.data as any[]) : []
+      const result = (await window.codeall.invoke('browser:list-tabs')) as BrowserTabListResponse
+      const tabs = result?.success ? (result.data ?? []) : []
 
       if (result?.success) {
         setBrowserTabs(tabs)
@@ -107,24 +186,6 @@ export function BrowserShell() {
     if (!window.codeall) return
 
     const setupTab = async () => {
-      const bounds: BrowserLifecycleBounds | null = browserRef.current
-        ? (() => {
-            const rect = browserRef.current!.getBoundingClientRect()
-            return {
-              x: rect.x,
-              y: rect.y,
-              width: rect.width,
-              height: rect.height
-            }
-          })()
-        : null
-
-      await browserLifecycleRef.current.sync({
-        panelOpen: isBrowserPanelOpen,
-        activeViewId: activeBrowserTabId,
-        bounds
-      })
-
       if (!activeBrowserTabId) {
         return
       }
@@ -132,8 +193,8 @@ export function BrowserShell() {
       // Update local state from backend
       const stateResult = (await window.codeall.invoke('browser:get-state', {
         viewId: activeBrowserTabId
-      })) as any
-      if (stateResult.success) {
+      })) as BrowserStateResponse
+      if (stateResult.success && stateResult.data) {
         const { url, canGoBack, canGoForward, isLoading, zoomLevel } = stateResult.data
         setBrowserUrl(url)
         setBrowserNavState({ canGoBack, canGoForward, isLoading })
@@ -144,11 +205,11 @@ export function BrowserShell() {
     setupTab()
 
     // Setup listeners
-    const removeStateListener = window.codeall.on('browser:state-changed' as any, (data: any) => {
-      // Update tabs list data
+    const removeStateListener = window.codeall.on('browser:state-changed', (payload: unknown) => {
+      const data = payload as BrowserStateChangedEvent
+
       syncTabs()
 
-      // Update active tab state
       if (data.viewId === activeBrowserTabId) {
         const { url, canGoBack, canGoForward, isLoading, zoomLevel } = data.state
         setBrowserUrl(url)
@@ -157,7 +218,8 @@ export function BrowserShell() {
       }
     })
 
-    const removeAIListener = window.codeall.on('browser:ai-operation', data => {
+    const removeAIListener = window.codeall.on('browser:ai-operation', (payload: unknown) => {
+      const data = payload as BrowserAIOperationEvent
       setAIOperation(data.toolName, data.status)
 
       const hasManualControl =
@@ -175,23 +237,24 @@ export function BrowserShell() {
         setShowLogs(true)
       }
 
-      // Upsert operation to history (running -> completed/error should update same item)
-      upsertBrowserOperation({
-        id: data.opId || Date.now().toString(),
-        timestamp: data.timestamp || Date.now(),
-        action: data.toolName,
-        target: (data.args && JSON.stringify(data.args)) || undefined,
-        status: data.status === 'error' ? 'failed' : data.status,
-        audit: {
-          viewId: data.viewId,
-          opId: data.opId,
-          errorCode: data.errorCode,
-          durationMs: data.durationMs,
-          toolName: data.toolName,
-          toolArgs: data.args,
-          outcome: data.status
-        }
-      })
+      if (data.status !== 'idle') {
+        upsertBrowserOperation({
+          id: data.opId || Date.now().toString(),
+          timestamp: data.timestamp || Date.now(),
+          action: data.toolName,
+          target: (data.args && JSON.stringify(data.args)) || undefined,
+          status: data.status === 'error' ? 'failed' : data.status,
+          audit: {
+            viewId: data.viewId,
+            opId: data.opId,
+            errorCode: data.errorCode,
+            durationMs: data.durationMs,
+            toolName: data.toolName,
+            toolArgs: data.args,
+            outcome: data.status
+          }
+        })
+      }
 
       if (data.status === 'completed' || data.status === 'error') {
         setTimeout(() => {
@@ -213,40 +276,16 @@ export function BrowserShell() {
     upsertBrowserOperation,
     openBrowserPanel,
     setActiveBrowserTab,
-    isBrowserPanelOpen,
     browserHandoff
   ])
 
-  // Hide/show the BrowserView when panel/tab/bounds change
   useEffect(() => {
-    if (!window.codeall) return
-
-    const sync = async () => {
-      const bounds: BrowserLifecycleBounds | null = browserRef.current
-        ? (() => {
-            const rect = browserRef.current!.getBoundingClientRect()
-            return {
-              x: rect.x,
-              y: rect.y,
-              width: rect.width,
-              height: rect.height
-            }
-          })()
-        : null
-
-      await browserLifecycleRef.current.sync({
-        panelOpen: isBrowserPanelOpen,
-        activeViewId: activeBrowserTabId,
-        bounds
-      })
-    }
-
-    sync()
-  }, [activeBrowserTabId, isBrowserPanelOpen])
+    void syncBrowserLifecycle()
+  }, [syncBrowserLifecycle])
 
   // Handle visibility changes to hide browser view when overlays are present
   useEffect(() => {
-    if (!activeBrowserTabId || !window.codeall) return
+    if (!window.codeall) return
 
     // Function to check if any overlay is open
     const checkOverlays = () => {
@@ -256,27 +295,7 @@ export function BrowserShell() {
         '[data-radix-portal], .dialog-overlay, .modal-overlay, [role="dialog"]'
       )
 
-      if (hasOverlay) {
-        // Temporarily hide browser view
-        window.codeall.invoke('browser:hide', { viewId: activeBrowserTabId })
-      } else {
-        // Restore browser view
-        if (browserRef.current) {
-          const rect = browserRef.current.getBoundingClientRect()
-          // Only show if we are actually in the browser tab and visible
-          if (rect.width > 0 && rect.height > 0) {
-            window.codeall.invoke('browser:show', {
-              viewId: activeBrowserTabId,
-              bounds: {
-                x: rect.x,
-                y: rect.y,
-                width: rect.width,
-                height: rect.height
-              }
-            })
-          }
-        }
-      }
+      setOverlayBlocking(Boolean(hasOverlay))
     }
 
     // Set up a mutation observer to watch for body changes (portals usually append to body)
@@ -287,7 +306,7 @@ export function BrowserShell() {
     checkOverlays()
 
     return () => observer.disconnect()
-  }, [activeBrowserTabId])
+  }, [])
 
   // Handle Resize
   useEffect(() => {
@@ -295,28 +314,7 @@ export function BrowserShell() {
     if (!isBrowserPanelOpen) return
 
     const updateBounds = () => {
-      if (!browserRef.current || !window.codeall || !activeBrowserTabId) return
-      const rect = browserRef.current.getBoundingClientRect()
-      window.codeall.invoke('browser:resize', {
-        viewId: activeBrowserTabId,
-        bounds: {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height
-        }
-      })
-
-      void browserLifecycleRef.current.sync({
-        panelOpen: isBrowserPanelOpen,
-        activeViewId: activeBrowserTabId,
-        bounds: {
-          x: rect.x,
-          y: rect.y,
-          width: rect.width,
-          height: rect.height
-        }
-      })
+      void syncBrowserLifecycle()
     }
 
     const observer = new ResizeObserver(updateBounds)
@@ -324,7 +322,14 @@ export function BrowserShell() {
     updateBounds()
 
     return () => observer.disconnect()
-  }, [activeBrowserTabId, isBrowserPanelOpen])
+  }, [activeBrowserTabId, isBrowserPanelOpen, syncBrowserLifecycle])
+
+  useEffect(
+    () => () => {
+      void browserLifecycleRef.current.hideVisible('component-unmount')
+    },
+    []
+  )
 
   // Actions
   const handleNewTab = async () => {
@@ -345,7 +350,7 @@ export function BrowserShell() {
       if (remaining.length > 0) {
         setActiveBrowserTab(remaining[remaining.length - 1].id)
       } else {
-        setActiveBrowserTab(null as any)
+        setActiveBrowserTab(null)
       }
     }
   }
@@ -429,7 +434,7 @@ export function BrowserShell() {
                 : 'bg-slate-950 text-slate-500 hover:bg-slate-900 hover:text-slate-400'
             )}
           >
-            <div className="flex-1 truncate">{tab.title || 'New Tab'}</div>
+            <div className="flex-1 truncate">{tab.title || UI_TEXT.browserShell.newTabFallbackTitle}</div>
             <button
               onClick={e => handleCloseTab(e, tab.id)}
               className="opacity-0 group-hover:opacity-100 p-0.5 hover:bg-slate-700 rounded transition-opacity"
@@ -462,7 +467,7 @@ export function BrowserShell() {
 
         {browserHandoff.isManualControl && browserHandoff.viewId === activeBrowserTabId && (
           <div className="px-2 py-1 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs font-medium">
-Manual control active
+            {UI_TEXT.browserShell.manualControlActive}
           </div>
         )}
 
@@ -488,7 +493,7 @@ Manual control active
               ? 'text-blue-400 bg-blue-500/10'
               : 'text-slate-500 hover:text-slate-200 hover:bg-slate-800'
           )}
-          title="Toggle Operation Logs"
+          title={UI_TEXT.browserShell.toggleOperationLogs}
         >
           <List size={16} />
         </button>
@@ -499,21 +504,23 @@ Manual control active
         {/* Browser View Container */}
         <div className="flex-1 relative bg-white" ref={browserRef}>
           {/* Electron BrowserView will be overlayed here */}
-          <div className="absolute inset-0 flex items-center justify-center text-slate-400 bg-slate-100">
-            {!activeBrowserTabId ? (
+          {!activeBrowserTabId ? (
+            <div className="absolute inset-0 flex items-center justify-center text-slate-400 bg-slate-100">
               <div className="flex flex-col items-center gap-4">
-                <span>No tabs open</span>
+                <span>{UI_TEXT.browserShell.noTabsOpen}</span>
                 <button
                   onClick={handleNewTab}
                   className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
                 >
-                  Open New Tab
+                  {UI_TEXT.browserShell.openNewTab}
                 </button>
               </div>
-            ) : (
-              <span className="animate-pulse">Loading Browser View...</span>
-            )}
-          </div>
+            </div>
+          ) : activeTab?.isLoading ? (
+            <div className="absolute inset-0 flex items-center justify-center text-slate-400 bg-slate-100">
+              <span className="animate-pulse">{UI_TEXT.browserShell.loadingBrowserView}</span>
+            </div>
+          ) : null}
         </div>
 
         {/* Operation Logs Panel */}

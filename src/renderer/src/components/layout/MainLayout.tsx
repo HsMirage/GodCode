@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useDefaultLayout } from 'react-resizable-panels'
 
 import { Sidebar } from './Sidebar'
@@ -7,10 +7,12 @@ import { BrowserPanel } from '../panels/BrowserPanel'
 import { TaskPanel } from '../panels/TaskPanel'
 import { ArtifactRail } from '../artifact/ArtifactRail'
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '../ui/resizable'
+import { SessionRecoveryPrompt } from '../session/SessionRecoveryPrompt'
 import { UpdaterManager } from '../updater/UpdaterManager'
 import { ChatPage } from '../../pages/ChatPage'
 import { useUIStore } from '../../store/ui.store'
 import { useDataStore } from '../../store/data.store'
+import { cleanupBrowserSessionViews } from '../../services/browser-session-cleanup'
 
 export function MainLayout() {
   const {
@@ -20,11 +22,14 @@ export function MainLayout() {
     isBrowserPanelOpen,
     openBrowserPanel,
     setActiveBrowserTab,
+    sidebarWidth,
     setPanelSizes,
     setTaskPanelWidth,
-    setBrowserPanelWidth
+    setBrowserPanelWidth,
+    resetBrowserWorkspace
   } = useUIStore()
   const { currentSessionId } = useDataStore()
+  const previousSessionIdRef = useRef<string | null | undefined>(undefined)
 
   // 监听浏览器面板自动展开事件
   useEffect(() => {
@@ -46,6 +51,47 @@ export function MainLayout() {
     }
   }, [openBrowserPanel, setActiveBrowserTab])
 
+  useEffect(() => {
+    const previousSessionId = previousSessionIdRef.current
+    previousSessionIdRef.current = currentSessionId
+
+    if (previousSessionId === undefined || previousSessionId === currentSessionId) {
+      return
+    }
+
+    resetBrowserWorkspace({ closePanel: true })
+
+    if (!window.codeall) {
+      return
+    }
+
+    void cleanupBrowserSessionViews(
+      {
+        listTabs: async () => {
+          const result = (await window.codeall.invoke('browser:list-tabs')) as {
+            success?: boolean
+            data?: Array<{ id: string }>
+          }
+
+          return result?.success ? result.data ?? [] : []
+        },
+        hide: async viewId => {
+          await window.codeall.invoke('browser:hide', { viewId })
+        },
+        destroy: async viewId => {
+          await window.codeall.invoke('browser:destroy', { viewId })
+        }
+      },
+      console
+    ).catch(error => {
+      console.warn('[MainLayout] browser workspace cleanup failed', {
+        previousSessionId,
+        currentSessionId,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    })
+  }, [currentSessionId, resetBrowserWorkspace])
+
   // Panels are conditionally mounted; panelIds must match rendered panels
   const outerPanelIds = useMemo(
     () => [
@@ -66,6 +112,7 @@ export function MainLayout() {
   return (
     <div className="h-screen flex flex-col ui-bg-app ui-text-primary overflow-hidden">
       <UpdaterManager />
+      <SessionRecoveryPrompt />
       <TopNavigation />
 
       <div className="flex-1 flex overflow-hidden relative">
@@ -80,11 +127,11 @@ export function MainLayout() {
             <>
               <ResizablePanel
                 id="sidebar"
-                defaultSize={15}
-                minSize="160px"
+                defaultSize={sidebarWidth}
+                minSize="240px"
                 maxSize="35%"
                 onResize={(size: number | { asPercentage?: number }) => {
-                  const newSize = typeof size === 'number' ? size : (size.asPercentage ?? 15)
+                  const newSize = typeof size === 'number' ? size : (size.asPercentage ?? sidebarWidth)
                   setPanelSizes({ sidebar: newSize })
                 }}
               >
@@ -95,7 +142,7 @@ export function MainLayout() {
           )}
 
           {/* Chat Panel - 主对话界面 */}
-          <ResizablePanel id="chat" minSize="420px">
+          <ResizablePanel id="chat" minSize="380px">
             <ChatPage />
           </ResizablePanel>
 
