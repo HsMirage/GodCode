@@ -103,6 +103,7 @@ async function executeDirectMessage({
     ...baseConfig,
     model: modelSelection.model,
     temperature: modelSelection.temperature ?? baseConfig.temperature,
+    apiProtocol: modelSelection.protocol ?? baseConfig.apiProtocol,
     maxToolIterations,
     workspaceDir,
     sessionId: input.sessionId,

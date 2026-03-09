@@ -1,4 +1,0 @@
-
-> codeall@1.0.0 typecheck D:\AiWork\CodeAll
-> tsc --noEmit
-

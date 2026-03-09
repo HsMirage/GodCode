@@ -29,7 +29,6 @@ import {
   type BackgroundTaskInfo,
   type BackgroundTaskOutputMeta,
   type BackgroundTaskOutputState,
-  type BackgroundTaskStats,
   type BackgroundOutputChunk,
   type TabType,
   type TaskBindingSnapshot,
@@ -38,10 +37,6 @@ import {
   type WorkflowObservabilityTaskPanelSnapshot
 } from '../task-panel-shared'
 import { resolveTaskBindingSnapshot } from '../task-panel-shared'
-import {
-  getModelSelectionSourceLabel,
-  type ModelSelectionSource
-} from '@shared/model-selection-contract'
 
 interface DiffViewerState {
   artifactId: string
@@ -77,7 +72,6 @@ export function useTaskPanel() {
   const [backgroundTasks, setBackgroundTasks] = useState<BackgroundTaskInfo[]>([])
   const [backgroundLoading, setBackgroundLoading] = useState(true)
   const [backgroundError, setBackgroundError] = useState<string | null>(null)
-  const [backgroundStats, setBackgroundStats] = useState<BackgroundTaskStats | null>(null)
   const [outputByTaskId, setOutputByTaskId] = useState<Record<string, BackgroundTaskOutputState>>(
     {}
   )
@@ -190,20 +184,13 @@ export function useTaskPanel() {
     }
 
     try {
-      const [taskResult, statsResult] = await Promise.all([
-        workflowApi.backgroundTaskList({
-          sessionId: currentSessionId
-        }) as Promise<{
-          success: boolean
-          data?: BackgroundTaskInfo[]
-          error?: string
-        }>,
-        workflowApi.backgroundTaskStats() as Promise<{
-          success: boolean
-          data?: BackgroundTaskStats
-          error?: string
-        }>
-      ])
+      const taskResult = (await workflowApi.backgroundTaskList({
+        sessionId: currentSessionId
+      })) as {
+        success: boolean
+        data?: BackgroundTaskInfo[]
+        error?: string
+      }
 
       if (!taskResult.success) {
         throw new Error(taskResult.error || 'Failed to load background tasks')
@@ -215,10 +202,6 @@ export function useTaskPanel() {
 
       setBackgroundTasks(ordered)
       setBackgroundError(null)
-
-      if (statsResult.success && statsResult.data) {
-        setBackgroundStats(statsResult.data)
-      }
 
       const runningIds = new Set(
         ordered
@@ -240,7 +223,6 @@ export function useTaskPanel() {
       console.error('Failed to load background tasks:', error)
       setBackgroundError(error instanceof Error ? error.message : String(error))
       setBackgroundTasks([])
-      setBackgroundStats(null)
     } finally {
       setBackgroundLoading(false)
     }
@@ -379,7 +361,6 @@ export function useTaskPanel() {
     setTaskDiagnosticsByTaskId({})
     setSessionDiagnosticSummary(DEFAULT_SESSION_DIAGNOSTIC_SUMMARY)
     setTaskDetailState(null)
-    setBackgroundStats(null)
     setLoading(false)
     setBackgroundLoading(false)
     setOutputByTaskId({})
@@ -555,34 +536,6 @@ export function useTaskPanel() {
   const hasTaskFilters =
     Boolean(normalizedTaskSearch) || taskStatusFilter !== 'all' || taskSortMode !== 'newest'
 
-  const workflowSnapshotSummary = useMemo(() => {
-    const entries = Object.values(bindingSnapshots)
-    if (entries.length === 0) {
-      return null
-    }
-
-    const modelSources = Array.from(
-      new Set(
-        entries
-          .map(item => item.modelSelectionSource || item.modelSource)
-          .filter((value): value is ModelSelectionSource => Boolean(value))
-          .map(source => getModelSelectionSourceLabel(source))
-      )
-    )
-
-    const withFallback = entries.filter(
-      item => Boolean(item.fallbackReason) || (item.fallbackTrail || []).length > 0
-    ).length
-    const withConcurrency = entries.filter(item => Boolean(item.concurrencyKey)).length
-
-    return {
-      total: entries.length,
-      modelSources,
-      withFallback,
-      withConcurrency
-    }
-  }, [bindingSnapshots])
-
   const stuckDiagnosticSummary = useMemo(
     () =>
       buildWorkflowStuckDiagnosticSummary({
@@ -650,16 +603,6 @@ export function useTaskPanel() {
     [backgroundTasks]
   )
 
-  const effectiveBackgroundStats: BackgroundTaskStats = backgroundStats || {
-    total: backgroundTasks.length,
-    running: backgroundRunning.length,
-    completed: backgroundTasks.filter(task => task.status === 'completed').length,
-    error: backgroundTasks.filter(
-      task => task.status === 'error' || task.status === 'interrupt' || task.status === 'timeout'
-    ).length,
-    cancelled: backgroundTasks.filter(task => task.status === 'cancelled').length
-  }
-
   const handleViewDiff = useCallback((artifactId: string, filePath: string) => {
     setDiffViewerState({ artifactId, filePath })
   }, [])
@@ -717,13 +660,11 @@ export function useTaskPanel() {
     backgroundError,
     backgroundRunning,
     backgroundFinished,
-    effectiveBackgroundStats,
     outputByTaskId,
     expandedTaskIds,
     bindingSnapshots,
     taskDiagnosticsByTaskId,
     sessionDiagnosticSummary,
-    workflowSnapshotSummary,
     stuckDiagnosticSummary,
     taskReadinessDashboard,
     highlightedTaskId,

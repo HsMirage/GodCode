@@ -15,7 +15,9 @@ test('final acceptance: complete user journey', async ({ window }) => {
   await addProviderBtn.click()
 
   await window.locator('input[placeholder="My Provider"]').fill(providerName)
-  await window.locator('input[placeholder="https://api.example.com/v1"]').fill('https://api.openai.com/v1')
+  await window
+    .locator('input[placeholder="https://api.example.com/v1"]')
+    .fill('https://api.openai.com/v1')
   await window.locator('input[placeholder="sk-..."]').fill(`sk-e2e-final-${ts}`)
 
   const modelInput = window.locator('input[placeholder="例如: gpt-4, claude-3-opus..."]')
@@ -33,11 +35,13 @@ test('final acceptance: complete user journey', async ({ window }) => {
 
   const getModelId = async () =>
     window.evaluate(async targetModelName => {
-      const api = (window as unknown as {
-        codeall?: {
-          invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+      const api = (
+        window as unknown as {
+          godcode?: {
+            invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+          }
         }
-      }).codeall
+      ).godcode
       if (!api) return null
       const models = (await api.invoke('model:list')) as Array<{ id: string; modelName: string }>
       return models.find(model => model.modelName === targetModelName)?.id ?? null
@@ -48,11 +52,13 @@ test('final acceptance: complete user journey', async ({ window }) => {
   if (!modelId) throw new Error(`Failed to resolve model id for ${modelName}`)
 
   await window.evaluate(async targetModelId => {
-    const api = (window as unknown as {
-      codeall?: {
-        invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+    const api = (
+      window as unknown as {
+        godcode?: {
+          invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+        }
       }
-    }).codeall
+    ).godcode
     if (!api) return
     await api.invoke('setting:set', { key: 'defaultModelId', value: targetModelId })
   }, modelId)
@@ -83,7 +89,9 @@ test('luban repeated sends stay stable with responses default model', async ({ w
   await addProviderBtn.click()
 
   await window.locator('input[placeholder="My Provider"]').fill(providerName)
-  await window.locator('input[placeholder="https://api.example.com/v1"]').fill('https://api.fuxi-e2e.local/v1')
+  await window
+    .locator('input[placeholder="https://api.example.com/v1"]')
+    .fill('https://api.fuxi-e2e.local/v1')
   await window.locator('input[placeholder="sk-..."]').fill(`sk-e2e-luban-${ts}`)
 
   const modelInput = window.locator('input[placeholder="例如: gpt-4, claude-3-opus..."]')
@@ -93,11 +101,13 @@ test('luban repeated sends stay stable with responses default model', async ({ w
 
   const getModelId = async () =>
     window.evaluate(async targetModelName => {
-      const api = (window as unknown as {
-        codeall?: {
-          invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+      const api = (
+        window as unknown as {
+          godcode?: {
+            invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+          }
         }
-      }).codeall
+      ).godcode
       if (!api) return null
       const models = (await api.invoke('model:list')) as Array<{ id: string; modelName: string }>
       return models.find(model => model.modelName === targetModelName)?.id ?? null
@@ -108,11 +118,13 @@ test('luban repeated sends stay stable with responses default model', async ({ w
   if (!modelId) throw new Error(`Failed to resolve model id for ${modelName}`)
 
   await window.evaluate(async targetModelId => {
-    const api = (window as unknown as {
-      codeall?: {
-        invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+    const api = (
+      window as unknown as {
+        godcode?: {
+          invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+        }
       }
-    }).codeall
+    ).godcode
     if (!api) return
     await api.invoke('setting:set', { key: 'defaultModelId', value: targetModelId })
   }, modelId)

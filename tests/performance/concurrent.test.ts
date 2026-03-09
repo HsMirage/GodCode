@@ -4,7 +4,7 @@ import { WorkforceEngine } from '../../src/main/services/workforce/workforce-eng
 import type { PrismaClient } from '@prisma/client'
 
 // Avoid real network LLM calls in perf tests.
-process.env.CODEALL_E2E_TEST = '1'
+process.env.GODCODE_E2E_TEST = '1'
 
 // DelegateEngine now resolves model via BindingService; mock it to avoid DB binding tables in test fakes.
 vi.mock('@/main/services/binding.service', () => ({
@@ -35,7 +35,7 @@ vi.mock('electron', () => {
   return {
     app: {
       getPath: vi.fn(name => {
-        if (name === 'userData') return '/tmp/codeall-perf-concurrent'
+        if (name === 'userData') return '/tmp/godcode-perf-concurrent'
         return '/tmp'
       })
     }

@@ -1,6 +1,6 @@
 # 开发者指南 (Development Guide)
 
-本文档旨在帮助开发者了解 CodeAll 的开发环境配置、项目结构、贡献准则及调试技巧。
+本文档旨在帮助开发者了解 GodCode 的开发环境配置、项目结构、贡献准则及调试技巧。
 
 ## 1. 环境准备
 
@@ -46,7 +46,7 @@ pnpm dev
 ## 3. 代码结构说明
 
 ```text
-CodeAll/
+GodCode/
 ├── src/
 │   ├── main/           # Electron 主进程
 │   │   ├── ipc/        # IPC 通讯处理逻辑与验证器

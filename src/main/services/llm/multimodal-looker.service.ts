@@ -200,9 +200,7 @@ export class MultimodalLookerService {
     ) {
       const protocol = modelSelection.protocol
       if (protocol !== 'chat/completions' && protocol !== 'responses') {
-        throw new Error(
-          `MODEL_PROTOCOL_NOT_CONFIGURED: 模型「${model}」缺少 apiProtocol 配置。请在“设置 -> 模型”中将协议设置为 chat/completions 或 responses。`
-        )
+        throw new Error(`MODEL_PROTOCOL_RESOLUTION_FAILED: 无法为模型「${model}」自动解析 OpenAI 协议。`)
       }
 
       const content = await this.extractWithOpenAICompatible(

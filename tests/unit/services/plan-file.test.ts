@@ -39,7 +39,7 @@ describe('PlanFileService', () => {
 
     // Mock FS defaults
     mockFs.existsSync.mockReturnValue(true)
-    mockFs.readdirSync.mockReturnValue(['codeall-unified-plan.md', 'archived', 'backup.txt'])
+    mockFs.readdirSync.mockReturnValue(['godcode-unified-plan.md', 'archived', 'backup.txt'])
     mockFs.readFileSync.mockReturnValue(mockPlanContent)
     mockFs.writeFileSync.mockImplementation(() => {})
     mockFs.mkdirSync.mockImplementation(() => {})
@@ -55,13 +55,13 @@ describe('PlanFileService', () => {
 
   it('should list only .md plan files from .fuxi/plans by default', async () => {
     mockFs.readdirSync.mockImplementation(dir => {
-      if (dir === fuxiPlansDir) return ['codeall-unified-plan.md', 'backup.txt']
+      if (dir === fuxiPlansDir) return ['godcode-unified-plan.md', 'backup.txt']
       if (dir === legacyPlansDir) return ['legacy-plan.md']
       return []
     })
 
     const plans = await service.listPlans()
-    expect(plans).toEqual(['codeall-unified-plan', 'legacy-plan'])
+    expect(plans).toEqual(['godcode-unified-plan', 'legacy-plan'])
     expect(mockFs.readdirSync).toHaveBeenCalledWith(fuxiPlansDir)
     expect(mockFs.readdirSync).toHaveBeenCalledWith(legacyPlansDir)
   })
@@ -80,10 +80,10 @@ describe('PlanFileService', () => {
   })
 
   it('should read plan content from .fuxi/plans when present', async () => {
-    const targetPath = path.join(fuxiPlansDir, 'codeall-unified-plan.md')
+    const targetPath = path.join(fuxiPlansDir, 'godcode-unified-plan.md')
     mockFs.existsSync.mockImplementation(p => p === targetPath)
 
-    const content = await service.readPlan('codeall-unified-plan')
+    const content = await service.readPlan('godcode-unified-plan')
     expect(content).toBe(mockPlanContent)
     expect(mockFs.readFileSync).toHaveBeenCalledWith(targetPath, 'utf-8')
   })
@@ -108,7 +108,7 @@ describe('PlanFileService', () => {
   })
 
   it('should parse plan tasks correctly', async () => {
-    const tasks = await service.parsePlan('codeall-unified-plan')
+    const tasks = await service.parsePlan('godcode-unified-plan')
     expect(tasks).toHaveLength(4)
 
     // Check first completed task
@@ -127,7 +127,7 @@ describe('PlanFileService', () => {
   })
 
   it('should calculate metadata correctly', async () => {
-    const meta = await service.getPlanMetadata('codeall-unified-plan')
+    const meta = await service.getPlanMetadata('godcode-unified-plan')
 
     expect(meta.totalTasks).toBe(4)
     expect(meta.completedTasks).toBe(1)
@@ -137,18 +137,18 @@ describe('PlanFileService', () => {
   })
 
   it('should get specific task by ID', async () => {
-    const task = await service.getTaskById('codeall-unified-plan', '8.1.2')
+    const task = await service.getTaskById('godcode-unified-plan', '8.1.2')
     expect(task).toBeDefined()
     expect(task?.description).toBe('Implement plan file storage')
   })
 
   it('should return null for non-existent task ID', async () => {
-    const task = await service.getTaskById('codeall-unified-plan', '9.9.9')
+    const task = await service.getTaskById('godcode-unified-plan', '9.9.9')
     expect(task).toBeNull()
   })
 
   it('should filter tasks by phase', async () => {
-    const tasks = await service.getTasksByPhase('codeall-unified-plan', 'Phase 8')
+    const tasks = await service.getTasksByPhase('godcode-unified-plan', 'Phase 8')
     expect(tasks).toHaveLength(4)
   })
 

@@ -66,7 +66,7 @@ describe('IPC Channel Alignment', () => {
     })
 
     it('should expose API via contextBridge in index.ts', () => {
-      expect(preloadIndexSource).toContain('createCodeAllAPI')
+      expect(preloadIndexSource).toContain('createGodCodeAPI')
       expect(preloadIndexSource).toContain('contextBridge.exposeInMainWorld')
     })
 

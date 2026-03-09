@@ -37,7 +37,7 @@ vi.mock('@/main/services/secure-storage.service', () => ({
   }
 }))
 
-describe('ModelSelectionService protocol validation', () => {
+describe('ModelSelectionService protocol resolution', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     findUniqueMock.mockReset()
@@ -49,7 +49,7 @@ describe('ModelSelectionService protocol validation', () => {
     findUniqueMock.mockResolvedValue(null)
   })
 
-  it('throws MODEL_PROTOCOL_NOT_CONFIGURED for openai-compatible model missing apiProtocol', async () => {
+  it('infers chat/completions for openai-compatible model missing apiProtocol', async () => {
     findManyMock.mockResolvedValue([
       {
         id: 'model-1',
@@ -64,11 +64,35 @@ describe('ModelSelectionService protocol validation', () => {
 
     const service = ModelSelectionService.getInstance()
 
-    await expect(
-      service.resolveModelSelection({
-        overrideModelSpec: 'openai-compatible/gpt-4o-mini'
-      })
-    ).rejects.toThrow('MODEL_PROTOCOL_NOT_CONFIGURED')
+    const result = await service.resolveModelSelection({
+      overrideModelSpec: 'openai-compatible/gpt-4o-mini'
+    })
+
+    expect(result.protocol).toBe('chat/completions')
+    expect(result.provider).toBe('openai-compatible')
+  })
+
+  it('infers responses for native openai model missing apiProtocol', async () => {
+    findManyMock.mockResolvedValue([
+      {
+        id: 'model-openai',
+        provider: 'openai',
+        modelName: 'gpt-4.1-mini',
+        apiKey: 'enc-key',
+        apiKeyRef: null,
+        baseURL: 'https://api.openai.com/v1',
+        config: {}
+      }
+    ])
+
+    const service = ModelSelectionService.getInstance()
+
+    const result = await service.resolveModelSelection({
+      overrideModelSpec: 'openai/gpt-4.1-mini'
+    })
+
+    expect(result.protocol).toBe('responses')
+    expect(result.provider).toBe('openai')
   })
 
   it('accepts openai-compatible model when apiProtocol is responses', async () => {

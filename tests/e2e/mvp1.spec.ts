@@ -6,8 +6,8 @@ test.describe('MVP1 End-to-End Tests', () => {
     expect(title).toBeTruthy()
   })
 
-  test('should display CodeAll branding', async ({ window }) => {
-    const branding = window.locator('text=CodeAll').first()
+  test('should display GodCode branding', async ({ window }) => {
+    const branding = window.locator('text=GodCode').first()
     await expect(branding).toBeVisible()
   })
 

@@ -13,7 +13,6 @@ import {
 } from 'lucide-react'
 import type { Task } from '@renderer/types/domain'
 import {
-  getFallbackReasonLabel,
   getModelSelectionReasonLabel,
   getModelSelectionSourceLabel
 } from '@shared/model-selection-contract'
@@ -22,7 +21,6 @@ import type { TaskDetailTab } from './task-panel-detail'
 import { TaskPanelSectionBoundary } from './TaskPanelSectionBoundary'
 import type { TaskDiagnosticSummary } from './task-panel-diagnostics'
 import {
-  buildFallbackAttemptText,
   diagnosticBadgeConfig,
   resolveTaskBindingSnapshot,
   type TaskBindingSnapshot,
@@ -63,7 +61,7 @@ const statusConfig = {
   },
   cancelled: {
     icon: AlertCircle,
-    color: 'text-amber-400',
+    color: 'ui-warning-icon',
     bg: 'bg-amber-500/20',
     label: '已取消'
   }
@@ -125,12 +123,6 @@ function TaskCard({
   const modelReasonLabel = resolvedBindingSnapshot.modelSelectionReason
     ? getModelSelectionReasonLabel(resolvedBindingSnapshot.modelSelectionReason)
     : null
-  const fallbackReasonLabel = resolvedBindingSnapshot.fallbackReason
-    ? getFallbackReasonLabel(resolvedBindingSnapshot.fallbackReason)
-    : null
-  const fallbackAttemptText = buildFallbackAttemptText(
-    resolvedBindingSnapshot.fallbackAttemptSummary
-  )
   const displayOutput = task.output ? sanitizeDisplayOutput(task.output) : ''
 
   return (
@@ -217,19 +209,10 @@ function TaskCard({
         </div>
       )}
 
-      {(fallbackReasonLabel || fallbackAttemptText) && (
-        <div className="mt-2 rounded border border-amber-500/20 bg-amber-500/10 px-2 py-1">
-          <p className="text-[11px] text-amber-300">
-            选择回退: {fallbackReasonLabel || '已记录'}
-            {fallbackAttemptText ? ` · ${fallbackAttemptText}` : ''}
-          </p>
-        </div>
-      )}
-
       {resolvedBindingSnapshot.fallbackTrail &&
         resolvedBindingSnapshot.fallbackTrail.length > 0 && (
-          <div className="mt-2 rounded border border-amber-500/20 bg-amber-500/10 px-2 py-1">
-            <p className="text-[11px] text-amber-300">
+          <div className="ui-warning-surface mt-2 rounded border px-2 py-1">
+            <p className="ui-warning-text text-[11px]">
               执行回退链路: {resolvedBindingSnapshot.fallbackTrail.join(' → ')}
             </p>
           </div>

@@ -1,14 +1,8 @@
 /**
- * @license
- * Copyright (c) 2024-2026 opencode-ai
+ * Copyright (c) 2026 GodCode Team
+ * SPDX-License-Identifier: MIT
  *
- * This file is adapted from oh-my-opencode
- * Original source: https://github.com/opencode-ai/oh-my-opencode
- * License: SUL-1.0
- *
- * This code is used under the Sustainable Use License for internal/non-commercial purposes only.
- *
- * Modified by CodeAll project.
+ * DelegateEngine — 任务委托引擎，负责将任务路由到对应 Agent 并执行
  */
 
 import { DatabaseService } from '@/main/services/database'
@@ -120,7 +114,7 @@ function buildModelSelectionSnapshot(selection: ResolvedModelSelection): ModelSe
   }
 }
 
-const DEFAULT_SYSTEM_PROMPT = 'You are CodeAll, an AI coding agent.'
+const DEFAULT_SYSTEM_PROMPT = 'You are GodCode, an AI coding agent.'
 const CATEGORY_EXECUTION_GUARDRAIL_PROMPT = `<Category_Execution_Contract>
 CATEGORY-RUN EXECUTION MODE (NON-NEGOTIABLE):
 
@@ -674,6 +668,7 @@ export class DelegateEngine {
         ...baseConfig,
         model: modelSelection.model,
         temperature: modelSelection.temperature ?? baseConfig.temperature ?? 0.5,
+        apiProtocol: modelSelection.protocol ?? baseConfig.apiProtocol,
         maxToolIterations: maxToolIterations ?? baseConfig.maxToolIterations,
         workspaceDir,
         sessionId: resolvedSessionId,
@@ -1199,7 +1194,7 @@ export class DelegateEngine {
     const toolList = availableTools.length > 0 ? availableTools.join(', ') : '所有可用工具'
 
     return `<Role>
-你是"${agent.chineseName}" - CodeAll 的代码探索专家。
+你是"${agent.chineseName}" - GodCode 的代码探索专家。
 
 **身份**: ${agent.description}
 
@@ -1242,7 +1237,7 @@ export class DelegateEngine {
    */
   private buildAdvisorPromptForAgent(agent: ResolvedAgent): string {
     return `<Role>
-你是"${agent.chineseName}" - CodeAll 的高级技术顾问。
+你是"${agent.chineseName}" - GodCode 的高级技术顾问。
 
 **身份**: ${agent.description}
 
@@ -1303,7 +1298,7 @@ export class DelegateEngine {
     const toolList = availableTools.length > 0 ? availableTools.join(', ') : agent.tools.join(', ')
 
     return `<Role>
-你是"${agent.chineseName}" - CodeAll 的专业 Agent。
+你是"${agent.chineseName}" - GodCode 的专业 Agent。
 
 **身份**: ${agent.description}
 

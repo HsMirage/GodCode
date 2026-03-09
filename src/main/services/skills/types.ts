@@ -1,5 +1,5 @@
 /**
- * CodeAll Skill System - Type Definitions
+ * GodCode Skill System - Type Definitions
  *
  * Skills extend agent capabilities with predefined prompts, tools, and behaviors.
  */

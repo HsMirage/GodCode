@@ -39,6 +39,8 @@ describe('OpenAICompatAdapter', () => {
   let adapter: OpenAICompatAdapter
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockCreate: any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let mockResponsesCreate: any
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -46,6 +48,7 @@ describe('OpenAICompatAdapter', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const mockClient = (OpenAI as any).mock.results.at(-1)?.value
     mockCreate = mockClient.chat.completions.create
+    mockResponsesCreate = mockClient.responses.create
   })
 
   it('defaults to chat/completions when apiProtocol is missing', async () => {
@@ -69,6 +72,32 @@ describe('OpenAICompatAdapter', () => {
     )
 
     expect(result.content).toBe('Hello from compat')
+    expect(mockCreate).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls back to chat/completions when explicit responses protocol is not supported', async () => {
+    mockResponsesCreate.mockRejectedValueOnce(new Error('404 not found: /responses'))
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: 'Recovered via chat completions' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 6, completion_tokens: 3 }
+    })
+
+    const result = await adapter.sendMessage(
+      [
+        {
+          role: 'user',
+          content: 'Hi',
+          id: '1',
+          sessionId: 's1',
+          createdAt: new Date(),
+          metadata: {}
+        }
+      ],
+      { model: 'gpt-4o-mini', apiProtocol: 'responses' }
+    )
+
+    expect(result.content).toBe('Recovered via chat completions')
+    expect(mockResponsesCreate).toHaveBeenCalledTimes(1)
     expect(mockCreate).toHaveBeenCalledTimes(1)
   })
 })

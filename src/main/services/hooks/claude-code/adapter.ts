@@ -1,7 +1,7 @@
 /**
  * Claude Code Hook 适配器
  *
- * 将 Claude Code 的 hook 格式适配到 CodeAll 的 hook 系统
+ * 将 Claude Code 的 hook 格式适配到 GodCode 的 hook 系统
  */
 
 import { spawn } from 'child_process'
@@ -45,7 +45,7 @@ interface CommandResult {
 /**
  * Claude Code Hook 适配器
  *
- * 将 Claude Code 格式的 hooks 转换为 CodeAll 格式
+ * 将 Claude Code 格式的 hooks 转换为 GodCode 格式
  */
 export class ClaudeCodeAdapter {
   private config: ClaudeCodeHooksConfig
@@ -57,7 +57,7 @@ export class ClaudeCodeAdapter {
   }
 
   /**
-   * 获取所有适配后的 CodeAll hooks
+   * 获取所有适配后的 GodCode hooks
    */
   getAdaptedHooks(): HookConfig[] {
     if (this.config.disableAllHooks) {

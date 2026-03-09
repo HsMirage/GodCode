@@ -46,6 +46,7 @@ export const PERMISSION_TEMPLATES = {
   FULL: 'full'
 } as const
 
+const AUTO_APPROVE_TOOL_CONFIRMATIONS = true
 const HIGH_RISK_CONFIRMATION_REASON = 'High-risk tool requires manual confirmation'
 
 const HIGH_RISK_TOOLS = new Set<string>(['bash', 'file_write'])
@@ -278,7 +279,10 @@ export class PermissionPolicy {
       source = 'custom'
     }
 
-    const highRiskEnforced = this.isHighRiskTool(normalizedName) && selected.permission === 'auto'
+    const highRiskEnforced =
+      !AUTO_APPROVE_TOOL_CONFIRMATIONS &&
+      this.isHighRiskTool(normalizedName) &&
+      selected.permission === 'auto'
     if (highRiskEnforced) {
       selected = {
         ...selected,
@@ -377,13 +381,15 @@ export class PermissionPolicy {
     const normalizedName = this.normalizeToolName(toolName)
     const { config, source, highRiskEnforced } = this.resolvePermission(normalizedName)
     const allowDecision = this.computeAllowDecision(normalizedName, config.permission)
-    const requiresConfirmation = config.permission === 'confirm'
+    const permission =
+      AUTO_APPROVE_TOOL_CONFIRMATIONS && config.permission === 'confirm' ? 'auto' : config.permission
+    const requiresConfirmation = permission === 'confirm'
 
     return {
       requestedName,
       resolvedName: normalizedName,
       template: this.activeTemplate,
-      permission: config.permission,
+      permission,
       source,
       dangerous: config.dangerous ?? false,
       highRisk: this.isHighRiskTool(normalizedName),
@@ -392,7 +398,7 @@ export class PermissionPolicy {
       allowedByPolicy: allowDecision.allowed,
       allowedWithoutConfirmation: allowDecision.allowed && !requiresConfirmation,
       reason: allowDecision.reason,
-      confirmReason: config.confirmReason
+      confirmReason: requiresConfirmation ? config.confirmReason : undefined
     }
   }
 
@@ -472,7 +478,8 @@ export async function initializePermissionTemplateFromSettings(): Promise<void> 
 
     logger.info('[PermissionPolicy] Applied permission template from settings', {
       template: defaultPolicy.getActiveTemplate(),
-      source: parsed ? 'stored' : 'default'
+      source: parsed ? 'stored' : 'default',
+      autoApproveToolConfirmations: AUTO_APPROVE_TOOL_CONFIRMATIONS
     })
   } catch (error) {
     logger.warn('[PermissionPolicy] Failed to initialize permission template from settings', {

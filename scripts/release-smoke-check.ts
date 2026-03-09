@@ -69,12 +69,12 @@ function findFirstMatchingFile(root: string, suffix: string): string | null {
 
 function resolveDefaultCandidate(platform: string): string | null {
   if (platform === 'windows' || platform === 'win32') {
-    const candidate = join(process.cwd(), 'dist', 'win-unpacked', 'CodeAll.exe')
+    const candidate = join(process.cwd(), 'dist', 'win-unpacked', 'GodCode.exe')
     return existsSync(candidate) ? candidate : null
   }
 
   if (platform === 'macos' || platform === 'darwin') {
-    return findFirstMatchingFile(join(process.cwd(), 'dist'), 'CodeAll.app/Contents/MacOS/CodeAll')
+    return findFirstMatchingFile(join(process.cwd(), 'dist'), 'GodCode.app/Contents/MacOS/GodCode')
   }
 
   return null

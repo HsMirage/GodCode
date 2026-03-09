@@ -1,5 +1,6 @@
 import { IpcMainInvokeEvent } from 'electron'
 import { Prisma, Session as PrismaSession } from '@prisma/client'
+import { isGodCodeE2ETestEnvironment } from '@/main/services/brand-runtime-compat'
 import { DatabaseService } from '../../services/database'
 import { LoggerService } from '../../services/logger'
 
@@ -38,7 +39,7 @@ export async function handleSessionGetOrCreateDefault(
   input: SessionGetOrCreateDefaultInput = {}
 ): Promise<PrismaSession | null> {
   // In E2E test environment, database may not be initialized
-  if (process.env.CODEALL_E2E_TEST === '1') {
+  if (isGodCodeE2ETestEnvironment()) {
     try {
       const prisma = DatabaseService.getInstance().getClient()
       // Normal flow continues
@@ -127,7 +128,7 @@ export async function handleSessionList(
   spaceId?: string
 ): Promise<PrismaSession[]> {
   // In E2E test environment, database may not be initialized
-  if (process.env.CODEALL_E2E_TEST === '1') {
+  if (isGodCodeE2ETestEnvironment()) {
     try {
       const prisma = DatabaseService.getInstance().getClient()
       const sessions = await prisma.session.findMany({

@@ -95,10 +95,8 @@ export function TaskPanel() {
         <WorkflowObservability
           activeTab={panel.activeTab}
           taskReadinessDashboard={panel.taskReadinessDashboard}
-          workflowSnapshotSummary={panel.workflowSnapshotSummary}
           stuckDiagnosticSummary={panel.stuckDiagnosticSummary}
           sessionDiagnosticSummary={panel.sessionDiagnosticSummary}
-          effectiveBackgroundStats={panel.effectiveBackgroundStats}
         />
 
         {panel.activeTab === 'tasks' ? (

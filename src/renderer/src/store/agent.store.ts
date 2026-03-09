@@ -188,7 +188,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   fetchAgents: async (sessionId?: string | null) => {
     const baseAgents = createBaseAgents()
 
-    if (!window.codeall || !sessionId) {
+    if (!window.godcode || !sessionId) {
       set(state => ({
         agents: baseAgents,
         selectedAgentId:
@@ -199,7 +199,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return
     }
 
-    const tasks = (await window.codeall.invoke('task:list', sessionId)) as Task[]
+    const tasks = (await window.godcode.invoke('task:list', sessionId)) as Task[]
     const tasksByAgent = new Map<string, Task[]>()
 
     for (const task of tasks) {

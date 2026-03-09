@@ -7,8 +7,8 @@ test.describe('Application Launch', () => {
   })
 
   test('top navigation renders with branding', async ({ window }) => {
-    // Check CodeAll branding is visible in TopNavigation
-    const branding = window.locator('text=CodeAll').first()
+    // Check GodCode branding is visible in TopNavigation
+    const branding = window.locator('text=GodCode').first()
     await expect(branding).toBeVisible()
 
     // Check settings button exists
@@ -27,8 +27,8 @@ test.describe('Application Launch', () => {
     const mainLayout = window.locator('h2:has-text("Spaces")').first()
     await expect(mainLayout).toBeVisible()
 
-    // Check CodeAll branding
-    const branding = window.locator('text=CodeAll').first()
+    // Check GodCode branding
+    const branding = window.locator('text=GodCode').first()
     await expect(branding).toBeVisible()
   })
 })

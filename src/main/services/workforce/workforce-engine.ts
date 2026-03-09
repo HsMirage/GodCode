@@ -8,7 +8,7 @@
  *
  * Licensed under the Apache License, Version 2.0
  *
- * Modified by CodeAll project.
+ * Modified by GodCode project.
  */
 
 import { SETTING_KEYS, buildScopedSettingStorageKey } from '@/main/services/settings/schema-registry'
@@ -1066,6 +1066,7 @@ Only return the JSON, no other text.`
       ...baseConfig,
       model: modelSelection.model,
       temperature: modelSelection.temperature ?? baseConfig.temperature ?? 0.3,
+      apiProtocol: modelSelection.protocol ?? baseConfig.apiProtocol,
       maxToolIterations: globalMaxToolIterations ?? baseConfig.maxToolIterations,
       abortSignal: opts.abortSignal,
       workspaceDir: opts.workspaceDir,
@@ -2711,6 +2712,7 @@ Only return the JSON, no other text.`
     const recoveryMode = this.normalizeRecoveryConfig(recoveryConfig)
     const concurrencySettings = await this.resolveWorkforceConcurrencySettings(resolvedSessionId)
     const taskRetryStates = new Map<string, RetryState>()
+    const failedTaskErrors = new Map<string, string>()
     const recoveryState = this.createInitialRecoveryState(recoveryMode)
     const taskRecoveryAttempts = new Map<string, number>()
     const taskRecoveryClassAttempts = new Map<string, number>()
@@ -2950,6 +2952,7 @@ Only return the JSON, no other text.`
           results.delete(task.id)
           executions.delete(task.id)
           logicalToPersistedTaskId.delete(task.id)
+          failedTaskErrors.delete(task.id)
           recoveredTaskIds.push(task.id)
         }
 
@@ -3569,6 +3572,7 @@ Only return the JSON, no other text.`
           })
           completed.add(task.id)
           inProgress.delete(task.id)
+          failedTaskErrors.delete(task.id)
           checkpointRecoveryReasons.delete(task.id)
           checkpointRecoveryPhases.delete(task.id)
           taskRecoveryAttempts.delete(task.id)
@@ -3673,6 +3677,7 @@ Only return the JSON, no other text.`
           failed.add(task.id)
 
           const errorMessage = error instanceof Error ? error.message : String(error)
+          failedTaskErrors.set(task.id, errorMessage)
           const retryState = taskRetryStates.get(task.id)
           const failureClass = classifyRecoveryFailure(error)
           if (!recoveryState.unrecoveredTasks.includes(task.id)) {
@@ -3726,6 +3731,33 @@ Only return the JSON, no other text.`
         return deps.every(depId => completed.has(depId))
       }
 
+      const summarizeWorkflowFailure = (taskId: string): string => {
+        const retryState = taskRetryStates.get(taskId)
+        const task = subtasks.find(item => item.id === taskId)
+        const rawReason =
+          failedTaskErrors.get(taskId) ||
+          retryState?.errors.at(-1)?.error ||
+          'Unknown error'
+        const normalizedReason = rawReason.replace(/\s+/g, ' ').trim()
+        const truncatedReason =
+          normalizedReason.length > 180 ? `${normalizedReason.slice(0, 177)}...` : normalizedReason
+        const retrySummary =
+          retryState
+            ? ` [attempt ${retryState.attemptNumber}/${retryState.maxAttempts}${retryState.status === 'exhausted' ? ', retries exhausted' : ''}]`
+            : ''
+
+        return `${taskId}${task?.description ? ` (${task.description})` : ''}: ${truncatedReason}${retrySummary}`
+      }
+
+      const buildWorkflowStopError = (): Error => {
+        const failedTaskIds = Array.from(failed)
+        const detailPreview = failedTaskIds.slice(0, 3).map(summarizeWorkflowFailure).join('; ')
+        const moreSuffix = failedTaskIds.length > 3 ? `; +${failedTaskIds.length - 3} more failed task(s)` : ''
+        return new Error(
+          `Workflow stopped because ${failedTaskIds.length} task(s) failed: ${detailPreview}${moreSuffix}`
+        )
+      }
+
       recordStageTransition('dispatch', {
         checkpointEnabled,
         maxConcurrent: concurrencySettings.maxConcurrent,
@@ -3747,7 +3779,7 @@ Only return the JSON, no other text.`
 
           if (ready.length === 0 && inProgress.size === 0) {
             if (failed.size > 0) {
-              throw new Error(`Workflow stopped: ${failed.size} task(s) failed`)
+              throw buildWorkflowStopError()
             }
             throw new Error('Deadlock detected: no tasks can proceed')
           }

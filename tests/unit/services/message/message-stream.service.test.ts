@@ -101,6 +101,37 @@ describe('message-stream.service', () => {
         EVENT_CHANNELS.MESSAGE_STREAM_ERROR,
         expect.objectContaining({
           sessionId: 'session-retry',
+          message: '模型连接异常，正在重试（第2次，约2秒后）',
+          code: 'API_RETRYING'
+        })
+      )
+    } finally {
+      stream.dispose()
+    }
+  })
+
+  test('formats busy retries without claiming api connectivity failure', () => {
+    const send = vi.fn()
+    const stream = createMessageStreamSession({ sender: { send } } as any, 'session-busy-retry')
+
+    try {
+      llmRetryNotifier.notify({
+        sessionId: 'session-busy-retry',
+        provider: 'openai',
+        attempt: 1,
+        delayMs: 500,
+        error: 'temporary empty output',
+        classification: RetryableErrorType.RESOURCE_BUSY,
+        nextAction: 'retry',
+        manualTakeoverRequired: false,
+        occurredAt: new Date('2026-03-06T00:00:00.000Z')
+      })
+
+      expect(send).toHaveBeenCalledWith(
+        EVENT_CHANNELS.MESSAGE_STREAM_ERROR,
+        expect.objectContaining({
+          sessionId: 'session-busy-retry',
+          message: '模型服务繁忙或响应不完整，正在重试（第1次，约1秒后）',
           code: 'API_RETRYING'
         })
       )

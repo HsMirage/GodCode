@@ -28,13 +28,7 @@ type ProviderWithModels = {
   models: Array<{ id: string; modelName: string; provider: string }>
 }
 
-type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: JsonValue }
-  | JsonValue[]
+type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[]
 
 type SettingSchemaDescriptor = {
   key: string
@@ -80,9 +74,9 @@ const MANAGED_SETTING_KEYS = [
 ] as const
 
 const PERMISSION_TEMPLATE_OPTIONS = [
-  { value: 'safe', label: 'Safe', description: '高风险工具默认确认，最小授权' },
-  { value: 'balanced', label: 'Balanced', description: '平衡安全与效率，推荐默认' },
-  { value: 'full', label: 'Full', description: '尽可能自动执行，仅适合受信环境' }
+  { value: 'safe', label: 'Safe', description: '最小授权，部分主动工具会直接禁用' },
+  { value: 'balanced', label: 'Balanced', description: '默认自动执行，兼顾效率与策略约束' },
+  { value: 'full', label: 'Full', description: '最大化自动执行，仅保留显式拒绝策略' }
 ] as const
 
 type ManagedSettingKey = (typeof MANAGED_SETTING_KEYS)[number]
@@ -114,9 +108,9 @@ export function AgentBindingPanel() {
   const [providerNameByModelId, setProviderNameByModelId] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [isDefaultModelDropdownOpen, setIsDefaultModelDropdownOpen] = useState(false)
-  const [managedSettings, setManagedSettings] = useState<Partial<Record<ManagedSettingKey, ManagedSettingState>>>(
-    {}
-  )
+  const [managedSettings, setManagedSettings] = useState<
+    Partial<Record<ManagedSettingKey, ManagedSettingState>>
+  >({})
 
   const currentSpaceId = useDataStore(state => state.currentSpaceId)
 
@@ -150,8 +144,8 @@ export function AgentBindingPanel() {
     setAgents(baseAgents)
     setCategories(baseCategories)
 
-    if (!window.codeall) {
-      console.warn('[AgentBindingPanel] window.codeall not available')
+    if (!window.godcode) {
+      console.warn('[AgentBindingPanel] window.godcode not available')
       setLoading(false)
       return
     }
@@ -159,11 +153,11 @@ export function AgentBindingPanel() {
     try {
       const [agentResult, categoryResult, modelResult, providerResult, schemaResult] =
         await Promise.allSettled([
-          window.codeall.invoke('agent-binding:list') as Promise<AgentBindingData[]>,
-          window.codeall.invoke('category-binding:list') as Promise<CategoryBindingData[]>,
-          window.codeall.invoke('model:list') as Promise<Model[]>,
-          window.codeall.invoke('keychain:list-with-models') as Promise<ProviderWithModels[]>,
-          window.codeall.invoke('setting:schema-list') as Promise<SettingSchemaDescriptor[]>
+          window.godcode.invoke('agent-binding:list') as Promise<AgentBindingData[]>,
+          window.godcode.invoke('category-binding:list') as Promise<CategoryBindingData[]>,
+          window.godcode.invoke('model:list') as Promise<Model[]>,
+          window.godcode.invoke('keychain:list-with-models') as Promise<ProviderWithModels[]>,
+          window.godcode.invoke('setting:schema-list') as Promise<SettingSchemaDescriptor[]>
         ])
 
       const agentList = agentResult.status === 'fulfilled' ? agentResult.value : []
@@ -233,18 +227,22 @@ export function AgentBindingPanel() {
       }
       setProviderNameByModelId(map)
 
-      const schemaByKey = schemaList.reduce((acc, schema) => {
-        acc[schema.key] = schema
-        return acc
-      }, {} as Record<string, SettingSchemaDescriptor>)
+      const schemaByKey = schemaList.reduce(
+        (acc, schema) => {
+          acc[schema.key] = schema
+          return acc
+        },
+        {} as Record<string, SettingSchemaDescriptor>
+      )
 
       const resolvedEntries = await Promise.all(
         MANAGED_SETTING_KEYS.map(async key => {
           const schema = schemaByKey[key]
           if (!schema) return null
 
-          const scopeInput = schema.scope === 'space' && currentSpaceId ? { spaceId: currentSpaceId } : {}
-          const resolved = (await window.codeall.invoke('setting:get-resolved', {
+          const scopeInput =
+            schema.scope === 'space' && currentSpaceId ? { spaceId: currentSpaceId } : {}
+          const resolved = (await window.godcode.invoke('setting:get-resolved', {
             key,
             ...scopeInput
           })) as SettingResolvedResult
@@ -287,10 +285,10 @@ export function AgentBindingPanel() {
   }, [loadData])
 
   const handleUpdateAgent = async (agentCode: string, data: UpdateAgentBindingInput) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     try {
-      await window.codeall.invoke('agent-binding:update', { agentCode, data })
+      await window.godcode.invoke('agent-binding:update', { agentCode, data })
       await loadData()
     } catch (error) {
       console.error('Failed to update agent binding:', error)
@@ -298,10 +296,10 @@ export function AgentBindingPanel() {
   }
 
   const handleResetAgent = async (agentCode: string) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     try {
-      await window.codeall.invoke('agent-binding:reset', agentCode)
+      await window.godcode.invoke('agent-binding:reset', agentCode)
       await loadData()
     } catch (error) {
       console.error('Failed to reset agent binding:', error)
@@ -309,10 +307,10 @@ export function AgentBindingPanel() {
   }
 
   const handleUpdateCategory = async (categoryCode: string, data: UpdateCategoryBindingInput) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     try {
-      await window.codeall.invoke('category-binding:update', { categoryCode, data })
+      await window.godcode.invoke('category-binding:update', { categoryCode, data })
       await loadData()
     } catch (error) {
       console.error('Failed to update category binding:', error)
@@ -320,10 +318,10 @@ export function AgentBindingPanel() {
   }
 
   const handleResetCategory = async (categoryCode: string) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     try {
-      await window.codeall.invoke('category-binding:reset', categoryCode)
+      await window.godcode.invoke('category-binding:reset', categoryCode)
       await loadData()
     } catch (error) {
       console.error('Failed to reset category binding:', error)
@@ -335,7 +333,7 @@ export function AgentBindingPanel() {
     value: unknown
     scope: 'global' | 'space'
   }) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     const { key, value, scope } = params
     const payload: { key: ManagedSettingKey; value: unknown; spaceId?: string } = { key, value }
@@ -344,7 +342,7 @@ export function AgentBindingPanel() {
     }
 
     try {
-      await window.codeall.invoke('setting:set', payload)
+      await window.godcode.invoke('setting:set', payload)
       await loadData()
       if (key === 'defaultModelId') {
         setIsDefaultModelDropdownOpen(false)
@@ -360,11 +358,13 @@ export function AgentBindingPanel() {
   const workforceMaxConcurrentSetting = managedSettings.workforceMaxConcurrent
 
   const defaultModelId =
-    typeof defaultModelSetting?.resolved.value === 'string' ? defaultModelSetting.resolved.value : null
+    typeof defaultModelSetting?.resolved.value === 'string'
+      ? defaultModelSetting.resolved.value
+      : null
 
   const defaultModel = models.find(m => m.id === defaultModelId)
   const defaultModelProvider = defaultModel
-    ? providerNameByModelId[defaultModel.id] ?? defaultModel.provider
+    ? (providerNameByModelId[defaultModel.id] ?? defaultModel.provider)
     : null
 
   const maxToolIterationsValue = maxToolIterationsSetting?.inputNumberValue ?? 100
@@ -408,8 +408,14 @@ export function AgentBindingPanel() {
                 onClick={() => setIsDefaultModelDropdownOpen(!isDefaultModelDropdownOpen)}
                 className="flex items-center gap-2 px-4 py-2 bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg text-sm text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors min-w-[200px] justify-between"
               >
-                <span className={defaultModel ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}>
-                  {defaultModel ? `${defaultModel.modelName} (${defaultModelProvider})` : '请选择默认模型'}
+                <span
+                  className={
+                    defaultModel ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'
+                  }
+                >
+                  {defaultModel
+                    ? `${defaultModel.modelName} (${defaultModelProvider})`
+                    : '请选择默认模型'}
                 </span>
                 <ChevronDown
                   className={`w-4 h-4 text-[var(--text-secondary)] transition-transform ${isDefaultModelDropdownOpen ? 'rotate-180' : ''}`}
@@ -542,14 +548,16 @@ export function AgentBindingPanel() {
           {permissionTemplateSetting && (
             <div className="-mt-1 pl-0 text-xs text-[var(--text-muted)]">
               {PERMISSION_TEMPLATE_OPTIONS.find(option => option.value === permissionTemplateValue)
-                ?.description ?? '平衡安全与效率，推荐默认'}
+                ?.description ?? '默认自动执行，兼顾效率与策略约束'}
             </div>
           )}
 
           {workforceMaxConcurrentSetting && (
             <div className="flex items-start justify-between gap-4 pt-3 border-t border-[var(--border-primary)]">
               <div>
-                <h4 className="text-sm font-medium text-[var(--text-primary)]">Workforce 并发上限</h4>
+                <h4 className="text-sm font-medium text-[var(--text-primary)]">
+                  Workforce 并发上限
+                </h4>
                 <p className="text-xs text-[var(--text-muted)] mt-0.5">
                   {workforceMaxConcurrentSetting.schema.description ||
                     '为当前空间设置 workforce 并发上限；清空表示使用全局默认值'}

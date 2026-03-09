@@ -11,6 +11,7 @@ import {
   Save,
   X
 } from 'lucide-react'
+import { GODCODE_KEYCHAIN_SERVICE } from '@shared/brand-compat'
 import { cn } from '../../utils'
 
 // Types
@@ -30,23 +31,10 @@ interface ProviderFormData {
   initialModels: string[]
 }
 
-type ModelApiProtocol = 'chat/completions' | 'responses'
-
 interface ModelFormData {
   modelName: string
   contextSize: number
   thinkingMode: boolean
-  apiProtocol: ModelApiProtocol
-}
-
-function normalizeApiProtocol(value: unknown): ModelApiProtocol {
-  if (value === 'chat/completions' || value === 'responses') {
-    return value
-  }
-
-  throw new Error(
-    `INVALID_API_PROTOCOL: 非法协议值「${String(value ?? '')}」。仅支持 chat/completions 或 responses。`
-  )
 }
 
 export function ProviderModelPanel() {
@@ -73,17 +61,16 @@ export function ProviderModelPanel() {
   const [modelForm, setModelForm] = useState<ModelFormData>({
     modelName: '',
     contextSize: 32,
-    thinkingMode: false,
-    apiProtocol: 'responses'
+    thinkingMode: false
   })
 
   // Load Data
   const loadProviders = useCallback(async () => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     try {
       const [providerData, modelData] = await Promise.all([
-        window.codeall.invoke('keychain:list-with-models') as Promise<ProviderWithModels[]>,
-        window.codeall.invoke('model:list') as Promise<any[]>
+        window.godcode.invoke('keychain:list-with-models') as Promise<ProviderWithModels[]>,
+        window.godcode.invoke('model:list') as Promise<any[]>
       ])
 
       setProviders(providerData)
@@ -115,7 +102,7 @@ export function ProviderModelPanel() {
   const handleEditProvider = async (provider: ProviderWithModels) => {
     // When editing, we need the full API key, not masked
     try {
-      const fullKey = await window.codeall.invoke('keychain:get-with-models', provider.id)
+      const fullKey = await window.godcode.invoke('keychain:get-with-models', provider.id)
 
       setEditingProviderId(provider.id)
       setProviderForm({
@@ -142,10 +129,10 @@ export function ProviderModelPanel() {
   }
 
   const handleSaveProvider = async () => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     setLoading(true)
     try {
-      const result = (await window.codeall.invoke('keychain:set-password', {
+      const result = (await window.godcode.invoke('keychain:set-password', {
         id: editingProviderId || undefined,
         label: providerForm.label,
         baseURL: providerForm.baseURL,
@@ -156,12 +143,12 @@ export function ProviderModelPanel() {
       // If adding a new provider and initial models are specified, create the models
       if (!editingProviderId && providerForm.initialModels.length > 0 && result?.id) {
         for (const modelName of providerForm.initialModels) {
-          await window.codeall.invoke('model:create', {
+          await window.godcode.invoke('model:create', {
             provider: 'openai-compatible',
             modelName: modelName.trim(),
             apiKeyId: result.id,
             baseURL: providerForm.baseURL,
-            config: { apiProtocol: 'responses' }
+            config: {}
           })
         }
       }
@@ -179,7 +166,7 @@ export function ProviderModelPanel() {
   }
 
   const handleDeleteProvider = async (provider: ProviderWithModels) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     const count = provider.models.length
     const confirmed = await confirm(
       `确定删除服务商 "${provider.label || provider.provider}"？\n` +
@@ -189,8 +176,8 @@ export function ProviderModelPanel() {
     if (confirmed) {
       setLoading(true)
       try {
-        await window.codeall.invoke('keychain:delete-password', {
-          service: 'codeall-app',
+        await window.godcode.invoke('keychain:delete-password', {
+          service: GODCODE_KEYCHAIN_SERVICE,
           account: 'ignored',
           id: provider.id
         })
@@ -211,8 +198,7 @@ export function ProviderModelPanel() {
     setModelForm({
       modelName: '',
       contextSize: 32,
-      thinkingMode: false,
-      apiProtocol: 'responses'
+      thinkingMode: false
     })
     // Ensure provider is expanded
     setExpandedProviders(prev => ({ ...prev, [providerId]: true }))
@@ -224,31 +210,25 @@ export function ProviderModelPanel() {
     setEditingModelId(model.id)
     setAddingModelToProviderId(null)
 
-    try {
-      setModelForm({
-        modelName: model.modelName,
-        contextSize: Number(details?.contextSize ?? 32),
-        thinkingMode: Boolean(details?.config?.thinkingMode ?? false),
-        apiProtocol: normalizeApiProtocol(details?.config?.apiProtocol)
-      })
-    } catch (error) {
-      alert(error instanceof Error ? error.message : String(error))
-      return
-    }
+    setModelForm({
+      modelName: model.modelName,
+      contextSize: Number(details?.contextSize ?? 32),
+      thinkingMode: Boolean(details?.config?.thinkingMode ?? false)
+    })
   }
 
   const handleSaveModel = async (providerId: string) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     setLoading(true)
     try {
       if (editingModelId) {
         const existing = modelsById[editingModelId]
         const nextConfig = {
           ...(existing?.config && typeof existing.config === 'object' ? existing.config : {}),
-          thinkingMode: modelForm.thinkingMode,
-          apiProtocol: modelForm.apiProtocol
+          thinkingMode: modelForm.thinkingMode
         }
-        await window.codeall.invoke('model:update', {
+        delete (nextConfig as { apiProtocol?: unknown }).apiProtocol
+        await window.godcode.invoke('model:update', {
           id: editingModelId,
           data: {
             modelName: modelForm.modelName,
@@ -261,15 +241,14 @@ export function ProviderModelPanel() {
         const provider = providers.find(p => p.id === providerId)
         if (!provider) throw new Error('Provider not found')
 
-        await window.codeall.invoke('model:create', {
+        await window.godcode.invoke('model:create', {
           provider: 'openai-compatible',
           modelName: modelForm.modelName,
           apiKeyId: provider.id,
           baseURL: provider.baseURL,
           contextSize: modelForm.contextSize,
           config: {
-            thinkingMode: modelForm.thinkingMode,
-            apiProtocol: modelForm.apiProtocol
+            thinkingMode: modelForm.thinkingMode
           }
         })
       }
@@ -286,10 +265,10 @@ export function ProviderModelPanel() {
 
   const handleDeleteModel = async (modelId: string, modelName: string) => {
     if (!confirm(`确定删除模型 "${modelName}"？`)) return
-    if (!window.codeall) return
+    if (!window.godcode) return
     setLoading(true)
     try {
-      await window.codeall.invoke('model:delete', modelId)
+      await window.godcode.invoke('model:delete', modelId)
       await loadProviders()
     } catch (error) {
       console.error('Failed to delete model:', error)
@@ -304,7 +283,10 @@ export function ProviderModelPanel() {
     <div className="bg-[var(--bg-secondary)] border border-indigo-500/20 rounded-xl p-4 space-y-4 animate-in fade-in slide-in-from-top-2 mb-4 shadow-[0_10px_30px_rgba(0,0,0,0.05)] dark:shadow-none">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <label htmlFor="provider-label" className="text-xs text-[var(--text-secondary)] font-medium ml-1">
+          <label
+            htmlFor="provider-label"
+            className="text-xs text-[var(--text-secondary)] font-medium ml-1"
+          >
             Label (Optional)
           </label>
           <input
@@ -317,7 +299,10 @@ export function ProviderModelPanel() {
           />
         </div>
         <div className="space-y-1.5">
-          <label htmlFor="provider-base-url" className="text-xs text-indigo-600 dark:text-indigo-400 font-medium ml-1">
+          <label
+            htmlFor="provider-base-url"
+            className="text-xs text-indigo-600 dark:text-indigo-400 font-medium ml-1"
+          >
             Base URL *
           </label>
           <div className="relative">
@@ -334,7 +319,10 @@ export function ProviderModelPanel() {
         </div>
       </div>
       <div className="space-y-1.5">
-        <label htmlFor="provider-api-key" className="text-xs text-indigo-600 dark:text-indigo-400 font-medium ml-1">
+        <label
+          htmlFor="provider-api-key"
+          className="text-xs text-indigo-600 dark:text-indigo-400 font-medium ml-1"
+        >
           API Key *
         </label>
         <div className="relative">
@@ -366,7 +354,9 @@ export function ProviderModelPanel() {
                   className="flex items-center gap-2 bg-[var(--bg-primary)] rounded-lg px-3 py-1.5 border border-[var(--border-primary)]"
                 >
                   <Bot className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                  <span className="flex-1 text-sm text-[var(--text-primary)] font-mono">{model}</span>
+                  <span className="flex-1 text-sm text-[var(--text-primary)] font-mono">
+                    {model}
+                  </span>
                   <button
                     type="button"
                     onClick={() => {
@@ -410,7 +400,10 @@ export function ProviderModelPanel() {
             <button
               type="button"
               onClick={() => {
-                if (newModelInput.trim() && !providerForm.initialModels.includes(newModelInput.trim())) {
+                if (
+                  newModelInput.trim() &&
+                  !providerForm.initialModels.includes(newModelInput.trim())
+                ) {
                   setProviderForm({
                     ...providerForm,
                     initialModels: [...providerForm.initialModels, newModelInput.trim()]
@@ -425,7 +418,9 @@ export function ProviderModelPanel() {
               添加模型
             </button>
           </div>
-          <p className="text-[10px] text-[var(--text-muted)] ml-1">输入模型名称后点击&quot;添加模型&quot;按钮或按回车添加，可添加多个</p>
+          <p className="text-[10px] text-[var(--text-muted)] ml-1">
+            输入模型名称后点击&quot;添加模型&quot;按钮或按回车添加，可添加多个
+          </p>
         </div>
       )}
       <div className="flex justify-end gap-2 pt-2">
@@ -497,24 +492,6 @@ export function ProviderModelPanel() {
             <p className="mt-1 text-[10px] text-[var(--text-muted)]">范围 1-2000</p>
           </div>
 
-          <div className="col-span-12 md:col-span-2">
-            <label className="block text-[10px] text-[var(--text-muted)] mb-1">OpenAI 协议</label>
-            <select
-              value={modelForm.apiProtocol}
-              onChange={e =>
-                setModelForm({
-                  ...modelForm,
-                  apiProtocol: normalizeApiProtocol(e.target.value)
-                })
-              }
-              className="w-full bg-[var(--bg-secondary)] border border-[var(--border-primary)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)] focus:border-indigo-500/50 focus:outline-none"
-            >
-              <option value="chat/completions">chat/completions</option>
-              <option value="responses">responses</option>
-            </select>
-            <p className="mt-1 text-[10px] text-[var(--text-muted)]">用于 OpenAI 兼容接口</p>
-          </div>
-
           <div className="col-span-12 md:col-span-3">
             <label className="block text-[10px] text-[var(--text-muted)] mb-1">思考模式</label>
             <button
@@ -530,7 +507,9 @@ export function ProviderModelPanel() {
             >
               {modelForm.thinkingMode ? '启用' : '禁用'}
             </button>
-            <p className="mt-1 text-[10px] text-[var(--text-muted)]">Claude 可启用 extended thinking</p>
+            <p className="mt-1 text-[10px] text-[var(--text-muted)]">
+              Claude 可启用 extended thinking；OpenAI 协议会自动适配
+            </p>
           </div>
         </div>
 
@@ -576,7 +555,6 @@ export function ProviderModelPanel() {
       </div>
 
       {isAddingProvider && renderProviderForm()}
-
 
       <div className="space-y-3">
         {providers.length === 0 && !isAddingProvider && (

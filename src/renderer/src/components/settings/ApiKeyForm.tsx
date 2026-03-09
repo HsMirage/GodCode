@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Key, Save, Trash, Plus, Eye, EyeOff, Globe } from 'lucide-react'
+import { GODCODE_KEYCHAIN_SERVICE } from '@shared/brand-compat'
 
 interface ApiKeyEntry {
   id: string
@@ -22,12 +23,12 @@ export function ApiKeyForm() {
 
   const loadKeys = useCallback(async () => {
     // Skip if not running in Electron environment
-    if (!window.codeall) {
-      console.warn('[ApiKeyForm] window.codeall not available')
+    if (!window.godcode) {
+      console.warn('[ApiKeyForm] window.godcode not available')
       return
     }
     try {
-      const loadedKeys = (await window.codeall.invoke('keychain:list')) as ApiKeyEntry[]
+      const loadedKeys = (await window.godcode.invoke('keychain:list')) as ApiKeyEntry[]
       setKeys(loadedKeys)
     } catch (error) {
       console.error('Failed to load API keys:', error)
@@ -47,18 +48,16 @@ export function ApiKeyForm() {
   }
 
   const startEdit = async (entry: ApiKeyEntry) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     try {
-      const detail = (await window.codeall.invoke('keychain:get-with-models', entry.id)) as
-        | {
-            id: string
-            provider: string
-            label: string | null
-            baseURL: string
-            apiKey: string
-          }
-        | null
+      const detail = (await window.godcode.invoke('keychain:get-with-models', entry.id)) as {
+        id: string
+        provider: string
+        label: string | null
+        baseURL: string
+        apiKey: string
+      } | null
 
       setEditingId(entry.id)
       setFormLabel(entry.label || entry.provider || '')
@@ -71,7 +70,7 @@ export function ApiKeyForm() {
   }
 
   const handleSave = async () => {
-    if (!formBaseURL || !formApiKey || !window.codeall) {
+    if (!formBaseURL || !formApiKey || !window.godcode) {
       return
     }
 
@@ -79,7 +78,7 @@ export function ApiKeyForm() {
     setLoading(prev => ({ ...prev, [tempId]: true }))
 
     try {
-      await window.codeall.invoke('keychain:set-password', {
+      await window.godcode.invoke('keychain:set-password', {
         id: editingId,
         label: formLabel,
         baseURL: formBaseURL,
@@ -98,12 +97,12 @@ export function ApiKeyForm() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this API Key?')) return
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     setLoading(prev => ({ ...prev, [id]: true }))
     try {
-      await window.codeall.invoke('keychain:delete-password', {
-        service: 'codeall-app',
+      await window.godcode.invoke('keychain:delete-password', {
+        service: GODCODE_KEYCHAIN_SERVICE,
         account: 'ignored',
         id
       })

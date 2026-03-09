@@ -98,4 +98,49 @@ describe('GeminiAdapter', () => {
     expect((error as Error).message).toContain('Network error')
     expect(fetchMock).toHaveBeenCalledTimes(4)
   })
+
+  it('keeps long-running requests alive until the five-minute default timeout', async () => {
+    let requestSignal: AbortSignal | undefined
+
+    fetchMock.mockImplementation((_, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined
+
+      return new Promise((_resolve, reject) => {
+        requestSignal?.addEventListener('abort', () => reject(new Error('AbortError')), {
+          once: true
+        })
+      })
+    })
+
+    const pending = adapter
+      .sendMessage(
+        [
+          {
+            role: 'user',
+            content: 'Hello',
+            id: '1',
+            sessionId: 's1',
+            createdAt: new Date(),
+            metadata: {}
+          }
+        ],
+        { model: 'gemini-1.5-flash', maxRetries: 0 }
+      )
+      .catch(error => error)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(requestSignal?.aborted).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(239_999)
+    expect(requestSignal?.aborted).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1)
+
+    const error = await pending
+
+    expect(requestSignal?.aborted).toBe(true)
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain('AbortError')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

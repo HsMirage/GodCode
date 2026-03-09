@@ -229,7 +229,7 @@ export function MessageInput({
         return
       }
 
-      if (!window.codeall) {
+      if (!window.godcode) {
         if (!cancelled) {
           closeCommandPanel()
         }
@@ -237,7 +237,7 @@ export function MessageInput({
       }
 
       try {
-        const items = await window.codeall.invoke('skill:command-items', { query: slashQuery })
+        const items = await window.godcode.invoke('skill:command-items', { query: slashQuery })
         if (!cancelled) {
           setCommandItems(Array.isArray(items) ? (items as SlashCommandItem[]) : [])
           setCommandPanelOpen(true)

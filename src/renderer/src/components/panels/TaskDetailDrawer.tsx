@@ -18,7 +18,6 @@ import {
   type TaskDetailTab
 } from './task-panel-detail'
 import {
-  buildFallbackAttemptText,
   diagnosticBadgeConfig,
   safeStringify,
   type TaskBindingSnapshot
@@ -51,9 +50,6 @@ export function TaskDetailDrawer({
   }
 
   const taskDetailTraceId = resolveTaskTraceId(taskDetailState.task, taskDetailState.runLogs)
-  const fallbackAttemptText = buildFallbackAttemptText(
-    taskDetailBindingSnapshot?.fallbackAttemptSummary
-  )
   const taskBrief =
     taskDetailState.task.metadata?.taskBrief && typeof taskDetailState.task.metadata.taskBrief === 'object'
       ? (taskDetailState.task.metadata.taskBrief as Record<string, unknown>)
@@ -158,17 +154,12 @@ export function TaskDetailDrawer({
               </div>
             </div>
 
-            {(taskDetailBindingSnapshot?.modelSelectionSummary || fallbackAttemptText) && (
+            {taskDetailBindingSnapshot?.modelSelectionSummary && (
               <div className="rounded-lg border border-slate-700/60 bg-slate-900/70 px-3 py-2 text-xs text-slate-200">
                 <p className="font-medium text-slate-100">模型选择解释</p>
-                {taskDetailBindingSnapshot?.modelSelectionSummary && (
-                  <p className="mt-1 text-slate-300">
-                    {taskDetailBindingSnapshot.modelSelectionSummary}
-                  </p>
-                )}
-                {fallbackAttemptText && (
-                  <p className="mt-1 text-amber-300">回退摘要: {fallbackAttemptText}</p>
-                )}
+                <p className="mt-1 text-slate-300">
+                  {taskDetailBindingSnapshot.modelSelectionSummary}
+                </p>
               </div>
             )}
 

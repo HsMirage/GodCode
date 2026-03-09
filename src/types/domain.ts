@@ -1,5 +1,5 @@
 /**
- * Core domain models for CodeAll.
+ * Core domain models for GodCode.
  */
 
 /**
@@ -158,7 +158,7 @@ export interface Model {
     baseDelayMs?: number
     maxToolIterations?: number
     defaultMaxTokens?: number
-    /** Explicit OpenAI-compatible protocol selection. */
+    /** Legacy OpenAI-compatible protocol override. Absent means auto-detect. */
     apiProtocol?: 'chat/completions' | 'responses'
     /** Provider-specific / capability toggle (e.g., Claude extended thinking). */
     thinkingMode?: boolean

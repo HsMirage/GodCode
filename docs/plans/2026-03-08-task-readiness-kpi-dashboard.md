@@ -29,7 +29,7 @@
 ## 版本历史
 
 - 本轮使用浏览器本地存储保存每个版本最近一次 KPI 快照。
-- 存储键：`codeall.task-readiness.dashboard.history`
+- 存储键：`godcode.task-readiness.dashboard.history`
 - 每个版本保留一个最新快照；历史默认最多保留 12 个版本。
 
 ## 分层退化定位规则

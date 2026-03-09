@@ -4,16 +4,12 @@ import { OpenAICompatAdapter } from './openai-compat.adapter'
 import { AnthropicAdapter } from './anthropic.adapter'
 import { GeminiAdapter } from './gemini.adapter'
 import { mockLLMAdapter } from './mock.adapter'
+import { isGodCodeE2ETestEnvironment } from '@/main/services/brand-runtime-compat'
 
 /**
  * Known provider types
  */
-export type ProviderType =
-  | 'openai'
-  | 'anthropic'
-  | 'gemini'
-  | 'openai-compatible'
-  | 'azure-openai'
+export type ProviderType = 'openai' | 'anthropic' | 'gemini' | 'openai-compatible' | 'azure-openai'
 
 /**
  * Configuration for LLM adapter creation
@@ -30,12 +26,9 @@ export interface LLMAdapterConfig {
  * @param config - Configuration including API key and optional base URL
  * @returns An LLM adapter instance
  */
-export const createLLMAdapter = (
-  provider: string,
-  config: LLMAdapterConfig
-): LLMAdapter => {
+export const createLLMAdapter = (provider: string, config: LLMAdapterConfig): LLMAdapter => {
   // Use mock adapter in E2E tests
-  if (process.env.CODEALL_E2E_TEST === '1') {
+  if (isGodCodeE2ETestEnvironment()) {
     return mockLLMAdapter
   }
 

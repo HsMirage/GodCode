@@ -94,14 +94,14 @@ export function ChatPage() {
   }, [navigationTarget, selectAgent, clearNavigate])
 
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     if (!currentSpaceId) {
       void fetchSpaces()
     }
   }, [currentSpaceId, fetchSpaces])
 
   useEffect(() => {
-    if (!window.codeall || !currentSessionId) return
+    if (!window.godcode || !currentSessionId) return
 
     const removeListener = workflowApi.onTaskStatusChanged(() => {
       if (viewMode === 'chat') setViewMode('workflow')

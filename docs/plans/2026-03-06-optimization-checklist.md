@@ -1,4 +1,4 @@
-# CodeAll 优化改造细化执行清单（2026-03-06）
+# GodCode 优化改造细化执行清单（2026-03-06）
 
 > 基于 `docs/plans/2026-03-06-optimization-execution-plan.md` 进一步拆分为可逐项勾选的执行清单。
 >
@@ -333,7 +333,7 @@
 ### 2.3 WP-07 IPC Gateway 与前端大组件治理
 
 ### A. IPC Gateway 收敛
-- [x] 盘点 renderer 中所有裸 `window.codeall.invoke/on`
+- [x] 盘点 renderer 中所有裸 `window.godcode.invoke/on`
 - [x] 按域分组：message / session / browser / workflow / settings / artifact
 - [x] 设计 `src/renderer/src/api.ts` 子域 API
 - [x] 抽离 messageApi
@@ -563,4 +563,4 @@
 
 ## 8. 结论
 
-- [ ] 当 P0 与第一批 P1 清单完成后，CodeAll 将从“已具备功能的复杂系统”升级为“主链稳定、恢复清晰、可解释、可维护的产品级系统”。
+- [ ] 当 P0 与第一批 P1 清单完成后，GodCode 将从“已具备功能的复杂系统”升级为“主链稳定、恢复清晰、可解释、可维护的产品级系统”。

@@ -1,4 +1,9 @@
-import { EVENT_CHANNELS, INVOKE_CHANNELS, type EventChannel, type InvokeChannel } from '@shared/ipc-channels'
+import {
+  EVENT_CHANNELS,
+  INVOKE_CHANNELS,
+  type EventChannel,
+  type InvokeChannel
+} from '@shared/ipc-channels'
 import type {
   AgentBindingData,
   AgentRunRecord,
@@ -61,6 +66,7 @@ import type {
   ToolApprovalResolveInput,
   ToolApprovalResolveResult
 } from '@shared/tool-approval-contract'
+import { GODCODE_RUNTIME_NAMESPACE, LEGACY_CODEALL_RUNTIME_NAMESPACE } from '@shared/brand-compat'
 import type { Artifact, Session, Space, Task } from './types/domain'
 
 export type {
@@ -75,38 +81,55 @@ export type {
   FileWriteResult
 } from '@shared/ipc-contract'
 
-const fallbackCodeallApi = {
+const fallbackGodCodeApi = {
   invoke: async (channel: string, ..._args: unknown[]) => {
-    console.error(`[API] window.codeall not available. Cannot invoke: ${channel}`)
+    console.error(
+      `[API] window.${GODCODE_RUNTIME_NAMESPACE}/window.${LEGACY_CODEALL_RUNTIME_NAMESPACE} not available. Cannot invoke: ${channel}`
+    )
     return { success: false, error: 'Preload API not available' }
   },
   on: (channel: string, _callback: (...args: unknown[]) => void) => {
-    console.error(`[API] window.codeall not available. Cannot subscribe: ${channel}`)
+    console.error(
+      `[API] window.${GODCODE_RUNTIME_NAMESPACE}/window.${LEGACY_CODEALL_RUNTIME_NAMESPACE} not available. Cannot subscribe: ${channel}`
+    )
     return () => {}
   }
 }
 
-function getCodeallApi() {
-  if (typeof window !== 'undefined' && window.codeall) {
-    return window.codeall
+function getGodCodeApi() {
+  if (typeof window !== 'undefined') {
+    if (window.godcode) {
+      return window.godcode
+    }
+
+    if (window.codeall) {
+      return window.codeall
+    }
   }
 
-  return fallbackCodeallApi
+  return fallbackGodCodeApi
 }
 
 const invokeUnknown = (channel: InvokeChannel, ...args: unknown[]) =>
-  (
-    getCodeallApi().invoke as (channel: InvokeChannel, ...args: unknown[]) => Promise<unknown>
-  )(channel, ...args)
+  (getGodCodeApi().invoke as (channel: InvokeChannel, ...args: unknown[]) => Promise<unknown>)(
+    channel,
+    ...args
+  )
 
 const invoke = <C extends IpcInvokeChannel>(
   channel: C,
   ...args: IpcInvokeArgs<C>
 ): Promise<IpcInvokeResponse<C>> => invokeUnknown(channel, ...args) as Promise<IpcInvokeResponse<C>>
 
-const onEvent = <C extends IpcEventChannel>(channel: C, callback: (...args: IpcEventArgs<C>) => void) =>
+const onEvent = <C extends IpcEventChannel>(
+  channel: C,
+  callback: (...args: IpcEventArgs<C>) => void
+) =>
   (
-    getCodeallApi().on as (channel: EventChannel, callback: (...args: unknown[]) => void) => () => void
+    getGodCodeApi().on as (
+      channel: EventChannel,
+      callback: (...args: unknown[]) => void
+    ) => () => void
   )(channel, callback as (...args: unknown[]) => void)
 
 /**
@@ -145,7 +168,8 @@ export const messageApi = {
     invoke(INVOKE_CHANNELS.MESSAGE_LIST, sessionId),
   send: (data: MessageSendInput): Promise<PersistedMessageRecord> =>
     invoke(INVOKE_CHANNELS.MESSAGE_SEND, data),
-  abort: (data: MessageAbortInput): Promise<MessageAbortResult> => invoke(INVOKE_CHANNELS.MESSAGE_ABORT, data),
+  abort: (data: MessageAbortInput): Promise<MessageAbortResult> =>
+    invoke(INVOKE_CHANNELS.MESSAGE_ABORT, data),
   onStreamChunk: (callback: (data: MessageStreamChunkPayload) => void) =>
     onEvent(EVENT_CHANNELS.MESSAGE_STREAM_CHUNK, callback),
   onStreamError: (callback: (data: MessageStreamErrorPayload) => void) =>
@@ -171,7 +195,8 @@ export const sessionApi = {
     updates: Partial<Pick<Session, 'spaceId' | 'title' | 'status'>>
   ): Promise<Session> => invoke(INVOKE_CHANNELS.SESSION_UPDATE, { id: sessionId, ...updates }),
   delete: (sessionId: string): Promise<void> => invoke(INVOKE_CHANNELS.SESSION_DELETE, sessionId),
-  recoveryList: (): Promise<SessionStateRecord[]> => invoke(INVOKE_CHANNELS.SESSION_RECOVERABLE_LIST),
+  recoveryList: (): Promise<SessionStateRecord[]> =>
+    invoke(INVOKE_CHANNELS.SESSION_RECOVERABLE_LIST),
   recoveryExecute: (sessionId: string): Promise<{ success: boolean; error?: string }> =>
     invoke(INVOKE_CHANNELS.SESSION_RECOVERY_EXECUTE, sessionId),
   recoveryResumePrompt: (sessionId: string): Promise<string> =>
@@ -198,21 +223,29 @@ export const workflowApi = {
     invoke(INVOKE_CHANNELS.AGENT_RUN_LIST, taskId),
   agentRunGetLogs: (runId: string): Promise<RunLogEntry[]> =>
     invoke(INVOKE_CHANNELS.AGENT_RUN_GET_LOGS, runId),
-  backgroundTaskList: (input?: BackgroundTaskListInput): Promise<ApiResult<BackgroundTaskRecord[]>> =>
+  backgroundTaskList: (
+    input?: BackgroundTaskListInput
+  ): Promise<ApiResult<BackgroundTaskRecord[]>> =>
     input === undefined
       ? invoke(INVOKE_CHANNELS.BACKGROUND_TASK_LIST)
       : invoke(INVOKE_CHANNELS.BACKGROUND_TASK_LIST, input),
   backgroundTaskStats: (): Promise<ApiResult<BackgroundTaskStats>> =>
     invoke(INVOKE_CHANNELS.BACKGROUND_TASK_STATS),
-  backgroundTaskGetOutput: (input: BackgroundTaskGetOutputInput): Promise<ApiResult<BackgroundTaskOutputResult>> =>
+  backgroundTaskGetOutput: (
+    input: BackgroundTaskGetOutputInput
+  ): Promise<ApiResult<BackgroundTaskOutputResult>> =>
     invoke(INVOKE_CHANNELS.BACKGROUND_TASK_GET_OUTPUT, input),
-  backgroundTaskCancel: (input: BackgroundTaskCancelInput): Promise<ApiResult<{ taskId: string; cancelled: boolean }>> =>
+  backgroundTaskCancel: (
+    input: BackgroundTaskCancelInput
+  ): Promise<ApiResult<{ taskId: string; cancelled: boolean }>> =>
     invoke(INVOKE_CHANNELS.BACKGROUND_TASK_CANCEL, input),
   continuationGetStatus: (sessionId: string): Promise<TaskContinuationStatus> =>
     invoke(INVOKE_CHANNELS.TASK_CONTINUATION_GET_STATUS, sessionId),
   continuationGetConfig: (): Promise<ApiResult<TaskContinuationConfig>> =>
     invoke(INVOKE_CHANNELS.TASK_CONTINUATION_GET_CONFIG),
-  continuationSetConfig: (config: Partial<TaskContinuationConfig>): Promise<ApiResult<TaskContinuationConfig>> =>
+  continuationSetConfig: (
+    config: Partial<TaskContinuationConfig>
+  ): Promise<ApiResult<TaskContinuationConfig>> =>
     invoke(INVOKE_CHANNELS.TASK_CONTINUATION_SET_CONFIG, config),
   onTaskStatusChanged: (callback: (data: TaskStatusChangedPayload) => void) =>
     onEvent(EVENT_CHANNELS.TASK_STATUS_CHANGED, callback),
@@ -221,10 +254,19 @@ export const workflowApi = {
   onBackgroundTaskStarted: (callback: (data: { task: BackgroundTaskRecord }) => void) =>
     onEvent(EVENT_CHANNELS.BACKGROUND_TASK_STARTED, callback),
   onBackgroundTaskOutput: (
-    callback: (data: { taskId: string; stream: 'stdout' | 'stderr'; data: string; timestamp: string }) => void
+    callback: (data: {
+      taskId: string
+      stream: 'stdout' | 'stderr'
+      data: string
+      timestamp: string
+    }) => void
   ) => onEvent(EVENT_CHANNELS.BACKGROUND_TASK_OUTPUT, callback),
   onBackgroundTaskCompleted: (
-    callback: (data: { task: BackgroundTaskRecord; exitCode: number | null; signal: string | null }) => void
+    callback: (data: {
+      task: BackgroundTaskRecord
+      exitCode: number | null
+      signal: string | null
+    }) => void
   ) => onEvent(EVENT_CHANNELS.BACKGROUND_TASK_COMPLETED, callback),
   onBackgroundTaskCancelled: (callback: (data: { task: BackgroundTaskRecord }) => void) =>
     onEvent(EVENT_CHANNELS.BACKGROUND_TASK_CANCELLED, callback)
@@ -247,28 +289,37 @@ export const settingsApi = {
   keychainDeletePassword: (data: KeychainDeletePasswordInput): Promise<boolean> =>
     invoke(INVOKE_CHANNELS.KEYCHAIN_DELETE_PASSWORD, data),
   agentBindingList: (): Promise<AgentBindingData[]> => invoke(INVOKE_CHANNELS.AGENT_BINDING_LIST),
-  agentBindingUpdate: (data: { agentCode: string; data: UpdateAgentBindingInput }): Promise<AgentBindingData> =>
-    invoke(INVOKE_CHANNELS.AGENT_BINDING_UPDATE, data),
+  agentBindingUpdate: (data: {
+    agentCode: string
+    data: UpdateAgentBindingInput
+  }): Promise<AgentBindingData> => invoke(INVOKE_CHANNELS.AGENT_BINDING_UPDATE, data),
   agentBindingReset: (agentCode: string): Promise<AgentBindingData> =>
     invoke(INVOKE_CHANNELS.AGENT_BINDING_RESET, agentCode),
   categoryBindingList: (): Promise<CategoryBindingData[]> =>
     invoke(INVOKE_CHANNELS.CATEGORY_BINDING_LIST),
-  categoryBindingUpdate: (
-    data: { categoryCode: string; data: UpdateCategoryBindingInput }
-  ): Promise<CategoryBindingData> => invoke(INVOKE_CHANNELS.CATEGORY_BINDING_UPDATE, data),
+  categoryBindingUpdate: (data: {
+    categoryCode: string
+    data: UpdateCategoryBindingInput
+  }): Promise<CategoryBindingData> => invoke(INVOKE_CHANNELS.CATEGORY_BINDING_UPDATE, data),
   categoryBindingReset: (categoryCode: string): Promise<CategoryBindingData> =>
     invoke(INVOKE_CHANNELS.CATEGORY_BINDING_RESET, categoryCode),
   settingGet: (key: string): Promise<string | null> => invoke(INVOKE_CHANNELS.SETTING_GET, key),
   settingGetResolved: (key: string): Promise<SettingResolvedResult> =>
     invoke(INVOKE_CHANNELS.SETTING_GET_RESOLVED, key),
-  settingSet: (input: { key: string; value: unknown; spaceId?: string }): Promise<{ key: string; value: string | null }> =>
-    invoke(INVOKE_CHANNELS.SETTING_SET, input),
+  settingSet: (input: {
+    key: string
+    value: unknown
+    spaceId?: string
+  }): Promise<{ key: string; value: string | null }> => invoke(INVOKE_CHANNELS.SETTING_SET, input),
   settingSchemaList: (): Promise<SettingSchemaDescriptor[]> =>
     invoke(INVOKE_CHANNELS.SETTING_SCHEMA_LIST),
   hookGovernanceGet: () => invoke(INVOKE_CHANNELS.HOOK_GOVERNANCE_GET),
   hookGovernanceSet: (input: HookGovernanceUpdateInput) =>
     invoke(INVOKE_CHANNELS.HOOK_GOVERNANCE_SET, input),
-  auditLogQuery: (filters?: AuditLogFilter, options?: AuditLogQueryOptions): Promise<AuditLogEntry[]> =>
+  auditLogQuery: (
+    filters?: AuditLogFilter,
+    options?: AuditLogQueryOptions
+  ): Promise<AuditLogEntry[]> =>
     filters === undefined && options === undefined
       ? invoke(INVOKE_CHANNELS.AUDIT_LOG_QUERY)
       : invoke(INVOKE_CHANNELS.AUDIT_LOG_QUERY, filters, options),
@@ -276,8 +327,10 @@ export const settingsApi = {
     filters === undefined
       ? invoke(INVOKE_CHANNELS.AUDIT_LOG_COUNT)
       : invoke(INVOKE_CHANNELS.AUDIT_LOG_COUNT, filters),
-  auditLogExport: (format: AuditLogExportFormat, filters?: AuditLogFilter): Promise<AuditLogExportResult> =>
-    invoke(INVOKE_CHANNELS.AUDIT_LOG_EXPORT, format, filters),
+  auditLogExport: (
+    format: AuditLogExportFormat,
+    filters?: AuditLogFilter
+  ): Promise<AuditLogExportResult> => invoke(INVOKE_CHANNELS.AUDIT_LOG_EXPORT, format, filters),
   backupList: (): Promise<BackupMetadata[]> => invoke(INVOKE_CHANNELS.BACKUP_LIST),
   backupCreate: (name?: string): Promise<string> =>
     name === undefined
@@ -291,7 +344,8 @@ export const settingsApi = {
 
 export const artifactApi = {
   get: (artifactId: string): Promise<Artifact> => invoke(INVOKE_CHANNELS.ARTIFACT_GET, artifactId),
-  list: (sessionId: string): Promise<Artifact[]> => invoke(INVOKE_CHANNELS.ARTIFACT_LIST, sessionId),
+  list: (sessionId: string): Promise<Artifact[]> =>
+    invoke(INVOKE_CHANNELS.ARTIFACT_LIST, sessionId),
   download: (artifactId: string, workDir?: string): Promise<ApiResult<{ filePath: string }>> =>
     workDir === undefined
       ? invoke(INVOKE_CHANNELS.ARTIFACT_DOWNLOAD, artifactId)
@@ -304,17 +358,19 @@ export const artifactApi = {
     invoke(INVOKE_CHANNELS.ARTIFACT_ACCEPT, artifactId),
   revert: (data: { artifactId: string; workDir: string }): Promise<ApiResult<null>> =>
     invoke(INVOKE_CHANNELS.ARTIFACT_REVERT, data),
-  onCreated: (callback: () => void) =>
-    onEvent(EVENT_CHANNELS.ARTIFACT_CREATED, callback)
+  onCreated: (callback: () => void) => onEvent(EVENT_CHANNELS.ARTIFACT_CREATED, callback)
 }
 
 export const spaceApi = {
   list: (): Promise<Space[]> => safeInvoke(INVOKE_CHANNELS.SPACE_LIST),
-  get: (spaceId: string): Promise<ApiResult<Space | null>> => invoke(INVOKE_CHANNELS.SPACE_GET, spaceId),
+  get: (spaceId: string): Promise<ApiResult<Space | null>> =>
+    invoke(INVOKE_CHANNELS.SPACE_GET, spaceId),
   create: (data: { name: string; workDir: string }): Promise<ApiResult<Space>> =>
     invoke(INVOKE_CHANNELS.SPACE_CREATE, data),
-  delete: (spaceId: string): Promise<ApiResult<null>> => invoke(INVOKE_CHANNELS.SPACE_DELETE, spaceId),
-  selectFolder: (): Promise<ApiResult<string | null>> => invoke(INVOKE_CHANNELS.DIALOG_SELECT_FOLDER)
+  delete: (spaceId: string): Promise<ApiResult<null>> =>
+    invoke(INVOKE_CHANNELS.SPACE_DELETE, spaceId),
+  selectFolder: (): Promise<ApiResult<string | null>> =>
+    invoke(INVOKE_CHANNELS.DIALOG_SELECT_FOLDER)
 }
 
 export const skillApi = {
@@ -328,8 +384,7 @@ export const skillApi = {
 export const api = {
   createBrowserView: (viewId: string, url?: string) =>
     invoke(INVOKE_CHANNELS.BROWSER_CREATE, { viewId, url }),
-  destroyBrowserView: (viewId: string) =>
-    invoke(INVOKE_CHANNELS.BROWSER_DESTROY, { viewId }),
+  destroyBrowserView: (viewId: string) => invoke(INVOKE_CHANNELS.BROWSER_DESTROY, { viewId }),
   showBrowserView: (viewId: string, bounds: BrowserViewBounds) =>
     invoke(INVOKE_CHANNELS.BROWSER_SHOW, { viewId, bounds }),
   hideBrowserView: (viewId: string) => invoke(INVOKE_CHANNELS.BROWSER_HIDE, { viewId }),
@@ -338,12 +393,10 @@ export const api = {
   navigateBrowserView: (viewId: string, url: string) =>
     invoke(INVOKE_CHANNELS.BROWSER_NAVIGATE, { viewId, url }),
   browserGoBack: (viewId: string) => invoke(INVOKE_CHANNELS.BROWSER_GO_BACK, { viewId }),
-  browserGoForward: (viewId: string) =>
-    invoke(INVOKE_CHANNELS.BROWSER_GO_FORWARD, { viewId }),
+  browserGoForward: (viewId: string) => invoke(INVOKE_CHANNELS.BROWSER_GO_FORWARD, { viewId }),
   browserReload: (viewId: string) => invoke(INVOKE_CHANNELS.BROWSER_RELOAD, { viewId }),
   browserStop: (viewId: string) => invoke(INVOKE_CHANNELS.BROWSER_STOP, { viewId }),
-  captureBrowserView: (viewId: string) =>
-    invoke(INVOKE_CHANNELS.BROWSER_CAPTURE, { viewId }),
+  captureBrowserView: (viewId: string) => invoke(INVOKE_CHANNELS.BROWSER_CAPTURE, { viewId }),
   executeJS: (viewId: string, code: string) =>
     invoke(INVOKE_CHANNELS.BROWSER_EXECUTE_JS, { viewId, code }),
   setZoom: (viewId: string, level: number) =>
@@ -354,8 +407,7 @@ export const api = {
   openArtifact: (path: string) => invoke(INVOKE_CHANNELS.SHELL_OPEN_PATH, path),
   readArtifactContent: (path: string, sessionId: string) =>
     invoke(INVOKE_CHANNELS.FILE_READ, path, sessionId),
-  writeArtifactContent: (input: FileWriteInput) =>
-    invoke(INVOKE_CHANNELS.FILE_WRITE, input),
+  writeArtifactContent: (input: FileWriteInput) => invoke(INVOKE_CHANNELS.FILE_WRITE, input),
   onBrowserStateChange: (callback: (data: BrowserStateChange) => void) =>
     onEvent(EVENT_CHANNELS.BROWSER_STATE_CHANGED, callback),
   onBrowserZoomChanged: (callback: (data: BrowserZoomChanged) => void) =>

@@ -32,7 +32,7 @@ vi.mock('electron', () => ({
   app: {
     getPath: vi.fn((name: string) => {
       if (name === 'temp') return os.tmpdir()
-      return path.join(os.tmpdir(), 'codeall-test-db')
+      return path.join(os.tmpdir(), 'godcode-test-db')
     }),
     isPackaged: false
   }
@@ -234,7 +234,7 @@ describe('ensureBindingSchemaCompatibility', () => {
     vi.clearAllMocks()
   })
 
-  it('applies additive patches and migrates openai protocol defaults', async () => {
+  it('applies additive schema patches without rewriting model protocol config', async () => {
     const fakeClient = {
       $queryRawUnsafe: vi.fn(async (sql: string) => {
         if (sql.includes("table_name = 'CategoryBinding'") && sql.includes("column_name = 'systemPrompt'")) {
@@ -265,27 +265,8 @@ describe('ensureBindingSchemaCompatibility', () => {
       }),
       $executeRawUnsafe: vi.fn().mockResolvedValue(undefined),
       model: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            id: 'model-openai-needs-patch',
-            provider: 'openai',
-            modelName: 'gpt-4.1',
-            config: {}
-          },
-          {
-            id: 'model-custom-valid',
-            provider: 'custom',
-            modelName: 'custom-model',
-            config: { apiProtocol: 'chat/completions' }
-          },
-          {
-            id: 'model-anthropic-skip',
-            provider: 'anthropic',
-            modelName: 'claude-sonnet',
-            config: {}
-          }
-        ]),
-        update: vi.fn().mockResolvedValue(undefined)
+        findMany: vi.fn(),
+        update: vi.fn()
       }
     }
 
@@ -306,14 +287,7 @@ describe('ensureBindingSchemaCompatibility', () => {
     expect(fakeClient.$executeRawUnsafe).toHaveBeenCalledWith(
       expect.stringContaining('CREATE TABLE IF NOT EXISTS "SessionState"')
     )
-    expect(fakeClient.model.update).toHaveBeenCalledTimes(1)
-    expect(fakeClient.model.update).toHaveBeenCalledWith({
-      where: { id: 'model-openai-needs-patch' },
-      data: {
-        config: {
-          apiProtocol: 'responses'
-        }
-      }
-    })
+    expect(fakeClient.model.findMany).not.toHaveBeenCalled()
+    expect(fakeClient.model.update).not.toHaveBeenCalled()
   })
 })

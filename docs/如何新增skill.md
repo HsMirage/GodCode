@@ -1,10 +1,10 @@
 # 如何新增 Skill
 
-本文说明在 CodeAll 中新增一个可用 Skill 的最小路径，覆盖定义、注册、发现、执行与验证。
+本文说明在 GodCode 中新增一个可用 Skill 的最小路径，覆盖定义、注册、发现、执行与验证。
 
 ## 1. Skill 基础模型
 
-Skill 类型定义位于：`/Users/mirage/AI/AiWork/CodeAll/src/main/services/skills/types.ts`
+Skill 类型定义位于：`/Users/mirage/AI/AiWork/GodCode/src/main/services/skills/types.ts`
 
 最关键字段：
 
@@ -45,7 +45,7 @@ export const summarizeDiffSkill: Skill = {
 
 ### 步骤 2：加入 Builtin 导出
 
-编辑：`/Users/mirage/AI/AiWork/CodeAll/src/main/services/skills/builtin/index.ts`
+编辑：`/Users/mirage/AI/AiWork/GodCode/src/main/services/skills/builtin/index.ts`
 
 增加导出：
 
@@ -55,25 +55,25 @@ export { summarizeDiffSkill } from './summarize-diff'
 
 ### 步骤 3：加入加载器
 
-编辑：`/Users/mirage/AI/AiWork/CodeAll/src/main/services/skills/loader.ts`
+编辑：`/Users/mirage/AI/AiWork/GodCode/src/main/services/skills/loader.ts`
 
 - 顶部 import 新 Skill
 - 将其加入 `builtinSkills` 数组
 
 ### 步骤 4：更新技能系统对外导出（可选）
 
-编辑：`/Users/mirage/AI/AiWork/CodeAll/src/main/services/skills/index.ts`
+编辑：`/Users/mirage/AI/AiWork/GodCode/src/main/services/skills/index.ts`
 
 把新 Skill 一并导出，便于统一引用。
 
 ## 3. Slash 命令发现链路
 
 - Renderer 输入框调用 `skill:command-items`：
-  `/Users/mirage/AI/AiWork/CodeAll/src/renderer/src/components/chat/MessageInput.tsx`
+  `/Users/mirage/AI/AiWork/GodCode/src/renderer/src/components/chat/MessageInput.tsx`
 - 主进程处理器返回命令项：
-  `/Users/mirage/AI/AiWork/CodeAll/src/main/ipc/handlers/skill.ts`
+  `/Users/mirage/AI/AiWork/GodCode/src/main/ipc/handlers/skill.ts`
 - Registry 根据 `triggers.command` 构建候选：
-  `/Users/mirage/AI/AiWork/CodeAll/src/main/services/skills/registry.ts`
+  `/Users/mirage/AI/AiWork/GodCode/src/main/services/skills/registry.ts`
 
 说明：只有 `enabled !== false` 且定义了 `triggers.command` 的 Skill，才会出现在命令面板。
 
@@ -82,19 +82,19 @@ export { summarizeDiffSkill } from './summarize-diff'
 Skill 命令最终在消息主链路组装并执行：
 
 - `assembleSkillRuntimePayload`：
-  `/Users/mirage/AI/AiWork/CodeAll/src/main/ipc/handlers/message.ts`
+  `/Users/mirage/AI/AiWork/GodCode/src/main/ipc/handlers/message.ts`
 - 组装内容包含：`renderedPrompt`、`allowedTools`、`agent`、`model`、`subtask`、`mcpConfig`
 - 执行阶段通过 `withAllowedTools` 做工具作用域约束：
-  `/Users/mirage/AI/AiWork/CodeAll/src/main/services/tools/tool-execution.service.ts`
+  `/Users/mirage/AI/AiWork/GodCode/src/main/services/tools/tool-execution.service.ts`
 
 ## 5. User/Workspace Skill（JSON）路径
 
 加载器支持从 JSON 文件加载 Skill：
 
-- User 目录：`~/.codeall/skills`
-- Workspace 目录：`<workspace>/.codeall/skills`
+- User 目录：`~/.godcode/skills`
+- Workspace 目录：`<workspace>/.godcode/skills`
 
-加载逻辑见：`/Users/mirage/AI/AiWork/CodeAll/src/main/services/skills/loader.ts`
+加载逻辑见：`/Users/mirage/AI/AiWork/GodCode/src/main/services/skills/loader.ts`
 
 最小 JSON 需要字段：`id`、`name`、`template`。
 

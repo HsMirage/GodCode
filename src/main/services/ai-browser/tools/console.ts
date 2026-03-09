@@ -84,7 +84,7 @@ export const listConsoleMessagesTool: BrowserTool = {
     const pageSize = params.pageSize as number | undefined
     const includePreserved = (params.includePreservedMessages as boolean) || false
 
-    // CodeAll's context needs to support getting console messages
+    // GodCode's context needs to support getting console messages
     // This assumes context has been extended or we cast it
     const messages = (context as any).getConsoleMessages?.(includePreserved) || []
 

@@ -56,6 +56,7 @@ export default defineConfig({
     plugins: [react(), removeCrossorigin()],
     resolve: {
       alias: {
+        '@': resolve(__dirname, 'src'),
         '@renderer': resolve(__dirname, 'src/renderer'),
         '@shared': resolve(__dirname, 'src/shared'),
         '@types': resolve(__dirname, 'src/types')

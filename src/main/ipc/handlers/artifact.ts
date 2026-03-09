@@ -2,6 +2,7 @@ import { ipcMain, shell } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { AuditLogService } from '../../services/audit-log.service'
+import { getCanonicalWorkspaceScopedDir } from '../../services/brand-runtime-compat'
 import { DatabaseService } from '../../services/database'
 import { ArtifactService } from '../../services/artifact.service'
 
@@ -304,7 +305,7 @@ export function registerArtifactHandlers(): void {
 
       const workDir = artifact.session.space.workDir
 
-      const downloadsDir = path.join(workDir, '.codeall', 'downloads')
+      const downloadsDir = getCanonicalWorkspaceScopedDir(workDir, 'downloads')
 
       // Ensure directory exists
       fs.mkdirSync(downloadsDir, { recursive: true })

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CodeAll is a Multi-LLM Collaborative Programming Platform built with Electron and React. It orchestrates complex development tasks by decomposing them into sub-tasks executed by specialized AI agents.
+GodCode is a Multi-LLM Collaborative Programming Platform built with Electron and React. It orchestrates complex development tasks by decomposing them into sub-tasks executed by specialized AI agents.
 
 ## Common Commands
 

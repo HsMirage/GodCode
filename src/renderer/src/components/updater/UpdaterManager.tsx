@@ -9,41 +9,41 @@ export function UpdaterManager() {
 
   useEffect(() => {
     // Skip if not running in Electron environment
-    if (!window.codeall) {
-      console.warn('[UpdaterManager] window.codeall not available, skipping updater events')
+    if (!window.godcode) {
+      console.warn('[UpdaterManager] window.godcode not available, skipping updater events')
       return
     }
 
     // Listen for updater events
-    const unsubChecking = window.codeall.on(EVENT_CHANNELS.UPDATER_CHECKING_FOR_UPDATE, () => {
+    const unsubChecking = window.godcode.on(EVENT_CHANNELS.UPDATER_CHECKING_FOR_UPDATE, () => {
       setStatus('checking')
     })
 
-    const unsubAvailable = window.codeall.on(EVENT_CHANNELS.UPDATER_UPDATE_AVAILABLE, info => {
+    const unsubAvailable = window.godcode.on(EVENT_CHANNELS.UPDATER_UPDATE_AVAILABLE, info => {
       setStatus('available')
       setUpdateInfo(info)
     })
 
-    const unsubNotAvailable = window.codeall.on(EVENT_CHANNELS.UPDATER_UPDATE_NOT_AVAILABLE, () => {
+    const unsubNotAvailable = window.godcode.on(EVENT_CHANNELS.UPDATER_UPDATE_NOT_AVAILABLE, () => {
       setStatus('not-available')
     })
 
-    const unsubError = window.codeall.on(EVENT_CHANNELS.UPDATER_ERROR, err => {
+    const unsubError = window.godcode.on(EVENT_CHANNELS.UPDATER_ERROR, err => {
       setStatus('error')
       setError(err)
     })
 
-    const unsubProgress = window.codeall.on(EVENT_CHANNELS.UPDATER_DOWNLOAD_PROGRESS, progress => {
+    const unsubProgress = window.godcode.on(EVENT_CHANNELS.UPDATER_DOWNLOAD_PROGRESS, progress => {
       setStatus('downloading')
       setProgress(progress)
     })
 
-    const unsubDownloaded = window.codeall.on(EVENT_CHANNELS.UPDATER_UPDATE_DOWNLOADED, info => {
+    const unsubDownloaded = window.godcode.on(EVENT_CHANNELS.UPDATER_UPDATE_DOWNLOADED, info => {
       setStatus('downloaded')
       setUpdateInfo(info)
     })
 
-    void window.codeall.invoke(INVOKE_CHANNELS.UPDATER_CHECK_FOR_UPDATES).catch(error => {
+    void window.godcode.invoke(INVOKE_CHANNELS.UPDATER_CHECK_FOR_UPDATES).catch(error => {
       console.error('[UpdaterManager] Failed to trigger update check:', error)
     })
 

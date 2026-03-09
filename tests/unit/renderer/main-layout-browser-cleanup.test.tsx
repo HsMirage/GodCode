@@ -50,7 +50,7 @@ vi.mock('../../../src/renderer/src/components/ui/resizable', () => ({
 
 describe('<MainLayout /> browser cleanup', () => {
   beforeEach(() => {
-    localStorage.removeItem('codeall-ui-storage')
+    localStorage.removeItem('godcode-ui-storage')
     vi.restoreAllMocks()
 
     useUIStore.setState({
@@ -121,5 +121,5 @@ describe('<MainLayout /> browser cleanup', () => {
     expect(useUIStore.getState().browserUrl).toBe('')
     expect(useUIStore.getState().isBrowserPanelOpen).toBe(false)
     expect(useUIStore.getState().aiOperationStatus).toBe('idle')
-   })
- })
+  })
+})

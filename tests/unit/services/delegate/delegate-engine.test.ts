@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { DelegateEngine } from '@/main/services/delegate/delegate-engine'
 import { createLLMAdapter } from '@/main/services/llm/factory'
+import { resolveLLMRuntimeConfig } from '@/main/services/llm/runtime-config'
 
 // vi.mock() is hoisted; keep shared mocks in a hoisted factory to avoid TDZ issues.
 const mocks = vi.hoisted(() => {
@@ -171,7 +172,11 @@ describe('DelegateEngine', () => {
       config: {}
     })
     mocks.mockPrisma.agentBinding.findUnique.mockImplementation(async ({ where }: any) => {
-      if (where?.agentCode === 'qianliyan' || where?.agentCode === 'fuxi' || where?.agentCode === 'haotian') {
+      if (
+        where?.agentCode === 'qianliyan' ||
+        where?.agentCode === 'fuxi' ||
+        where?.agentCode === 'haotian'
+      ) {
         return {
           enabled: true,
           modelId: 'agent-model-1',
@@ -272,6 +277,24 @@ describe('DelegateEngine', () => {
 
       expect(result.success).toBe(true)
       expect(result.output).toBe('Task completed result')
+    })
+
+    it('applies the five-minute default timeout on delegate task execution', async () => {
+      await delegateEngine.delegateTask({
+        description: 'Long-running delegate task',
+        prompt: 'Run a task that may take longer than one minute',
+        category: 'tianbing',
+        sessionId: 'test-session-123'
+      })
+
+      const llmConfig = mocks.mockAdapter.sendMessage.mock.calls.at(-1)?.[1]
+
+      expect(llmConfig).toEqual(
+        expect.objectContaining({
+          sessionId: 'test-session-123'
+        })
+      )
+      expect(resolveLLMRuntimeConfig(llmConfig).timeoutMs).toBe(300_000)
     })
 
     it('should include builtin category prompt when delegating by category', async () => {
@@ -693,7 +716,9 @@ describe('DelegateEngine', () => {
           where: { id: 'task-1' },
           data: expect.objectContaining({
             status: 'failed',
-            output: expect.stringContaining('Error: Delegate task returned empty output after recovery prompt')
+            output: expect.stringContaining(
+              'Error: Delegate task returned empty output after recovery prompt'
+            )
           })
         })
       )

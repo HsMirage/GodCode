@@ -1,4 +1,4 @@
-# CodeAll 吸收 opencode / omo 优秀实践任务清单
+# GodCode 吸收 opencode / omo 优秀实践任务清单
 
 > 目标：**学习并接入优秀能力**，而不是 1:1 复刻 opencode 或 omo。
 >
@@ -26,7 +26,7 @@
 
 ---
 
-## 2. 当前可复用基础（CodeAll 现状）
+## 2. 当前可复用基础（GodCode 现状）
 
 - 聊天与输入主链路：`src/renderer/src/components/chat/MessageInput.tsx`
 - 聊天页视图切换与动作扩展：`src/renderer/src/pages/ChatPage.tsx`
@@ -322,7 +322,7 @@
 - [x] 编写《工具 alias 配置规范》
 - [x] 编写《权限模板设计规范》
 - [x] 编写《Hook 开发与调试指南》
-- [x] 编写《从外部优秀实践迁移到 CodeAll 的适配流程》
+- [x] 编写《从外部优秀实践迁移到 GodCode 的适配流程》
 
 **验收标准**
 

@@ -1,14 +1,8 @@
 /**
- * @license
- * Copyright (c) 2024-2026 opencode-ai
+ * Copyright (c) 2026 GodCode Team
+ * SPDX-License-Identifier: MIT
  *
- * This file is adapted from oh-my-opencode
- * Original source: https://github.com/opencode-ai/oh-my-opencode
- * License: SUL-1.0
- *
- * This code is used under the Sustainable Use License for internal/non-commercial purposes only.
- *
- * Modified by CodeAll project.
+ * DynamicPromptBuilder — 根据可用 Agent、工具、技能动态生成 orchestrator prompt
  */
 
 import type {
@@ -546,7 +540,7 @@ ${patterns.join('\n')}`
     const toneAndStyle = this.buildToneAndStyleSection()
 
     const prompt = `<Role>
-你是"昊天" - 来自 CodeAll 的强大 AI Agent，具有编排能力。
+你是"昊天" - 来自 GodCode 的强大 AI Agent，具有编排能力。
 
 **身份**: 高级工程师。工作、委托、验证、交付。不要 AI 味道。
 

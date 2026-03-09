@@ -14,19 +14,25 @@ export function ChatView() {
   const messageScrollRef = useRef<HTMLDivElement>(null)
 
   // Use the streaming events hook
-  const { isStreaming, content: streamingContent, toolCalls, error, start, reset } =
-    useStreamingEvents(sessionId)
+  const {
+    isStreaming,
+    content: streamingContent,
+    toolCalls,
+    error,
+    start,
+    reset
+  } = useStreamingEvents(sessionId)
 
   useEffect(() => {
     // Skip if not running in Electron environment
-    if (!window.codeall) {
-      console.warn('[ChatView] window.codeall not available, chat will be disabled')
+    if (!window.godcode) {
+      console.warn('[ChatView] window.godcode not available, chat will be disabled')
       return
     }
 
     const initializeSession = async () => {
       try {
-        const session = await window.codeall.invoke('session:get-or-create-default')
+        const session = await window.godcode.invoke('session:get-or-create-default')
         if (!session || typeof session !== 'object' || !('id' in session)) {
           // Session not available (e.g., in E2E test environment without database)
           console.warn('No session available, chat will be disabled')
@@ -34,7 +40,7 @@ export function ChatView() {
         }
         setSessionId((session as { id: string }).id)
 
-        const existingMessages = await window.codeall.invoke(
+        const existingMessages = await window.godcode.invoke(
           'message:list',
           (session as { id: string }).id
         )
@@ -70,7 +76,7 @@ export function ChatView() {
     // Detect transition from streaming to not streaming
     if (prevIsStreamingRef.current && !isStreaming && streamingContent) {
       // Streaming just completed, add the message
-      setMessages((prev) => [
+      setMessages(prev => [
         ...prev,
         {
           id: Date.now().toString(),
@@ -96,7 +102,7 @@ export function ChatView() {
   const handleSend = useCallback(
     async (payload: MessageInputSendPayload, agentCode?: string) => {
       const { content, skillCommand } = payload
-      if (!sessionId || !window.codeall) return false
+      if (!sessionId || !window.godcode) return false
 
       const userMessage: Message = {
         id: Date.now().toString(),
@@ -104,14 +110,14 @@ export function ChatView() {
         content,
         createdAt: new Date().toISOString()
       }
-      setMessages((prev) => [...prev, userMessage])
+      setMessages(prev => [...prev, userMessage])
       setIsLoading(true)
 
       // Start streaming state
       start()
 
       try {
-        await window.codeall.invoke('message:send', {
+        await window.godcode.invoke('message:send', {
           sessionId,
           content,
           agentCode,
@@ -169,7 +175,7 @@ export function ChatView() {
         <div className="max-w-3xl mx-auto relative">
           <MessageInput isLoading={isLoading} onSend={handleSend} placeholder="Type a message..." />
           <div className="text-xs text-center text-[var(--text-muted)] mt-2">
-            CodeAll can make mistakes. Please verify generated code.
+            GodCode can make mistakes. Please verify generated code.
           </div>
         </div>
       </div>

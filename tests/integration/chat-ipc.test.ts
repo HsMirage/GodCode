@@ -7,16 +7,17 @@ import { EVENT_CHANNELS } from '../../src/shared/ipc-channels'
 import { loadBuiltinSkills } from '../../src/main/services/skills/loader'
 import { skillRegistry } from '../../src/main/services/skills/registry'
 import { hookManager } from '../../src/main/services/hooks'
+import { resolveLLMRuntimeConfig } from '../../src/main/services/llm/runtime-config'
 
 // Set E2E test mode BEFORE imports that read it
-process.env.CODEALL_E2E_TEST = '1'
+process.env.GODCODE_E2E_TEST = '1'
 
 // Mock Electron
 vi.mock('electron', () => {
   return {
     app: {
       getPath: vi.fn(name => {
-        if (name === 'userData') return '/tmp/codeall-test-userdata'
+        if (name === 'userData') return '/tmp/godcode-test-userdata'
         return '/tmp'
       })
     },
@@ -96,6 +97,7 @@ const mockStore: any = {
   agentBinding: [],
   categoryBinding: [],
   session: [],
+  sessionState: [],
   message: [],
   task: [],
   artifact: []
@@ -128,8 +130,14 @@ const createDelegate = (modelName: string) => ({
     }
 
     // agentBinding/categoryBinding include model relation in model selection service
-    if (include && (modelName === 'agentBinding' || modelName === 'categoryBinding') && include.model) {
-      const model = item.modelId ? mockStore.model.find((m: any) => m.id === item.modelId) || null : null
+    if (
+      include &&
+      (modelName === 'agentBinding' || modelName === 'categoryBinding') &&
+      include.model
+    ) {
+      const model = item.modelId
+        ? mockStore.model.find((m: any) => m.id === item.modelId) || null
+        : null
       if (model && include.model.include?.apiKeyRef) {
         return {
           ...item,
@@ -196,6 +204,27 @@ const createDelegate = (modelName: string) => ({
     mockStore[modelName][index] = updated
     return updated
   }),
+  updateMany: vi.fn(async ({ where, data }: any = {}) => {
+    let count = 0
+    mockStore[modelName] = mockStore[modelName].map((item: any) => {
+      const matches =
+        !where ||
+        Object.entries(where).every(([k, v]: any) => {
+          if (v && typeof v === 'object' && 'in' in v) {
+            return v.in.includes(item[k])
+          }
+          return item[k] === v
+        })
+
+      if (!matches) {
+        return item
+      }
+
+      count += 1
+      return { ...item, ...data, updatedAt: new Date() }
+    })
+    return { count }
+  }),
   delete: vi.fn(async ({ where }: any) => {
     const index = mockStore[modelName].findIndex((item: any) => item.id === where.id)
     if (index !== -1) mockStore[modelName].splice(index, 1)
@@ -230,6 +259,7 @@ vi.mock('@prisma/client', () => {
       agentBinding = createDelegate('agentBinding')
       categoryBinding = createDelegate('categoryBinding')
       session = createDelegate('session')
+      sessionState = createDelegate('sessionState')
       message = createDelegate('message')
       task = createDelegate('task')
       artifact = createDelegate('artifact')
@@ -394,6 +424,7 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     mockStore.systemSetting = []
     mockStore.agentBinding = []
     mockStore.session = []
+    mockStore.sessionState = []
     mockStore.message = []
     mockStore.task = []
     mockStore.artifact = []
@@ -498,6 +529,19 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     }
   })
 
+  test('applies the five-minute default timeout on the direct message execution path', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    await handleMessageSend(mockEvent, {
+      sessionId,
+      content: 'Use the default timeout path',
+      agentCode: 'luban'
+    })
+
+    expect(lastLLMConfig).toBeTruthy()
+    expect(resolveLLMRuntimeConfig(lastLLMConfig).timeoutMs).toBe(300_000)
+  })
+
   test('filters sensitive paths from injected context before LLM call by default', async () => {
     const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
 
@@ -531,7 +575,8 @@ describe('Chat IPC Integration - handleMessageSend', () => {
 
       const systemMessages = (lastLLMMessages || []).filter((msg: any) => msg.role === 'system')
       const injectedSystem = systemMessages.find(
-        (msg: any) => typeof msg?.content === 'string' && String(msg.content).includes('visible-normal-line')
+        (msg: any) =>
+          typeof msg?.content === 'string' && String(msg.content).includes('visible-normal-line')
       )
 
       expect(injectedSystem).toBeDefined()
@@ -555,7 +600,6 @@ describe('Chat IPC Integration - handleMessageSend', () => {
       hookManager.registerMany(originalHooks)
     }
   })
-
 
   test('emits usage event for direct message streaming', async () => {
     const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
@@ -763,7 +807,9 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     })
 
     mockStore.systemSetting = []
-    await prisma.systemSetting.create({ data: { key: 'defaultModelId', value: systemDefaultModel.id } })
+    await prisma.systemSetting.create({
+      data: { key: 'defaultModelId', value: systemDefaultModel.id }
+    })
 
     await prisma.agentBinding.create({
       data: {
@@ -823,6 +869,35 @@ describe('Chat IPC Integration - handleMessageSend', () => {
       call => call[0] === EVENT_CHANNELS.MESSAGE_STREAM_ERROR
     )
     expect(streamErrorCalls).toHaveLength(0)
+  })
+
+  test('auto-infers chat/completions for openai-compatible model without manual protocol override', async () => {
+    const { handleMessageSend } = await import('../../src/main/ipc/handlers/message')
+
+    const autoProtocolModel = await prisma.model.create({
+      data: {
+        provider: 'openai-compatible',
+        modelName: 'auto-protocol-model',
+        apiKey: 'auto-key',
+        baseURL: 'https://api.example.com/v1',
+        config: {}
+      }
+    })
+
+    mockStore.systemSetting = []
+    await prisma.systemSetting.create({
+      data: { key: 'defaultModelId', value: autoProtocolModel.id }
+    })
+
+    await handleMessageSend(mockEvent, {
+      sessionId,
+      content: 'Use auto protocol',
+      agentCode: 'luban'
+    })
+
+    expect(lastLLMConfig).toBeTruthy()
+    expect(lastLLMConfig.model).toBe('auto-protocol-model')
+    expect(lastLLMConfig.apiProtocol).toBe('chat/completions')
   })
 
   test('still uses system default after agent binding reset (delete)', async () => {
@@ -903,7 +978,9 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     const userMessage = mockStore.message.find((msg: any) => msg.role === 'user')
     expect(userMessage).toBeDefined()
     expect(String(userMessage.content)).toContain('You are a senior reviewer')
-    expect(String(userMessage.content)).toContain('Please review src/main/services/skills/registry.ts')
+    expect(String(userMessage.content)).toContain(
+      'Please review src/main/services/skills/registry.ts'
+    )
 
     const userSkillMeta = (userMessage.metadata as any)?.skill
     expect(userSkillMeta?.id).toBe('review')
@@ -961,12 +1038,13 @@ describe('Chat IPC Integration - handleMessageSend', () => {
 
     vi.spyOn(SmartRouter.prototype, 'route').mockResolvedValueOnce({
       taskId: 'mock-task-id',
-      output: 'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .fuxi/plans/codeall-repair.md',
+      output:
+        'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .fuxi/plans/godcode-repair.md',
       success: true
     } as any)
 
     vi.spyOn(fs, 'existsSync').mockImplementation((p: fs.PathLike) =>
-      String(p).replace(/\\/g, '/').includes('.fuxi/plans/codeall-repair.md')
+      String(p).replace(/\\/g, '/').includes('.fuxi/plans/godcode-repair.md')
     )
 
     const result = await handleMessageSend(mockEvent, {
@@ -979,7 +1057,7 @@ describe('Chat IPC Integration - handleMessageSend', () => {
     expect(result.content).toContain('执行计划')
     expect((result.metadata as any)?.agentCode).toBe('fuxi')
     expect((result.metadata as any)?.handoffToAgent).toBe('kuafu')
-    expect((result.metadata as any)?.planPath).toContain('.fuxi/plans/codeall-repair.md')
+    expect((result.metadata as any)?.planPath).toContain('.fuxi/plans/godcode-repair.md')
     expect(mockBoulderState.updateState).toHaveBeenCalledTimes(1)
   })
 
@@ -989,7 +1067,8 @@ describe('Chat IPC Integration - handleMessageSend', () => {
 
     vi.spyOn(SmartRouter.prototype, 'route').mockResolvedValueOnce({
       taskId: 'mock-task-id-legacy',
-      output: 'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .sisyphus/plans/legacy-repair.md',
+      output:
+        'TL;DR\nTODOs\nExecution Strategy\nSuccess Criteria\n计划路径: .sisyphus/plans/legacy-repair.md',
       success: true
     } as any)
 

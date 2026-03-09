@@ -4,6 +4,8 @@ import fs from 'fs'
 import net from 'net'
 import { spawn, ChildProcess } from 'child_process'
 import { killPostgresProcesses } from '@/main/services/process-utils'
+import { isGodCodeE2ETestEnvironment } from '@/main/services/brand-runtime-compat'
+import { GODCODE_PACKAGE_NAME, LEGACY_CODEALL_PACKAGE_NAME } from '@/shared/brand-compat'
 
 // Exported for testing - allows mocking in tests
 // Using an object so that internal calls can be mocked by vitest
@@ -526,29 +528,14 @@ let embeddedPostgres: EmbeddedPostgresInstance | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let prismaClient: any = null
 
-const OPENAI_PROTOCOL_REQUIRED_PROVIDERS = new Set([
-  'openai',
-  'openai-compatible',
-  'openai-compat',
-  'custom',
-  'azure-openai',
-  'azure'
-])
-
-function readApiProtocol(config: unknown): string {
-  if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    return ''
-  }
-
-  const value = (config as Record<string, unknown>).apiProtocol
-  return typeof value === 'string' ? value.trim() : ''
-}
-
 export async function ensureBindingSchemaCompatibility(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   client: any
 ): Promise<void> {
-  if (typeof client?.$queryRawUnsafe !== 'function' || typeof client?.$executeRawUnsafe !== 'function') {
+  if (
+    typeof client?.$queryRawUnsafe !== 'function' ||
+    typeof client?.$executeRawUnsafe !== 'function'
+  ) {
     console.warn(
       '[Database] Prisma raw query APIs not available ($queryRawUnsafe/$executeRawUnsafe), skipping schema patching'
     )
@@ -626,7 +613,8 @@ export async function ensureBindingSchemaCompatibility(
      LIMIT 1`
   )
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  const systemSettingExists = Array.isArray(systemSettingTableRows) && systemSettingTableRows.length > 0
+  const systemSettingExists =
+    Array.isArray(systemSettingTableRows) && systemSettingTableRows.length > 0
   if (!systemSettingExists) {
     console.warn('[Database] Creating SystemSetting table')
     await client.$executeRawUnsafe(`
@@ -657,7 +645,8 @@ export async function ensureBindingSchemaCompatibility(
      LIMIT 1`
   )
   // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-  const sessionStateExists = Array.isArray(sessionStateTableRows) && sessionStateTableRows.length > 0
+  const sessionStateExists =
+    Array.isArray(sessionStateTableRows) && sessionStateTableRows.length > 0
   if (!sessionStateExists) {
     console.warn('[Database] Creating SessionState table')
     await client.$executeRawUnsafe(`
@@ -681,53 +670,6 @@ export async function ensureBindingSchemaCompatibility(
     await client.$executeRawUnsafe(`
       CREATE INDEX IF NOT EXISTS "SessionState_status_idx" ON "SessionState"("status")
     `)
-  }
-
-  const models = await client.model.findMany({
-    select: {
-      id: true,
-      provider: true,
-      modelName: true,
-      config: true
-    }
-  })
-
-  let migratedCount = 0
-  for (const model of models as Array<{
-    id: string
-    provider: string
-    modelName: string
-    config: unknown
-  }>) {
-    const provider = model.provider.trim().toLowerCase()
-    if (!OPENAI_PROTOCOL_REQUIRED_PROVIDERS.has(provider)) {
-      continue
-    }
-
-    const protocol = readApiProtocol(model.config)
-    if (protocol === 'chat/completions' || protocol === 'responses') {
-      continue
-    }
-
-    const nextConfig =
-      model.config && typeof model.config === 'object' && !Array.isArray(model.config)
-        ? { ...(model.config as Record<string, unknown>) }
-        : {}
-    nextConfig.apiProtocol = 'responses'
-
-    await client.model.update({
-      where: { id: model.id },
-      data: { config: nextConfig }
-    })
-
-    migratedCount += 1
-    console.warn(
-      `[Database] Patched model protocol to responses: ${model.provider}/${model.modelName} (${model.id})`
-    )
-  }
-
-  if (migratedCount > 0) {
-    console.warn(`[Database] Model protocol migration complete: ${migratedCount} model(s) updated`)
   }
 }
 
@@ -807,7 +749,9 @@ function resolvePrismaMigrationsDir(): string {
   const devFromBundlePath = path.join(__dirname, '..', '..', 'prisma', 'migrations')
   const cwdPath = path.join(process.cwd(), 'prisma', 'migrations')
 
-  const candidates = Array.from(new Set([bundledAppPath, resourcesPath, devFromBundlePath, cwdPath]))
+  const candidates = Array.from(
+    new Set([bundledAppPath, resourcesPath, devFromBundlePath, cwdPath])
+  )
 
   for (const dir of candidates) {
     if (fs.existsSync(dir)) return dir
@@ -824,7 +768,7 @@ export async function ensureBaseSchema(
 ): Promise<void> {
   const isVitest = !!process.env.VITEST
   const isNodeTest = process.env.NODE_ENV === 'test'
-  const isElectronE2E = process.env.CODEALL_E2E_TEST === '1'
+  const isElectronE2E = isGodCodeE2ETestEnvironment()
   if (isVitest || (isNodeTest && !isElectronE2E)) return
 
   // On a fresh database, tables may not exist because we don't run Prisma migrations at runtime.
@@ -833,7 +777,10 @@ export async function ensureBaseSchema(
   const hasAgentBinding = await tableExists(client, 'AgentBinding')
   if (hasSpace && hasAgentBinding) return
 
-  if (typeof client?.$executeRawUnsafe !== 'function' || typeof client?.$queryRawUnsafe !== 'function') {
+  if (
+    typeof client?.$executeRawUnsafe !== 'function' ||
+    typeof client?.$queryRawUnsafe !== 'function'
+  ) {
     throw new Error(
       'Database schema is missing, and Prisma raw SQL APIs are not available. ' +
         'Run `pnpm prisma migrate deploy` (preferred) or `pnpm prisma db push --force-reset` to initialize schema.'
@@ -924,14 +871,14 @@ async function loadOrCreateCredentials(
 
   if (isLegacy) {
     credentials = {
-      user: 'codeall',
-      password: 'codeall',
+      user: LEGACY_CODEALL_PACKAGE_NAME,
+      password: LEGACY_CODEALL_PACKAGE_NAME,
       port: 54320
     }
   } else {
     const crypto = await import('crypto')
     credentials = {
-      user: 'codeall',
+      user: GODCODE_PACKAGE_NAME,
       password: crypto.randomBytes(32).toString('hex'),
       port: await getAvailablePort()
     }
@@ -1197,6 +1144,40 @@ export class DatabaseService {
       throw new Error('Database not initialized. Call init() first.')
     }
     return prismaClient
+  }
+
+  async reconnect(): Promise<void> {
+    console.warn('[Database] Reconnecting after connection loss...')
+
+    if (this.initPromise) {
+      await this.initPromise
+      return
+    }
+
+    try {
+      if (prismaClient) {
+        await prismaClient.$disconnect()
+      }
+    } catch (error) {
+      console.warn('[Database] Prisma disconnect during reconnect failed:', error)
+    } finally {
+      prismaClient = null
+    }
+
+    try {
+      if (embeddedPostgres) {
+        await embeddedPostgres.stop()
+      }
+    } catch (error) {
+      console.warn('[Database] Embedded Postgres stop during reconnect failed:', error)
+    } finally {
+      embeddedPostgres = null
+    }
+
+    this.isInitialized = false
+    this.initPromise = null
+
+    await this.init()
   }
 
   async shutdown(): Promise<void> {

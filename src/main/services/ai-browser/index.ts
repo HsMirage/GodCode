@@ -8,11 +8,11 @@
  *
  * Released under the MIT License
  *
- * Modified by CodeAll project.
+ * Modified by GodCode project.
  */
 
 /*
- * Copyright (c) 2025 CodeAll. All rights reserved.
+ * Copyright (c) 2025 GodCode. All rights reserved.
  */
 
 export * from './types'

@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { GODCODE_UI_STORAGE_KEY, LEGACY_CODEALL_UI_STORAGE_KEY } from '@shared/brand-compat'
+import { createCompatibleJSONStorage } from '../utils/storage-compat'
 
 const MAX_SLASH_COMMAND_MRU = 20
 
@@ -107,6 +109,17 @@ interface UIState {
   setTheme: (theme: 'light' | 'dark') => void
   toggleTheme: () => void
 }
+
+type UIPersistedState = Pick<
+  UIState,
+  | 'theme'
+  | 'isTaskPanelOpen'
+  | 'isBrowserPanelOpen'
+  | 'taskPanelWidth'
+  | 'browserPanelWidth'
+  | 'sidebarWidth'
+  | 'slashCommandMru'
+>
 
 export const useUIStore = create<UIState>()(
   persist(
@@ -229,7 +242,7 @@ export const useUIStore = create<UIState>()(
           activeBrowserTabId:
             state.activeBrowserTabId && tabs.some(tab => tab.id === state.activeBrowserTabId)
               ? state.activeBrowserTabId
-              : tabs[0]?.id ?? null
+              : (tabs[0]?.id ?? null)
         })),
       setActiveBrowserTab: id => set({ activeBrowserTabId: id }),
       resetBrowserWorkspace: (options = {}) =>
@@ -306,7 +319,11 @@ export const useUIStore = create<UIState>()(
         })
     }),
     {
-      name: 'codeall-ui-storage',
+      name: GODCODE_UI_STORAGE_KEY,
+      storage: createCompatibleJSONStorage<UIPersistedState>(
+        GODCODE_UI_STORAGE_KEY,
+        LEGACY_CODEALL_UI_STORAGE_KEY
+      ),
       partialize: state => ({
         theme: state.theme,
         isTaskPanelOpen: state.isTaskPanelOpen,

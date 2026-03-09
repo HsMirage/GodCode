@@ -1,7 +1,9 @@
 import { create } from 'zustand'
-import { createJSONStorage, persist } from 'zustand/middleware'
+import { persist } from 'zustand/middleware'
+import { GODCODE_DATA_STORAGE_KEY, LEGACY_CODEALL_DATA_STORAGE_KEY } from '@shared/brand-compat'
 import { safeInvoke, sessionApi } from '../api'
 import type { Space, Session } from '../types/domain'
+import { createCompatibleJSONStorage } from '../utils/storage-compat'
 
 interface DataState {
   spaces: Space[]
@@ -30,6 +32,11 @@ interface DataState {
   deleteSession: (spaceId: string, sessionId: string) => Promise<void>
   bumpSessionActivity: (spaceId: string, sessionId: string) => void
 }
+
+type PersistedDataState = Pick<
+  DataState,
+  'spaces' | 'currentSpaceId' | 'currentSessionId' | 'selectedSessionIdBySpaceId'
+>
 
 export const useDataStore = create<DataState>()(
   persist(
@@ -81,7 +88,9 @@ export const useDataStore = create<DataState>()(
             }))
           }
 
-          const mapped = nextSpaceId ? (get().selectedSessionIdBySpaceId[nextSpaceId] ?? null) : null
+          const mapped = nextSpaceId
+            ? (get().selectedSessionIdBySpaceId[nextSpaceId] ?? null)
+            : null
           const nextSessionId = mapped
 
           if (nextSpaceId !== currentSpaceId || nextSessionId !== get().currentSessionId) {
@@ -213,13 +222,15 @@ export const useDataStore = create<DataState>()(
       deleteSpace: async (spaceId: string) => {
         set({ isLoading: true, error: null })
         try {
-          if (!window.codeall) throw new Error('Preload API not available')
-          const result = (await window.codeall.invoke('space:delete', spaceId)) as
+          if (!window.godcode) throw new Error('Preload API not available')
+          const result = (await window.godcode.invoke('space:delete', spaceId)) as
             | { success: boolean; error?: string }
             | boolean
 
           const ok =
-            typeof result === 'boolean' ? result : !!(result && typeof result === 'object' && result.success)
+            typeof result === 'boolean'
+              ? result
+              : !!(result && typeof result === 'object' && result.success)
           if (!ok) {
             const msg = typeof result === 'object' ? result.error : undefined
             throw new Error(msg || 'Failed to delete space')
@@ -258,10 +269,16 @@ export const useDataStore = create<DataState>()(
           set(state => {
             const existing = state.sessionsBySpaceId[spaceId] ?? []
             return {
-              sessionsBySpaceId: { ...state.sessionsBySpaceId, [spaceId]: [newSession, ...existing] },
+              sessionsBySpaceId: {
+                ...state.sessionsBySpaceId,
+                [spaceId]: [newSession, ...existing]
+              },
               currentSpaceId: spaceId,
               currentSessionId: newSession.id,
-              selectedSessionIdBySpaceId: { ...state.selectedSessionIdBySpaceId, [spaceId]: newSession.id },
+              selectedSessionIdBySpaceId: {
+                ...state.selectedSessionIdBySpaceId,
+                [spaceId]: newSession.id
+              },
               isLoading: false
             }
           })
@@ -291,8 +308,8 @@ export const useDataStore = create<DataState>()(
       deleteSession: async (spaceId: string, sessionId: string) => {
         set({ isLoading: true, error: null })
         try {
-          if (!window.codeall) throw new Error('Preload API not available')
-          await window.codeall.invoke('session:delete', sessionId)
+          if (!window.godcode) throw new Error('Preload API not available')
+          await window.godcode.invoke('session:delete', sessionId)
 
           set(state => {
             const list = state.sessionsBySpaceId[spaceId] ?? []
@@ -330,8 +347,11 @@ export const useDataStore = create<DataState>()(
       }
     }),
     {
-      name: 'codeall:data-store',
-      storage: createJSONStorage(() => localStorage),
+      name: GODCODE_DATA_STORAGE_KEY,
+      storage: createCompatibleJSONStorage<PersistedDataState>(
+        GODCODE_DATA_STORAGE_KEY,
+        LEGACY_CODEALL_DATA_STORAGE_KEY
+      ),
       partialize: state => ({
         spaces: state.spaces,
         currentSpaceId: state.currentSpaceId,

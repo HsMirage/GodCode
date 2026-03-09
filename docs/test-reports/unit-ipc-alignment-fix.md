@@ -48,6 +48,6 @@ pnpm exec vitest run "tests/unit/ipc/background-task-ipc.test.ts"
   - 非 PF-2 范围失败建议在后续任务独立建卡处理。
 
 ## 7. 附件与归档
-- 关联任务文档：`CodeAll完成度审查与优化文档.md`
+- 关联任务文档：`GodCode完成度审查与优化文档.md`
 - 相关历史记录：`docs/test-reports/unit.md`、`docs/final-acceptance.md`
 - 本报告：`docs/test-reports/unit-ipc-alignment-fix.md`

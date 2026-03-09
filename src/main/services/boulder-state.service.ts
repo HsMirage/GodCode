@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { GODCODE_DEFAULT_PLAN_NAME, LEGACY_CODEALL_DEFAULT_PLAN_NAME } from '@/shared/brand-compat'
 
 export interface BoulderState {
   active_plan: string
@@ -155,7 +156,7 @@ export class BoulderStateService {
   }
 
   private createDefaultState(): BoulderState {
-    const defaultPlanName = 'codeall-unified-plan'
+    const defaultPlanName = GODCODE_DEFAULT_PLAN_NAME
     const defaultPlanPath = path.join(process.cwd(), '.fuxi', 'plans', `${defaultPlanName}.md`)
 
     return {
@@ -189,9 +190,10 @@ export class BoulderStateService {
     }
 
     const record = raw as Record<string, unknown>
-    const activePlan = typeof record.active_plan === 'string' && record.active_plan.trim()
-      ? record.active_plan.trim()
-      : this.createDefaultState().active_plan
+    const activePlan =
+      typeof record.active_plan === 'string' && record.active_plan.trim()
+        ? this.normalizePlanPath(record.active_plan.trim())
+        : this.createDefaultState().active_plan
 
     const completedTasks = this.toNonNegativeNumber(record.completed_tasks)
     const rawTotalTasks = this.toNonNegativeNumber(record.total_tasks)
@@ -225,7 +227,12 @@ export class BoulderStateService {
     completed: number,
     total: number
   ): BoulderState['status'] {
-    if (value === 'not_started' || value === 'in_progress' || value === 'complete' || value === 'blocked') {
+    if (
+      value === 'not_started' ||
+      value === 'in_progress' ||
+      value === 'complete' ||
+      value === 'blocked'
+    ) {
       return value
     }
 
@@ -260,14 +267,34 @@ export class BoulderStateService {
 
   private normalizePlanName(value: unknown, activePlan: string): string | undefined {
     const explicit = this.normalizeOptionalString(value)
-    if (explicit) return explicit
+    if (explicit) {
+      return explicit === LEGACY_CODEALL_DEFAULT_PLAN_NAME ? GODCODE_DEFAULT_PLAN_NAME : explicit
+    }
 
     const fileName = path.basename(activePlan)
     if (!fileName) return undefined
 
     const ext = path.extname(fileName)
     const baseName = ext ? fileName.slice(0, -ext.length) : fileName
-    return baseName || undefined
+    if (!baseName) return undefined
+    return baseName === LEGACY_CODEALL_DEFAULT_PLAN_NAME ? GODCODE_DEFAULT_PLAN_NAME : baseName
+  }
+
+  private normalizePlanPath(activePlan: string): string {
+    if (!activePlan.includes(LEGACY_CODEALL_DEFAULT_PLAN_NAME)) {
+      return activePlan
+    }
+
+    const migratedPlanPath = activePlan.replace(
+      LEGACY_CODEALL_DEFAULT_PLAN_NAME,
+      GODCODE_DEFAULT_PLAN_NAME
+    )
+
+    if (fs.existsSync(migratedPlanPath) || !fs.existsSync(activePlan)) {
+      return migratedPlanPath
+    }
+
+    return activePlan
   }
 
   private normalizePercentage(value: unknown): string | null {

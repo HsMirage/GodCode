@@ -2,7 +2,7 @@ import {
   TASK_READINESS_METRICS,
   type TaskReadinessMetricDefinition,
   type TaskReadinessMetricValue
-} from '@/shared/task-readiness-metrics'
+} from './task-readiness-metrics'
 
 export type TaskReadinessMetricKey = TaskReadinessMetricDefinition['key']
 export type TaskReadinessMetricSourceStatus = 'measured' | 'estimated' | 'missing'

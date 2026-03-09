@@ -72,9 +72,9 @@ export function SessionRecoveryPrompt() {
     let mounted = true
 
     const loadRecoverable = async () => {
-      if (!window.codeall) return
+      if (!window.godcode) return
       try {
-        const items = (await window.codeall.invoke('session-recovery:list')) as SessionRecoveryRecord[]
+        const items = (await window.godcode.invoke('session-recovery:list')) as SessionRecoveryRecord[]
         const recoverable = items.filter(item =>
           ['crashed', 'interrupted', 'recovering'].includes(item.status)
         )
@@ -101,12 +101,12 @@ export function SessionRecoveryPrompt() {
   )
 
   const handleRecover = async () => {
-    if (!session || !window.codeall || !recoveryContext) return
+    if (!session || !window.godcode || !recoveryContext) return
 
     setIsRecovering(true)
 
     try {
-      const result = (await window.codeall.invoke('session-recovery:execute', session.sessionId)) as {
+      const result = (await window.godcode.invoke('session-recovery:execute', session.sessionId)) as {
         success: boolean
         error?: string
       }
@@ -121,13 +121,13 @@ export function SessionRecoveryPrompt() {
         setCurrentSession(session.sessionId)
       }
 
-      const prompt = (await window.codeall.invoke(
+      const prompt = (await window.godcode.invoke(
         'session-recovery:resume-prompt',
         session.sessionId
       )) as string
 
       if (prompt) {
-        await window.codeall.invoke('message:send', {
+        await window.godcode.invoke('message:send', {
           sessionId: session.sessionId,
           content: prompt,
           resumeContext: recoveryContext

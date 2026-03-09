@@ -12,6 +12,7 @@ import {
   type JsonValue,
   type SettingSchemaDescriptor
 } from '../../services/settings/schema-registry'
+import { defaultPolicy, parsePermissionTemplate } from '../../services/tools/permission-policy'
 
 export { SETTING_KEYS }
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS]
@@ -257,6 +258,11 @@ export async function handleSettingSet(
     update: { value: serializedValue },
     create: { key: storageKey, value: serializedValue }
   })
+
+  if (key === SETTING_KEYS.PERMISSION_TEMPLATE) {
+    const parsedTemplate = parsePermissionTemplate(serializedValue)
+    defaultPolicy.applyTemplate(parsedTemplate ?? 'balanced')
+  }
 
   return { key: setting.key, value: setting.value }
 }

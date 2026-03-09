@@ -1,12 +1,8 @@
 /**
- * @license
- * Copyright (c) 2024-2026 opencode-ai
+ * Copyright (c) 2026 GodCode Team
+ * SPDX-License-Identifier: MIT
  *
- * This file is adapted from oh-my-opencode
- * Original source: https://github.com/opencode-ai/oh-my-opencode
- * License: SUL-1.0
- *
- * Modified by CodeAll project.
+ * HookManager — 生命周期 Hook 管理器，基于 EventEmitter 实现事件驱动的钩子系统
  */
 
 import { EventEmitter } from 'node:events'

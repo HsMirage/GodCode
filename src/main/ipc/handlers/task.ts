@@ -11,18 +11,63 @@ async function getPrismaClient() {
   return db.getClient()
 }
 
+function isDatabaseConnectionError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+
+  const code = 'code' in error ? String(error.code) : ''
+  const message = error instanceof Error ? error.message : String(error)
+
+  return (
+    code === 'P1001' ||
+    code === 'P1017' ||
+    /Can't reach database server/i.test(message) ||
+    /server has closed the connection/i.test(message) ||
+    /connection terminated unexpectedly/i.test(message) ||
+    /ECONNREFUSED/i.test(message) ||
+    /ECONNRESET/i.test(message)
+  )
+}
+
+async function withDatabaseReconnectRetry<T>(
+  operationName: string,
+  execute: (prisma: Awaited<ReturnType<typeof getPrismaClient>>) => Promise<T>
+): Promise<T> {
+  const logger = LoggerService.getInstance().getLogger()
+  const db = DatabaseService.getInstance()
+  const prisma = await getPrismaClient()
+
+  try {
+    return await execute(prisma)
+  } catch (error) {
+    if (!isDatabaseConnectionError(error)) {
+      throw error
+    }
+
+    logger.warn(`Database connection lost during ${operationName}, reconnecting and retrying`, {
+      operationName,
+      error
+    })
+
+    await db.reconnect()
+    return execute(db.getClient())
+  }
+}
+
 export async function handleTaskList(
   _event: IpcMainInvokeEvent,
   sessionId: string
 ): Promise<Task[]> {
   const logger = LoggerService.getInstance().getLogger()
-  const prisma = await getPrismaClient()
 
   try {
-    const tasks = await prisma.task.findMany({
+    const tasks = await withDatabaseReconnectRetry('task:list', prisma =>
+      prisma.task.findMany({
       where: { sessionId },
       orderBy: { createdAt: 'asc' }
-    })
+      })
+    )
 
     return tasks.map(
       (task: PrismaTask): Task => ({
@@ -52,22 +97,23 @@ export async function handleTaskCreate(
   data: Omit<Task, 'id' | 'createdAt' | 'startedAt' | 'completedAt'>
 ): Promise<Task> {
   const logger = LoggerService.getInstance().getLogger()
-  const prisma = await getPrismaClient()
 
   try {
-    const task = await prisma.task.create({
-      data: {
-        sessionId: data.sessionId,
-        parentTaskId: data.parentTaskId,
-        type: data.type,
-        status: data.status,
-        input: data.input,
-        output: data.output,
-        assignedModel: data.assignedModel,
-        assignedAgent: data.assignedAgent,
-        metadata: data.metadata || {}
-      }
-    })
+    const task = await withDatabaseReconnectRetry('task:create', prisma =>
+      prisma.task.create({
+        data: {
+          sessionId: data.sessionId,
+          parentTaskId: data.parentTaskId,
+          type: data.type,
+          status: data.status,
+          input: data.input,
+          output: data.output,
+          assignedModel: data.assignedModel,
+          assignedAgent: data.assignedAgent,
+          metadata: data.metadata || {}
+        }
+      })
+    )
 
     return {
       id: task.id,
@@ -92,12 +138,13 @@ export async function handleTaskCreate(
 
 export async function handleTaskGet(_event: IpcMainInvokeEvent, taskId: string): Promise<Task> {
   const logger = LoggerService.getInstance().getLogger()
-  const prisma = await getPrismaClient()
 
   try {
-    const task = await prisma.task.findUniqueOrThrow({
-      where: { id: taskId }
-    })
+    const task = await withDatabaseReconnectRetry('task:get', prisma =>
+      prisma.task.findUniqueOrThrow({
+        where: { id: taskId }
+      })
+    )
 
     return {
       id: task.id,
@@ -125,17 +172,18 @@ export async function handleTaskUpdate(
   data: { id: string } & Partial<Omit<Task, 'id' | 'createdAt'>>
 ): Promise<Task> {
   const logger = LoggerService.getInstance().getLogger()
-  const prisma = await getPrismaClient()
 
   try {
     const { id, ...updateData } = data
-    const task = await prisma.task.update({
-      where: { id },
-      data: {
-        ...updateData,
-        metadata: updateData.metadata || undefined
-      }
-    })
+    const task = await withDatabaseReconnectRetry('task:update', prisma =>
+      prisma.task.update({
+        where: { id },
+        data: {
+          ...updateData,
+          metadata: updateData.metadata || undefined
+        }
+      })
+    )
 
     return {
       id: task.id,

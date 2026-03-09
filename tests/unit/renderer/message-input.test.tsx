@@ -8,7 +8,7 @@ import { useUIStore } from '../../../src/renderer/src/store/ui.store'
 
 describe('<MessageInput />', () => {
   beforeEach(() => {
-    localStorage.removeItem('codeall-ui-storage')
+    localStorage.removeItem('godcode-ui-storage')
     useUIStore.setState({ slashCommandMru: [] })
   })
 

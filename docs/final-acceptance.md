@@ -1,4 +1,4 @@
-# CodeAll MVP Final Acceptance Report
+# GodCode MVP Final Acceptance Report
 
 **Date**: March 3, 2026
 **Version**: 1.0.0
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-The CodeAll MVP has reached a functional state with core capabilities in place, including multi-LLM orchestration, local workspace management, and browser automation integration. Final verification confirms startup-chain blocking has been removed and key flows are executable, but release gating remains unsatisfied due to unresolved test/build failures. Current evidence indicates partial readiness: some unit/integration/performance checks still fail or are conditional, and release preflight has FAIL/BLOCKED items that prevent release sign-off.
+The GodCode MVP has reached a functional state with core capabilities in place, including multi-LLM orchestration, local workspace management, and browser automation integration. Final verification confirms startup-chain blocking has been removed and key flows are executable, but release gating remains unsatisfied due to unresolved test/build failures. Current evidence indicates partial readiness: some unit/integration/performance checks still fail or are conditional, and release preflight has FAIL/BLOCKED items that prevent release sign-off.
 
 ## Implemented Features
 
@@ -130,7 +130,7 @@ This matrix is the mandatory pre-release gate for Windows/macOS deliveries. Ever
 
 ## Conclusion
 
-CodeAll has successfully integrated the capabilities of multiple reference projects into a cohesive desktop application baseline. Final verification confirms that startup-chain blockers have been cleared and key capabilities are testable, but release gate conditions are still not met. The current candidate remains **not releasable** until failing/blocked preflight and test items are resolved and re-verified.
+GodCode has successfully integrated the capabilities of multiple reference projects into a cohesive desktop application baseline. Final verification confirms that startup-chain blockers have been cleared and key capabilities are testable, but release gate conditions are still not met. The current candidate remains **not releasable** until failing/blocked preflight and test items are resolved and re-verified.
 
 ## Final Verification Sign-off (P-FINAL)
 

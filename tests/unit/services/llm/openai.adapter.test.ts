@@ -86,7 +86,12 @@ describe('OpenAIAdapter', () => {
 
   it('should extract non-standard reasoning_content when content is empty', async () => {
     mockCreate.mockResolvedValue({
-      choices: [{ message: { content: null, reasoning_content: 'Recovered text from gateway' }, finish_reason: 'stop' }],
+      choices: [
+        {
+          message: { content: null, reasoning_content: 'Recovered text from gateway' },
+          finish_reason: 'stop'
+        }
+      ],
       usage: { prompt_tokens: 10, completion_tokens: 5 }
     })
 
@@ -208,38 +213,34 @@ describe('OpenAIAdapter', () => {
     expect(result.content).toContain('Recovered from choice.text')
   })
 
-  it(
-    'should stop retrying when configured maxRetries is exhausted',
-    async () => {
-      mockCreate
-        .mockRejectedValueOnce(new Error('Network error 1'))
-        .mockRejectedValueOnce(new Error('Network error 2'))
-        .mockRejectedValueOnce(new Error('Network error 3'))
-        .mockResolvedValueOnce({
-          choices: [{ message: { content: 'Recovered' }, finish_reason: 'stop' }],
-          usage: {}
-        })
+  it('should stop retrying when configured maxRetries is exhausted', async () => {
+    mockCreate
+      .mockRejectedValueOnce(new Error('Network error 1'))
+      .mockRejectedValueOnce(new Error('Network error 2'))
+      .mockRejectedValueOnce(new Error('Network error 3'))
+      .mockResolvedValueOnce({
+        choices: [{ message: { content: 'Recovered' }, finish_reason: 'stop' }],
+        usage: {}
+      })
 
-      await expect(
-        adapter.sendMessage(
-          [
-            {
-              role: 'user',
-              content: 'Hi',
-              id: '1',
-              sessionId: 's1',
-              createdAt: new Date(),
-              metadata: {}
-            }
-          ],
-          { model: 'gpt-4', apiProtocol: 'chat/completions', maxRetries: 1 }
-        )
-      ).rejects.toThrow('Network error 2')
+    await expect(
+      adapter.sendMessage(
+        [
+          {
+            role: 'user',
+            content: 'Hi',
+            id: '1',
+            sessionId: 's1',
+            createdAt: new Date(),
+            metadata: {}
+          }
+        ],
+        { model: 'gpt-4', apiProtocol: 'chat/completions', maxRetries: 1 }
+      )
+    ).rejects.toThrow('Network error 2')
 
-      expect(mockCreate).toHaveBeenCalledTimes(2)
-    },
-    15000
-  )
+    expect(mockCreate).toHaveBeenCalledTimes(2)
+  }, 15000)
 
   it('should stream messages', async () => {
     const mockStream = (async function* () {
@@ -448,6 +449,105 @@ describe('OpenAIAdapter', () => {
     expect(mockCreate).not.toHaveBeenCalled()
   })
 
+  it('keeps long-running OpenAI responses requests alive until the five-minute default timeout', async () => {
+    vi.useFakeTimers()
+
+    let requestSignal: AbortSignal | undefined
+
+    mockResponsesCreate.mockImplementation(
+      (_request: unknown, options?: { signal?: AbortSignal }) => {
+        requestSignal = options?.signal
+
+        return new Promise((_resolve, reject) => {
+          requestSignal?.addEventListener('abort', () => reject(new Error('AbortError')), {
+            once: true
+          })
+        })
+      }
+    )
+
+    try {
+      const pending = adapter
+        .sendMessage(
+          [
+            {
+              role: 'user',
+              content: 'Keep this request open',
+              id: '1',
+              sessionId: 's1',
+              createdAt: new Date(),
+              metadata: {}
+            }
+          ],
+          { model: 'gpt-5.4', apiProtocol: 'responses', maxRetries: 0 }
+        )
+        .catch(error => error)
+
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(requestSignal?.aborted).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(239_999)
+      expect(requestSignal?.aborted).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1)
+
+      const error = await pending
+
+      expect(requestSignal?.aborted).toBe(true)
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toContain('timed out')
+      expect(mockResponsesCreate).toHaveBeenCalledTimes(1)
+      expect(mockCreate).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('forces chat/completions requests to reject on timeout even when the transport ignores aborts', async () => {
+    vi.useFakeTimers()
+
+    let requestSignal: AbortSignal | undefined
+
+    mockCreate.mockImplementation((_request: unknown, options?: { signal?: AbortSignal }) => {
+      requestSignal = options?.signal
+      return new Promise(() => {})
+    })
+
+    try {
+      const pending = adapter
+        .sendMessage(
+          [
+            {
+              role: 'user',
+              content: 'Keep this request open forever',
+              id: '1',
+              sessionId: 's1',
+              createdAt: new Date(),
+              metadata: {}
+            }
+          ],
+          { model: 'gpt-5.4', apiProtocol: 'chat/completions', maxRetries: 0, timeoutMs: 1_000 }
+        )
+        .catch(error => error)
+
+      await vi.advanceTimersByTimeAsync(999)
+      expect(requestSignal?.aborted).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(requestSignal?.aborted).toBe(true)
+
+      const sentinel = Symbol('still-pending')
+      const result = await Promise.race([pending, Promise.resolve(sentinel)])
+
+      expect(result).not.toBe(sentinel)
+      expect(result).toBeInstanceOf(Error)
+      expect((result as Error).message).toContain('timed out')
+      expect(mockCreate).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('should normalize responses tool schema to strict required fields', async () => {
     const { toolExecutionService } = await import('@/main/services/tools/tool-execution.service')
 
@@ -609,5 +709,58 @@ describe('OpenAIAdapter', () => {
       [{ id: 'call_1', name: 'test_tool', arguments: { arg: 'value' } }],
       expect.anything()
     )
+  })
+
+  it('forces streaming chat/completions requests to reject on timeout even when the iterator ignores aborts', async () => {
+    vi.useFakeTimers()
+
+    let requestSignal: AbortSignal | undefined
+
+    mockCreate.mockImplementation((_request: unknown, options?: { signal?: AbortSignal }) => {
+      requestSignal = options?.signal
+
+      return Promise.resolve({
+        [Symbol.asyncIterator]() {
+          return {
+            next: () => new Promise(() => {})
+          }
+        }
+      })
+    })
+
+    try {
+      const pending = adapter
+        .streamMessage(
+          [
+            {
+              role: 'user',
+              content: 'Stream forever',
+              id: '1',
+              sessionId: 's1',
+              createdAt: new Date(),
+              metadata: {}
+            }
+          ],
+          { model: 'gpt-5.4', apiProtocol: 'chat/completions', maxRetries: 0, timeoutMs: 1_000 }
+        )
+        .next()
+        .catch(error => error)
+
+      await vi.advanceTimersByTimeAsync(999)
+      expect(requestSignal?.aborted).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1)
+      expect(requestSignal?.aborted).toBe(true)
+
+      const sentinel = Symbol('still-pending')
+      const result = await Promise.race([pending, Promise.resolve(sentinel)])
+
+      expect(result).not.toBe(sentinel)
+      expect(result).toBeInstanceOf(Error)
+      expect((result as Error).message).toContain('timed out')
+      expect(mockCreate).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

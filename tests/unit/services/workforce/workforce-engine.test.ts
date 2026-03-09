@@ -1136,6 +1136,49 @@ describe('WorkforceEngine', () => {
       )
     })
 
+    it('should surface failed task details when workflow stops after partial batch failure', async () => {
+      mockAdapter.sendMessage.mockResolvedValueOnce({
+        content: JSON.stringify({
+          subtasks: [
+            { id: 'task-1', description: 'Task 1', dependencies: [] },
+            { id: 'task-2', description: 'Task 2', dependencies: [] }
+          ]
+        })
+      })
+      mockWorkerDispatcher.dispatch.mockImplementation(async (input: any) => {
+        if (input.metadata?.logicalTaskId === 'task-1') {
+          throw new Error('temporary delegate crash')
+        }
+
+        return {
+          taskId: `subtask-${input.metadata?.logicalTaskId ?? 'unknown'}`,
+          output: 'Task output',
+          success: true,
+          runId: 'run-123',
+          model: 'openai-compatible::gpt-4o-mini',
+          modelSource: 'system-default'
+        }
+      })
+
+      await expect(
+        workforceEngine.executeWorkflow('Partially failed workflow', 'test-session-123', { enableRetry: false })
+      ).rejects.toThrow(
+        'Workflow stopped because 1 task(s) failed: task-1 (Task 1): temporary delegate crash'
+      )
+
+      expect(mockPrisma.task.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'workflow-1' },
+          data: expect.objectContaining({
+            status: 'failed',
+            output: expect.stringContaining(
+              'Workflow stopped because 1 task(s) failed: task-1 (Task 1): temporary delegate crash'
+            )
+          })
+        })
+      )
+    })
+
     it('should fail fast for kuafu when no executable plan can be resolved', async () => {
       await expect(
         workforceEngine.executeWorkflow('执行计划', 'test-session-123', { agentCode: 'kuafu' })

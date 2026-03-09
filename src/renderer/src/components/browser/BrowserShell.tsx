@@ -80,25 +80,25 @@ export function BrowserShell() {
   const browserLifecycleRef = useRef(
     createBrowserPanelLifecycle({
       create: async viewId => {
-        await window.codeall?.invoke('browser:create', {
+        await window.godcode?.invoke('browser:create', {
           viewId,
           url: undefined
         })
       },
       show: async (viewId, bounds) => {
-        await window.codeall?.invoke('browser:show', {
+        await window.godcode?.invoke('browser:show', {
           viewId,
           bounds
         })
       },
       hide: async viewId => {
-        await window.codeall?.invoke('browser:hide', { viewId })
+        await window.godcode?.invoke('browser:hide', { viewId })
       },
       destroy: async viewId => {
-        await window.codeall?.invoke('browser:destroy', { viewId })
+        await window.godcode?.invoke('browser:destroy', { viewId })
       },
       resize: async (viewId, bounds) => {
-        await window.codeall?.invoke('browser:resize', {
+        await window.godcode?.invoke('browser:resize', {
           viewId,
           bounds
         })
@@ -121,7 +121,7 @@ export function BrowserShell() {
   }, [])
 
   const syncBrowserLifecycle = useCallback(async () => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     await browserLifecycleRef.current.sync({
       panelOpen: isBrowserPanelOpen,
@@ -133,9 +133,9 @@ export function BrowserShell() {
 
   // Sync tabs from backend
   const syncTabs = useCallback(async () => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     try {
-      const result = (await window.codeall.invoke('browser:list-tabs')) as BrowserTabListResponse
+      const result = (await window.godcode.invoke('browser:list-tabs')) as BrowserTabListResponse
       if (result.success) {
         const tabs = result.data ?? []
         setBrowserTabs(tabs)
@@ -154,11 +154,11 @@ export function BrowserShell() {
 
   // Initial tab creation
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     const init = async () => {
       // Read source-of-truth tabs list from backend (avoid stale closure on browserTabs)
-      const result = (await window.codeall.invoke('browser:list-tabs')) as BrowserTabListResponse
+      const result = (await window.godcode.invoke('browser:list-tabs')) as BrowserTabListResponse
       const tabs = result?.success ? (result.data ?? []) : []
 
       if (result?.success) {
@@ -171,7 +171,7 @@ export function BrowserShell() {
       // If no tabs exist in backend, create one
       if (tabs.length === 0) {
         const viewId = `tab-${Date.now()}`
-        await window.codeall.invoke('browser:create', { viewId, url: 'https://google.com' })
+        await window.godcode.invoke('browser:create', { viewId, url: 'https://google.com' })
         setActiveBrowserTab(viewId)
         await syncTabs()
       }
@@ -183,7 +183,7 @@ export function BrowserShell() {
 
   // Handle active tab view management
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     const setupTab = async () => {
       if (!activeBrowserTabId) {
@@ -191,7 +191,7 @@ export function BrowserShell() {
       }
 
       // Update local state from backend
-      const stateResult = (await window.codeall.invoke('browser:get-state', {
+      const stateResult = (await window.godcode.invoke('browser:get-state', {
         viewId: activeBrowserTabId
       })) as BrowserStateResponse
       if (stateResult.success && stateResult.data) {
@@ -205,7 +205,7 @@ export function BrowserShell() {
     setupTab()
 
     // Setup listeners
-    const removeStateListener = window.codeall.on('browser:state-changed', (payload: unknown) => {
+    const removeStateListener = window.godcode.on('browser:state-changed', (payload: unknown) => {
       const data = payload as BrowserStateChangedEvent
 
       syncTabs()
@@ -218,7 +218,7 @@ export function BrowserShell() {
       }
     })
 
-    const removeAIListener = window.codeall.on('browser:ai-operation', (payload: unknown) => {
+    const removeAIListener = window.godcode.on('browser:ai-operation', (payload: unknown) => {
       const data = payload as BrowserAIOperationEvent
       setAIOperation(data.toolName, data.status)
 
@@ -285,7 +285,7 @@ export function BrowserShell() {
 
   // Handle visibility changes to hide browser view when overlays are present
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     // Function to check if any overlay is open
     const checkOverlays = () => {
@@ -310,7 +310,7 @@ export function BrowserShell() {
 
   // Handle Resize
   useEffect(() => {
-    if (!browserRef.current || !window.codeall || !activeBrowserTabId) return
+    if (!browserRef.current || !window.godcode || !activeBrowserTabId) return
     if (!isBrowserPanelOpen) return
 
     const updateBounds = () => {
@@ -334,7 +334,7 @@ export function BrowserShell() {
   // Actions
   const handleNewTab = async () => {
     const viewId = `tab-${Date.now()}`
-    await window.codeall?.invoke('browser:create', { viewId, url: 'https://google.com' })
+    await window.godcode?.invoke('browser:create', { viewId, url: 'https://google.com' })
     await syncTabs()
     setActiveBrowserTab(viewId)
   }
@@ -362,7 +362,7 @@ export function BrowserShell() {
   const handleNavigate = useCallback(
     (url: string) => {
       if (activeBrowserTabId) {
-        window.codeall?.invoke('browser:navigate', { viewId: activeBrowserTabId, url })
+        window.godcode?.invoke('browser:navigate', { viewId: activeBrowserTabId, url })
       }
     },
     [activeBrowserTabId]
@@ -371,30 +371,30 @@ export function BrowserShell() {
   const handleBack = useCallback(
     () =>
       activeBrowserTabId &&
-      window.codeall?.invoke('browser:go-back', { viewId: activeBrowserTabId }),
+      window.godcode?.invoke('browser:go-back', { viewId: activeBrowserTabId }),
     [activeBrowserTabId]
   )
   const handleForward = useCallback(
     () =>
       activeBrowserTabId &&
-      window.codeall?.invoke('browser:go-forward', { viewId: activeBrowserTabId }),
+      window.godcode?.invoke('browser:go-forward', { viewId: activeBrowserTabId }),
     [activeBrowserTabId]
   )
   const handleReload = useCallback(
     () =>
       activeBrowserTabId &&
-      window.codeall?.invoke('browser:reload', { viewId: activeBrowserTabId }),
+      window.godcode?.invoke('browser:reload', { viewId: activeBrowserTabId }),
     [activeBrowserTabId]
   )
   const handleStop = useCallback(
     () =>
-      activeBrowserTabId && window.codeall?.invoke('browser:stop', { viewId: activeBrowserTabId }),
+      activeBrowserTabId && window.godcode?.invoke('browser:stop', { viewId: activeBrowserTabId }),
     [activeBrowserTabId]
   )
 
   const handleScreenshot = useCallback(async () => {
     if (!activeBrowserTabId) return
-    await window.codeall?.invoke('browser:capture', { viewId: activeBrowserTabId })
+    await window.godcode?.invoke('browser:capture', { viewId: activeBrowserTabId })
   }, [activeBrowserTabId])
 
   const handleTakeover = useCallback(() => {
@@ -405,14 +405,14 @@ export function BrowserShell() {
   const handleToggleDevTools = useCallback(
     () =>
       activeBrowserTabId &&
-      window.codeall?.invoke('browser:toggle-devtools', { viewId: activeBrowserTabId }),
+      window.godcode?.invoke('browser:toggle-devtools', { viewId: activeBrowserTabId }),
     [activeBrowserTabId]
   )
 
   const handleZoom = useCallback(
     (level: number) => {
       if (activeBrowserTabId) {
-        window.codeall?.invoke('browser:zoom', { viewId: activeBrowserTabId, level })
+        window.godcode?.invoke('browser:zoom', { viewId: activeBrowserTabId, level })
         setZoomLevel(level)
       }
     },

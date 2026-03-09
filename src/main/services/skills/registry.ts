@@ -1,5 +1,5 @@
 /**
- * CodeAll Skill Registry
+ * GodCode Skill Registry
  *
  * Manages registration and retrieval of skills.
  */

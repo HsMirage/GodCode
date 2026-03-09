@@ -51,7 +51,7 @@ export function useContinuationConfig() {
     draft.abortWindowMs !== config.abortWindowMs
 
   const load = useCallback(async () => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     try {
       setLoading(true)
@@ -69,7 +69,7 @@ export function useContinuationConfig() {
   }, [])
 
   const save = useCallback(async () => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     try {
       setSaving(true)

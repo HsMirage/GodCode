@@ -42,10 +42,10 @@ interface SessionRecoveryRecord {
 }
 
 async function loadResumeHistory(sessionId: string): Promise<ResumeHistoryItem[]> {
-  if (!window.codeall || !sessionId) return []
+  if (!window.godcode || !sessionId) return []
 
   try {
-    const recoverable = (await window.codeall.invoke(
+    const recoverable = (await window.godcode.invoke(
       'session-recovery:list'
     )) as SessionRecoveryRecord[]
 
@@ -96,9 +96,9 @@ export function SessionResumeIndicator({ sessionId }: SessionResumeIndicatorProp
     let mounted = true
 
     const checkStatus = async () => {
-      if (!sessionId || !window.codeall) return
+      if (!sessionId || !window.godcode) return
       try {
-        const result = await window.codeall.invoke('task-continuation:get-status', sessionId)
+        const result = await window.godcode.invoke('task-continuation:get-status', sessionId)
         if (mounted) {
           setStatus(result as ContinuationStatus)
         }
@@ -127,12 +127,12 @@ export function SessionResumeIndicator({ sessionId }: SessionResumeIndicatorProp
   }, [sessionId])
 
   const handleResume = async () => {
-    if (!sessionId || !status?.shouldContinue || !window.codeall) return
+    if (!sessionId || !status?.shouldContinue || !window.godcode) return
 
     setIsLoading(true)
     try {
       if (status.continuationPrompt) {
-        await window.codeall.invoke('message:send', {
+        await window.godcode.invoke('message:send', {
           sessionId,
           content: status.continuationPrompt,
           resumeContext: status.recoveryContext

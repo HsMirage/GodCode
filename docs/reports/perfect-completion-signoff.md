@@ -7,7 +7,7 @@
 - 任务目标：完成最终一致性复验并签署 `APPROVED`
 
 ## 2. 输入与审查范围
-- 计划真值源：`CodeAll完成度审查与优化文档.md`
+- 计划真值源：`GodCode完成度审查与优化文档.md`
 - 总验收：`docs/final-acceptance.md`
 - PF 归档证据：
   - PF-1：`docs/reports/perfect-closure-consistency-log.md`

@@ -1,5 +1,5 @@
 /**
- * Electron App Fixture for CodeAll E2E Tests
+ * Electron App Fixture for GodCode E2E Tests
  *
  * Usage:
  *   import { test, expect } from './fixtures/electron'
@@ -102,15 +102,15 @@ export const test = base.extend<ElectronFixtures>({
 
     const e2eSpaceDir = path.join(
       os.tmpdir(),
-      `codeall-e2e-space-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      `godcode-e2e-space-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     )
 
     const launchEnv = Object.fromEntries(
       Object.entries({
         ...process.env,
         ELECTRON_DISABLE_GPU: '1',
-        CODEALL_E2E_TEST: '1',
-        CODEALL_E2E_SPACE_DIR: e2eSpaceDir,
+        GODCODE_E2E_TEST: '1',
+        GODCODE_E2E_SPACE_DIR: e2eSpaceDir,
         NODE_ENV: 'test'
       }).filter((entry): entry is [string, string] => typeof entry[1] === 'string')
     )
@@ -168,8 +168,8 @@ export async function navigateTo(window: Page, destination: 'chat' | 'settings')
     const settingsBtn = window.locator('button[title="Settings"]')
     await settingsBtn.click()
   } else {
-    // Navigate to home/chat by clicking the CodeAll brand
-    const brand = window.locator('text=CodeAll').first()
+    // Navigate to home/chat by clicking the GodCode brand
+    const brand = window.locator('text=GodCode').first()
     await brand.click()
   }
   await window.waitForLoadState('networkidle')

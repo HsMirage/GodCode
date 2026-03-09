@@ -1,5 +1,5 @@
 /**
- * LSP Tools - Language Server Protocol tools for CodeAll
+ * LSP Tools - Language Server Protocol tools for GodCode
  *
  * Provides code intelligence capabilities:
  * - lsp_diagnostics: Get errors/warnings from language server

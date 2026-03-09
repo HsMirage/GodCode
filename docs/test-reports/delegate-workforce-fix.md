@@ -44,7 +44,7 @@ pnpm test -- --runInBand
 - 后续动作：进入 PF-4（Windows 打包链路修复）。
 
 ## 7. 附件与归档
-- 关联计划文档：`CodeAll完成度审查与优化文档.md`
+- 关联计划文档：`GodCode完成度审查与优化文档.md`
 - 关键代码路径：
   - `tests/integration/workforce-engine.test.ts`
   - `src/main/services/llm/model-selection.service.ts`

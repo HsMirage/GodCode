@@ -22,10 +22,10 @@ export const useArtifactStore = create<ArtifactState>((set, _get) => ({
   error: null,
 
   loadArtifacts: async (sessionId: string) => {
-    if (!sessionId || !window.codeall) return
+    if (!sessionId || !window.godcode) return
     set({ isLoading: true, error: null })
     try {
-      const result = await window.codeall.invoke('artifact:list', sessionId, false)
+      const result = await window.godcode.invoke('artifact:list', sessionId, false)
       if (Array.isArray(result)) {
         set({ artifacts: result, isLoading: false })
       } else {
@@ -45,9 +45,9 @@ export const useArtifactStore = create<ArtifactState>((set, _get) => ({
         return
       }
 
-      if (!window.codeall) return
+      if (!window.godcode) return
       set({ isLoading: true })
-      const fullArtifact = (await window.codeall.invoke('artifact:get', artifact.id)) as Artifact
+      const fullArtifact = (await window.godcode.invoke('artifact:get', artifact.id)) as Artifact
 
       set(state => ({
         selectedArtifact: fullArtifact,
@@ -67,8 +67,8 @@ export const useArtifactStore = create<ArtifactState>((set, _get) => ({
       const space = await safeInvoke<Space | null>('space:get', spaceId)
       if (!space || !space.workDir) throw new Error('Space not found')
 
-      if (!window.codeall) return
-      await window.codeall.invoke('artifact:download', artifact.id, space.workDir)
+      if (!window.godcode) return
+      await window.godcode.invoke('artifact:download', artifact.id, space.workDir)
     } catch (err) {
       console.error('Failed to download artifact:', err)
       throw err
@@ -76,9 +76,9 @@ export const useArtifactStore = create<ArtifactState>((set, _get) => ({
   },
 
   deleteArtifact: async (artifact: Artifact) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     try {
-      await window.codeall.invoke('artifact:delete', artifact.id)
+      await window.godcode.invoke('artifact:delete', artifact.id)
       set(state => ({
         selectedArtifact:
           state.selectedArtifact?.id === artifact.id ? null : state.selectedArtifact,

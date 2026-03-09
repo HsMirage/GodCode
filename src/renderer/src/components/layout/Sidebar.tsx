@@ -52,7 +52,7 @@ export function Sidebar() {
 
   // Defensive: if the store gets reset (HMR/reload quirks), ensure we re-fetch spaces when Sidebar mounts.
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     if (spaces.length > 0) return
     void fetchSpaces()
   }, [fetchSpaces, spaces.length])

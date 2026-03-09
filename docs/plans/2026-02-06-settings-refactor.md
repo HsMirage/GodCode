@@ -643,13 +643,13 @@ export function ProviderModelPanel() {
   })
 
   const loadProviders = useCallback(async () => {
-    if (!window.codeall) {
+    if (!window.godcode) {
       setLoading(false)
       return
     }
 
     try {
-      const data = (await window.codeall.invoke('keychain:list-with-models')) as ProviderData[]
+      const data = (await window.godcode.invoke('keychain:list-with-models')) as ProviderData[]
       setProviders(data)
     } catch (error) {
       console.error('Failed to load providers:', error)
@@ -696,10 +696,10 @@ export function ProviderModelPanel() {
   }
 
   const handleSaveProvider = async () => {
-    if (!window.codeall || !providerForm.baseURL || !providerForm.apiKey) return
+    if (!window.godcode || !providerForm.baseURL || !providerForm.apiKey) return
 
     try {
-      await window.codeall.invoke('keychain:set-password', {
+      await window.godcode.invoke('keychain:set-password', {
         id: editingProviderId || undefined,
         label: providerForm.label || undefined,
         baseURL: providerForm.baseURL,
@@ -714,12 +714,12 @@ export function ProviderModelPanel() {
   }
 
   const handleDeleteProvider = async (id: string) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     if (!confirm('删除此 API 服务商将同时删除其下所有模型配置，确认删除？')) return
 
     try {
-      await window.codeall.invoke('keychain:delete-password', {
-        service: 'codeall-app',
+      await window.godcode.invoke('keychain:delete-password', {
+        service: 'godcode-app',
         account: 'ignored',
         id
       })
@@ -754,11 +754,11 @@ export function ProviderModelPanel() {
   }
 
   const handleSaveModel = async (apiKeyId: string) => {
-    if (!window.codeall || !modelForm.modelName) return
+    if (!window.godcode || !modelForm.modelName) return
 
     try {
       if (editingModelId) {
-        await window.codeall.invoke('model:update', {
+        await window.godcode.invoke('model:update', {
           id: editingModelId,
           data: {
             modelName: modelForm.modelName,
@@ -767,7 +767,7 @@ export function ProviderModelPanel() {
           }
         })
       } else {
-        await window.codeall.invoke('model:create', {
+        await window.godcode.invoke('model:create', {
           provider: 'openai-compatible',
           modelName: modelForm.modelName,
           contextSize: modelForm.contextSize,
@@ -782,11 +782,11 @@ export function ProviderModelPanel() {
   }
 
   const handleDeleteModel = async (modelId: string) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     if (!confirm('确认删除此模型配置？')) return
 
     try {
-      await window.codeall.invoke('model:delete', modelId)
+      await window.godcode.invoke('model:delete', modelId)
       await loadProviders()
     } catch (error) {
       console.error('Failed to delete model:', error)

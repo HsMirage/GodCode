@@ -81,6 +81,37 @@
   .ui-border-secondary {
     border-color: var(--border-secondary);
   }
+
+  .ui-warning-surface {
+    border-color: rgb(245 158 11 / 0.28);
+    background-color: rgb(245 158 11 / 0.1);
+  }
+
+  .ui-warning-text {
+    color: rgb(253 230 138);
+  }
+
+  .ui-warning-text-muted {
+    color: rgb(252 211 77 / 0.84);
+  }
+
+  .ui-warning-icon {
+    color: rgb(251 191 36);
+  }
+}
+
+@layer components {
+  .light .ui-warning-text {
+    color: rgb(146 64 14);
+  }
+
+  .light .ui-warning-text-muted {
+    color: rgb(180 83 9 / 0.88);
+  }
+
+  .light .ui-warning-icon {
+    color: rgb(217 119 6);
+  }
 }
 
 /* ==============================

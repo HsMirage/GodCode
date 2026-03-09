@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2025 CodeAll. All rights reserved.
+ * Copyright (c) 2025 GodCode. All rights reserved.
  */
 
 import { BrowserTool, ExtractResult, AccessibilityNode, ToolResult } from '../types'
@@ -32,7 +32,7 @@ export const takeSnapshotTool: BrowserTool = {
     }
 
     try {
-      // Existing CodeAll snapshot logic, enhanced
+      // Existing GodCode snapshot logic, enhanced
       const snapshot = (await webContents.executeJavaScript(`
         (() => {
           let uidCounter = 0

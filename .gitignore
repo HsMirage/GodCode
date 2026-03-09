@@ -59,11 +59,32 @@ tmp/
 temp/
 *.tmp
 dev-data/
+certs/
+experiments/
+/.claude/settings.json
+/.fuxi/boulder.json
 网站CodeAlltemp_eigent/
+网站GodCodetemp_eigent/
 .worktrees/
 
-# Sisyphus runtime state
-.sisyphus/boulder.json
+# Sisyphus — internal AI work notes, not for public release
+.sisyphus/
+
+# Private / internal documents
+session-ses_400c.md
+日志.md
+项目规划.md
+learnings.md
+DELIVERY_SUMMARY.md
+GodCode完成度审查与优化文档.md
+openspec/
+
+# Extracted asar debug directories
+extracted-asar/
+extracted-asar3/
+
+# Dev error logs
+dev-ps.err
 
 # Test artifacts
 test-results/

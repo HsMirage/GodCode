@@ -67,13 +67,13 @@ export function ArtifactList({ sessionId, onViewDiff, onOpenFile }: ArtifactList
   const requestNavigate = useTraceNavigationStore(state => state.requestNavigate)
 
   const loadArtifacts = useCallback(async () => {
-    if (!window.codeall || !sessionId) {
+    if (!window.godcode || !sessionId) {
       setLoading(false)
       return
     }
 
     try {
-      const list = (await window.codeall.invoke('artifact:list', { sessionId })) as Artifact[]
+      const list = (await window.godcode.invoke('artifact:list', { sessionId })) as Artifact[]
       setArtifacts(list)
     } catch (error) {
       console.error('Failed to load artifacts:', error)
@@ -88,9 +88,9 @@ export function ArtifactList({ sessionId, onViewDiff, onOpenFile }: ArtifactList
 
   // 监听新产物创建事件
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
-    const removeListener = window.codeall.on('artifact:created', () => {
+    const removeListener = window.godcode.on('artifact:created', () => {
       loadArtifacts()
     })
 
@@ -100,11 +100,11 @@ export function ArtifactList({ sessionId, onViewDiff, onOpenFile }: ArtifactList
   }, [loadArtifacts])
 
   const handleAccept = async (artifactId: string) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     setActionLoading(artifactId)
     try {
-      const result = (await window.codeall.invoke('artifact:accept', artifactId)) as IpcActionResult
+      const result = (await window.godcode.invoke('artifact:accept', artifactId)) as IpcActionResult
       if (!result?.success) {
         throw new Error(result?.error || 'Accept artifact failed')
       }
@@ -117,9 +117,9 @@ export function ArtifactList({ sessionId, onViewDiff, onOpenFile }: ArtifactList
   }
 
   const resolveWorkDir = useCallback(async (): Promise<string | null> => {
-    if (!window.codeall || !sessionId) return null
+    if (!window.godcode || !sessionId) return null
 
-    const session = (await window.codeall.invoke('session:get', sessionId)) as {
+    const session = (await window.godcode.invoke('session:get', sessionId)) as {
       spaceId?: string
     } | null
 
@@ -127,7 +127,7 @@ export function ArtifactList({ sessionId, onViewDiff, onOpenFile }: ArtifactList
       return null
     }
 
-    const spaceResponse = (await window.codeall.invoke(
+    const spaceResponse = (await window.godcode.invoke(
       'space:get',
       session.spaceId
     )) as SpaceResponse
@@ -143,7 +143,7 @@ export function ArtifactList({ sessionId, onViewDiff, onOpenFile }: ArtifactList
   }, [sessionId])
 
   const handleRevert = async (artifactId: string) => {
-    if (!window.codeall || !confirm('确定要撤销此变更吗？')) return
+    if (!window.godcode || !confirm('确定要撤销此变更吗？')) return
 
     setActionLoading(artifactId)
     try {
@@ -152,7 +152,7 @@ export function ArtifactList({ sessionId, onViewDiff, onOpenFile }: ArtifactList
         throw new Error('Workspace directory not found')
       }
 
-      const result = (await window.codeall.invoke('artifact:revert', {
+      const result = (await window.godcode.invoke('artifact:revert', {
         artifactId,
         workDir
       })) as IpcActionResult

@@ -22,7 +22,7 @@ describe('<TaskPanel /> task readiness dashboard', () => {
     vi.restoreAllMocks()
     window.localStorage.clear()
     window.localStorage.setItem(
-      'codeall.task-readiness.dashboard.history',
+      'godcode.task-readiness.dashboard.history',
       JSON.stringify([
         buildTaskReadinessDashboardSnapshot({
           version: '0.9.0',
@@ -51,9 +51,25 @@ describe('<TaskPanel /> task readiness dashboard', () => {
   it('renders version trend and layer regression hints in observability panel', async () => {
     const tasks: Task[] = [
       createTask({ id: 'workflow-1', type: 'workflow', status: 'running', input: 'workflow root' }),
-      createTask({ id: 'task-done', type: 'subtask', status: 'completed', input: 'completed task' }),
-      createTask({ id: 'task-failed', type: 'subtask', status: 'failed', input: 'write config', output: 'operation not permitted' }),
-      createTask({ id: 'task-approval', type: 'subtask', status: 'pending_approval', input: 'sensitive change' })
+      createTask({
+        id: 'task-done',
+        type: 'subtask',
+        status: 'completed',
+        input: 'completed task'
+      }),
+      createTask({
+        id: 'task-failed',
+        type: 'subtask',
+        status: 'failed',
+        input: 'write config',
+        output: 'operation not permitted'
+      }),
+      createTask({
+        id: 'task-approval',
+        type: 'subtask',
+        status: 'pending_approval',
+        input: 'sensitive change'
+      })
     ]
 
     const invoke = vi.fn(async (channel: string) => {
@@ -67,7 +83,13 @@ describe('<TaskPanel /> task readiness dashboard', () => {
                 attemptNumber: 2,
                 status: 'completed',
                 maxAttempts: 2,
-                errors: [{ errorType: 'tool', error: 'temporary failure', timestamp: '2026-03-08T00:00:01.000Z' }]
+                errors: [
+                  {
+                    errorType: 'tool',
+                    error: 'temporary failure',
+                    timestamp: '2026-03-08T00:00:01.000Z'
+                  }
+                ]
               }
             },
             totalRetried: 2
@@ -103,11 +125,14 @@ describe('<TaskPanel /> task readiness dashboard', () => {
 
     render(<TaskPanel />)
 
-    expect(await screen.findByText('任务 KPI 仪表盘')).toBeInTheDocument()
+    expect(await screen.findByText('KPI 仪表盘')).toBeInTheDocument()
     expect(screen.getByText(/当前版本 v1.0.0 · 对比 v0.9.0/)).toBeInTheDocument()
     expect(screen.getByText('Delegate')).toBeInTheDocument()
     expect(screen.getByText('Tool')).toBeInTheDocument()
     expect(screen.getAllByText(/任务完成率/).length).toBeGreaterThan(0)
     expect(screen.getByText(/审批命中率下降 100pp/)).toBeInTheDocument()
+    expect(screen.queryByText('运行绑定快照')).not.toBeInTheDocument()
+    expect(screen.queryByText('诊断统计')).not.toBeInTheDocument()
+    expect(invoke).not.toHaveBeenCalledWith('background-task:stats')
   })
 })

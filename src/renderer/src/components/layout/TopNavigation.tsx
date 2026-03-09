@@ -35,7 +35,7 @@ export function TopNavigation() {
         onClick={() => navigate('/')}
       >
         <Box className="w-5 h-5 text-indigo-500" />
-        <span>CodeAll</span>
+        <span>GodCode</span>
         {currentSpaceId && (
           <span className="ml-2 text-xs font-normal text-[var(--text-muted)]">
             / {spaces.find(s => s.id === currentSpaceId)?.name ?? 'Space'}

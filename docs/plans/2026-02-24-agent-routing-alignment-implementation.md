@@ -281,12 +281,12 @@ git commit -m "fix(delegate): hard-enforce fuxi planning-only runtime guard"
 
 ```ts
 test('fuxi handoff should capture .fuxi plan path and expose kuafu handoff metadata', async () => {
-  // mock stream output includes: 计划路径: .fuxi/plans/codeall-repair.md
+  // mock stream output includes: 计划路径: .fuxi/plans/godcode-repair.md
   // ... existing setup ...
 
   expect(result.content).toContain('执行计划')
   expect((result.metadata as any)?.handoffToAgent).toBe('kuafu')
-  expect((result.metadata as any)?.planPath).toContain('.fuxi/plans/codeall-repair.md')
+  expect((result.metadata as any)?.planPath).toContain('.fuxi/plans/godcode-repair.md')
 })
 ```
 

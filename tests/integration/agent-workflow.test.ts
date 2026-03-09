@@ -134,7 +134,7 @@ const mocks = vi.hoisted(() => {
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn((name: string) => {
-      if (name === 'userData') return '/tmp/codeall-test-userdata'
+      if (name === 'userData') return '/tmp/godcode-test-userdata'
       return '/tmp'
     })
   }

@@ -144,7 +144,7 @@ describe('PermissionPolicy', () => {
     )
   })
 
-  it('should enforce confirmation for high-risk tools even when custom permission is auto', () => {
+  it('should keep high-risk tools auto-executable when manual approvals are disabled', () => {
     policy.setPermission({
       name: 'bash',
       permission: 'auto'
@@ -156,12 +156,28 @@ describe('PermissionPolicy', () => {
       expect.objectContaining({
         resolvedName: 'bash',
         highRisk: true,
-        highRiskEnforced: true,
-        permission: 'confirm',
-        requiresConfirmation: true,
+        highRiskEnforced: false,
+        permission: 'auto',
+        requiresConfirmation: false,
         allowedByPolicy: true,
-        allowedWithoutConfirmation: false,
+        allowedWithoutConfirmation: true,
         dangerous: true
+      })
+    )
+  })
+
+  it('should auto-approve confirm-level tools in execution previews', () => {
+    const preview = policy.getExecutionPreview('bash')
+
+    expect(preview).toEqual(
+      expect.objectContaining({
+        requestedName: 'bash',
+        resolvedName: 'bash',
+        permission: 'auto',
+        requiresConfirmation: false,
+        allowedByPolicy: true,
+        allowedWithoutConfirmation: true,
+        confirmReason: undefined
       })
     )
   })

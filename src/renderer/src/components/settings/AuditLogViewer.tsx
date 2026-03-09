@@ -60,8 +60,8 @@ export function AuditLogViewer({ defaultActionFilter }: AuditLogViewerProps) {
   // Load data
   const fetchLogs = async () => {
     // Skip if not running in Electron environment
-    if (!window.codeall) {
-      console.warn('[AuditLogViewer] window.codeall not available')
+    if (!window.godcode) {
+      console.warn('[AuditLogViewer] window.godcode not available')
       return
     }
     setLoading(true)
@@ -71,7 +71,7 @@ export function AuditLogViewer({ defaultActionFilter }: AuditLogViewerProps) {
       if (actionInput) queryFilter.action = actionInput
 
       // Query logs
-      const result = (await window.codeall.invoke('audit-log:query', queryFilter, {
+      const result = (await window.godcode.invoke('audit-log:query', queryFilter, {
         limit,
         offset: page * limit
       })) as AuditLogEntry[]
@@ -80,7 +80,7 @@ export function AuditLogViewer({ defaultActionFilter }: AuditLogViewerProps) {
 
       // Get total count for pagination (optional, separate IPC call usually needed if not returned)
       // For now we might just check if we got full page
-      const count = (await window.codeall.invoke('audit-log:count', queryFilter)) as number
+      const count = (await window.godcode.invoke('audit-log:count', queryFilter)) as number
       setTotal(count)
     } catch (error) {
       console.error('Failed to fetch audit logs:', error)
@@ -107,9 +107,9 @@ export function AuditLogViewer({ defaultActionFilter }: AuditLogViewerProps) {
   }, [page, filter]) // Re-fetch on page/filter change
 
   const handleExport = async (format: 'json' | 'csv') => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     try {
-      const result = (await window.codeall.invoke('audit-log:export', format, {
+      const result = (await window.godcode.invoke('audit-log:export', format, {
         ...filter,
         action: actionInput || undefined,
         startDate: startDateInput ? new Date(startDateInput) : undefined,

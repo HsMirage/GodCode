@@ -26,14 +26,14 @@ const scanTargets: ScanTarget[] = [
   {
     label: 'Renderer invoke usage',
     rootDir: 'src/renderer',
-    regex: /window\.codeall\.invoke\(\s*(['"`])([^'"`]+)\1/g,
+    regex: /window\.(?:godcode|codeall)\.invoke\(\s*(['"`])([^'"`]+)\1/g,
     allowedChannels: invokeChannels,
     channelType: 'invoke'
   },
   {
     label: 'Renderer event subscription',
     rootDir: 'src/renderer',
-    regex: /window\.codeall\.(?:on|once|off)\(\s*(['"`])([^'"`]+)\1/g,
+    regex: /window\.(?:godcode|codeall)\.(?:on|once|off)\(\s*(['"`])([^'"`]+)\1/g,
     allowedChannels: eventChannels,
     channelType: 'event'
   },
@@ -177,7 +177,11 @@ async function main(): Promise<void> {
     ...verifyNoOverlap(Object.values(INVOKE_CHANNELS), Object.values(EVENT_CHANNELS))
   ]
 
-  if (violations.length === 0 && preloadIssues.length === 0 && channelDefinitionIssues.length === 0) {
+  if (
+    violations.length === 0 &&
+    preloadIssues.length === 0 &&
+    channelDefinitionIssues.length === 0
+  ) {
     console.log(
       `✅ IPC alignment verified: ${invokeChannels.size} invoke channels, ${eventChannels.size} event channels, ${scanTargets.length} scan groups.`
     )

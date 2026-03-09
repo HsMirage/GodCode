@@ -19,27 +19,27 @@
 **Step 1: Create worktree branch**
 
 ```bash
-git -C "/Users/mirage/AI/AiWork/CodeAll" worktree add "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" -b "fix/model-selection-protocol-phase1"
+git -C "/Users/mirage/AI/AiWork/GodCode" worktree add "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" -b "fix/model-selection-protocol-phase1"
 ```
 
 **Step 2: Install dependencies in worktree**
 
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" install
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" install
 ```
 
 **Step 3: Verify baseline on focused files**
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/services/llm/openai.adapter.test.ts
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/services/llm/openai.adapter.test.ts
 ```
 Expected: PASS (or existing known failures are documented before changes)
 
 **Step 4: Commit (worktree setup not committed unless files changed)**
 
 ```bash
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" status
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" status
 ```
 
 ---
@@ -69,7 +69,7 @@ it('throws MODEL_NOT_FOUND when binding modelId points to missing model', async 
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/services/llm/model-selection.service.test.ts
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/services/llm/model-selection.service.test.ts
 ```
 Expected: FAIL initially (new test or behavior mismatch)
 
@@ -89,15 +89,15 @@ if (binding.modelId && !binding.model) {
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/services/llm/model-selection.service.test.ts
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/services/llm/model-selection.service.test.ts
 ```
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" add tests/unit/services/llm/model-selection.service.test.ts src/main/services/llm/model-selection.service.ts
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" commit -m "test(llm): lock binding fallback semantics in model selection"
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" add tests/unit/services/llm/model-selection.service.test.ts src/main/services/llm/model-selection.service.ts
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" commit -m "test(llm): lock binding fallback semantics in model selection"
 ```
 
 ---
@@ -125,7 +125,7 @@ it('rejects invalid apiProtocol values instead of silently coercing', () => {
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/renderer/provider-model-panel.protocol.test.tsx
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/renderer/provider-model-panel.protocol.test.tsx
 ```
 Expected: FAIL
 
@@ -152,15 +152,15 @@ config: { apiProtocol: 'responses' }
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/renderer/provider-model-panel.protocol.test.tsx
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/renderer/provider-model-panel.protocol.test.tsx
 ```
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" add src/renderer/src/components/settings/ProviderModelPanel.tsx tests/unit/renderer/provider-model-panel.protocol.test.tsx
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" commit -m "fix(settings): default openai-compatible protocol to responses and validate strictly"
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" add src/renderer/src/components/settings/ProviderModelPanel.tsx tests/unit/renderer/provider-model-panel.protocol.test.tsx
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" commit -m "fix(settings): default openai-compatible protocol to responses and validate strictly"
 ```
 
 ---
@@ -185,7 +185,7 @@ it('backfills missing apiProtocol to responses for openai-compatible providers o
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run tests/integration/llm-providers.test.ts
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run tests/integration/llm-providers.test.ts
 ```
 Expected: FAIL for migration case
 
@@ -206,15 +206,15 @@ await ensureModelProtocolCompatibility(prismaClient)
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run tests/integration/llm-providers.test.ts
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run tests/integration/llm-providers.test.ts
 ```
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" add src/main/services/database.ts tests/integration/llm-providers.test.ts
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" commit -m "feat(db): migrate missing model apiProtocol to responses at startup"
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" add src/main/services/database.ts tests/integration/llm-providers.test.ts
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" commit -m "feat(db): migrate missing model apiProtocol to responses at startup"
 ```
 
 ---
@@ -244,21 +244,21 @@ it('does not rely on legacy model resolver in runtime paths', () => {
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/services/llm/openai.adapter.test.ts
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run tests/unit/services/llm/openai.adapter.test.ts
 ```
 Expected: PASS
 
 Run:
 ```bash
-rg -n "claude-3-5-sonnet-20241022" "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1/src"
+rg -n "claude-3-5-sonnet-20241022" "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1/src"
 ```
 Expected: no runtime matches
 
 **Step 4: Commit**
 
 ```bash
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" add -u src/main/services/llm/model-resolver.ts tests/unit/services/llm/model-resolver.test.ts
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" commit -m "refactor(llm): remove legacy model-resolver runtime path"
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" add -u src/main/services/llm/model-resolver.ts tests/unit/services/llm/model-resolver.test.ts
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" commit -m "refactor(llm): remove legacy model-resolver runtime path"
 ```
 
 ---
@@ -287,7 +287,7 @@ it('uses responses protocol for openai-compatible model end-to-end', async () =>
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run tests/integration/chat-ipc.test.ts tests/integration/workforce-engine.test.ts
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run tests/integration/chat-ipc.test.ts tests/integration/workforce-engine.test.ts
 ```
 Expected: FAIL initially for new cases
 
@@ -301,16 +301,16 @@ Expected: FAIL initially for new cases
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run tests/integration/chat-ipc.test.ts tests/integration/workforce-engine.test.ts
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" playwright test tests/e2e/settings.spec.ts -g "protocol"
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run tests/integration/chat-ipc.test.ts tests/integration/workforce-engine.test.ts
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" playwright test tests/e2e/settings.spec.ts -g "protocol"
 ```
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" add tests/integration/chat-ipc.test.ts tests/integration/workforce-engine.test.ts tests/e2e/settings.spec.ts
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" commit -m "test(regression): cover default-model fallback and protocol stability"
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" add tests/integration/chat-ipc.test.ts tests/integration/workforce-engine.test.ts tests/e2e/settings.spec.ts
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" commit -m "test(regression): cover default-model fallback and protocol stability"
 ```
 
 ---
@@ -324,7 +324,7 @@ git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phas
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" vitest run \
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" vitest run \
   tests/unit/services/llm/model-selection.service.test.ts \
   tests/unit/services/llm/openai.adapter.test.ts \
   tests/unit/renderer/provider-model-panel.protocol.test.tsx \
@@ -338,17 +338,17 @@ Expected: PASS
 
 Run:
 ```bash
-pnpm -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" typecheck
-rg -n "claude-3-5-sonnet-20241022" "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1/src"
+pnpm -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" typecheck
+rg -n "claude-3-5-sonnet-20241022" "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1/src"
 ```
 Expected: typecheck PASS; no runtime legacy string matches
 
 **Step 3: Final summary commit (if pending changes)**
 
 ```bash
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" status
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" add <remaining-files>
-git -C "/Users/mirage/AI/AiWork/CodeAll/.worktrees/model-selection-protocol-phase1" commit -m "fix(llm): complete phase1 model-selection and protocol hardening"
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" status
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" add <remaining-files>
+git -C "/Users/mirage/AI/AiWork/GodCode/.worktrees/model-selection-protocol-phase1" commit -m "fix(llm): complete phase1 model-selection and protocol hardening"
 ```
 
 ---

@@ -152,11 +152,11 @@ export function useStreamingEvents(sessionId: string | null) {
 
   // Subscribe to IPC events
   useEffect(() => {
-    if (!sessionId || !window.codeall) return
+    if (!sessionId || !window.godcode) return
 
-    const removeChunkListener = window.codeall.on('message:stream-chunk', handleStreamChunk)
-    const removeErrorListener = window.codeall.on('message:stream-error', handleStreamError)
-    const removeUsageListener = window.codeall.on('message:stream-usage', handleStreamUsage)
+    const removeChunkListener = window.godcode.on('message:stream-chunk', handleStreamChunk)
+    const removeErrorListener = window.godcode.on('message:stream-error', handleStreamError)
+    const removeUsageListener = window.godcode.on('message:stream-usage', handleStreamUsage)
 
     return () => {
       removeChunkListener()

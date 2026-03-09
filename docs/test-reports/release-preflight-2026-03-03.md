@@ -7,7 +7,7 @@
 - 分支：`master`（HEAD：`91a52d09`）
 - 仓库状态：`Git 仓库（工作区有未提交改动）`
 - 执行人：`Halo`
-- 发布候选标识（Release Candidate）：`CodeAll-1.0.0`（本地打包产物）
+- 发布候选标识（Release Candidate）：`GodCode-1.0.0`（本地打包产物）
 
 ## 2. 环境信息
 - 操作系统：`macOS 15.7.4 (24G517)`
@@ -25,7 +25,7 @@ pnpm build:win
 pnpm exec playwright test tests/e2e/session-workflow.spec.ts -g "can bind default model and send message"
 pnpm exec vitest run "tests/integration/workforce-engine.test.ts"
 pnpm exec vitest run "tests/integration/browser-automation.test.ts" "tests/integration/ai-browser.test.ts"
-"/Users/mirage/AI/AiWork/CodeAll/dist/mac-arm64/CodeAll.app/Contents/MacOS/CodeAll"
+"/Users/mirage/AI/AiWork/GodCode/dist/mac-arm64/GodCode.app/Contents/MacOS/GodCode"
 ```
 
 ## 4. 结果摘要
@@ -49,9 +49,9 @@ pnpm exec vitest run "tests/integration/browser-automation.test.ts" "tests/integ
 | 检查项ID | 平台 | 执行命令/操作 | 结果（PASS/FAIL/BLOCKED） | 证据路径 | 备注 |
 |---|---|---|---|---|---|
 | RLS-BUILD-WIN | Windows | `pnpm build:win` | `FAIL` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-build-win.log` | NSIS `makensis` 启动失败（error -86） |
-| RLS-BUILD-MAC | macOS | `pnpm build:mac` | `PASS` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-build-mac.log` | 生成 `dist/CodeAll-1.0.0.dmg` 与 `dist/CodeAll-1.0.0-arm64.dmg` |
+| RLS-BUILD-MAC | macOS | `pnpm build:mac` | `PASS` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-build-mac.log` | 生成 `dist/GodCode-1.0.0.dmg` 与 `dist/GodCode-1.0.0-arm64.dmg` |
 | RLS-BOOT-WIN | Windows | 安装并启动打包应用 | `BLOCKED` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-build-win.log` | Windows 构建失败且当前非 Windows 环境，无法执行启动验证 |
-| RLS-BOOT-MAC | macOS | 启动 `dist/mac-arm64/CodeAll.app/Contents/MacOS/CodeAll` 并检查进程 | `PASS` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-boot-mac-check.log` | 进程成功拉起（`BOOT_MAC_STATUS=PASS`） |
+| RLS-BOOT-MAC | macOS | 启动 `dist/mac-arm64/GodCode.app/Contents/MacOS/GodCode` 并检查进程 | `PASS` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-boot-mac-check.log` | 进程成功拉起（`BOOT_MAC_STATUS=PASS`） |
 | RLS-FLOW-CHAT | Windows/macOS | `pnpm exec playwright test tests/e2e/session-workflow.spec.ts -g "can bind default model and send message"` | `PASS` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-flow-chat.log`, `playwright-report/index.html`, `test-results/.last-run.json` | 目标用例 1/1 通过 |
 | RLS-FLOW-DELEGATE | Windows/macOS | `pnpm exec vitest run "tests/integration/workforce-engine.test.ts"` | `PASS` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-flow-delegate.log` | 16 项全部通过 |
 | RLS-FLOW-BROWSER | Windows/macOS | `pnpm exec vitest run "tests/integration/browser-automation.test.ts" "tests/integration/ai-browser.test.ts"` | `PASS` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-flow-browser.log` | 2 个文件共 16 项全部通过 |
@@ -78,7 +78,7 @@ pnpm exec vitest run "tests/integration/browser-automation.test.ts" "tests/integ
 |---|---|---|---|---:|---|
 | RLS-BUILD-MAC | `pnpm build:mac` | `2026-03-03T09:54:59Z` | `2026-03-03T09:55:31Z` | `0` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-build-mac.log` |
 | RLS-BUILD-WIN | `pnpm build:win` | `2026-03-03T09:55:51Z` | `2026-03-03T09:56:31Z` | `1` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-build-win.log` |
-| RLS-BOOT-MAC | 启动 `dist/mac-arm64/CodeAll.app/Contents/MacOS/CodeAll` 并检查进程 | `2026-03-03T09:57:17Z` | `2026-03-03T09:57:25Z` | `0` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-boot-mac-check.log` |
+| RLS-BOOT-MAC | 启动 `dist/mac-arm64/GodCode.app/Contents/MacOS/GodCode` 并检查进程 | `2026-03-03T09:57:17Z` | `2026-03-03T09:57:25Z` | `0` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-boot-mac-check.log` |
 | RLS-FLOW-CHAT | `pnpm exec playwright test tests/e2e/session-workflow.spec.ts -g "can bind default model and send message"` | `2026-03-03T09:57:50Z` | `2026-03-03T09:57:56Z` | `0` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-flow-chat.log` |
 | RLS-FLOW-DELEGATE | `pnpm exec vitest run "tests/integration/workforce-engine.test.ts"` | `2026-03-03T09:58:13Z` | `2026-03-03T09:58:14Z` | `0` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-flow-delegate.log` |
 | RLS-FLOW-BROWSER | `pnpm exec vitest run "tests/integration/browser-automation.test.ts" "tests/integration/ai-browser.test.ts"` | `2026-03-03T09:58:28Z` | `2026-03-03T09:58:31Z` | `0` | `docs/test-reports/evidence/2026-03-03/pf-9-rls-flow-browser.log` |

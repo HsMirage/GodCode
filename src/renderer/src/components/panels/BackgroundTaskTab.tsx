@@ -64,7 +64,7 @@ function BackgroundTaskCard({
           ) : failed ? (
             <XCircle className="h-4 w-4 flex-shrink-0 text-rose-400" />
           ) : task.status === 'cancelled' ? (
-            <AlertCircle className="h-4 w-4 flex-shrink-0 text-amber-400" />
+            <AlertCircle className="ui-warning-icon h-4 w-4 flex-shrink-0" />
           ) : (
             <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-emerald-400" />
           )}
@@ -104,7 +104,7 @@ function BackgroundTaskCard({
                 stderr: {formatBytes(outputMeta.stderr)}
               </span>
               {outputMeta.truncated && (
-                <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-amber-300">
+                <span className="ui-warning-surface ui-warning-text rounded border px-1.5 py-0.5">
                   输出已截断
                 </span>
               )}

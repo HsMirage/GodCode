@@ -14,6 +14,7 @@ import fs from 'fs'
 import net from 'net'
 import { spawn, ChildProcess } from 'child_process'
 import { killPostgresProcesses } from '@/main/services/process-utils'
+import { GODCODE_PACKAGE_NAME, LEGACY_CODEALL_PACKAGE_NAME } from '@/shared/brand-compat'
 
 // Exported for testing - allows mocking in tests
 // Using an object so that internal calls can be mocked by vitest
@@ -626,14 +627,14 @@ async function loadOrCreateCredentials(
 
   if (isLegacy) {
     credentials = {
-      user: 'codeall',
-      password: 'codeall',
+      user: LEGACY_CODEALL_PACKAGE_NAME,
+      password: LEGACY_CODEALL_PACKAGE_NAME,
       port: 54320
     }
   } else {
     const crypto = await import('crypto')
     credentials = {
-      user: 'codeall',
+      user: GODCODE_PACKAGE_NAME,
       password: crypto.randomBytes(32).toString('hex'),
       port: await getAvailablePort()
     }

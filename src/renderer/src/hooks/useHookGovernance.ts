@@ -45,7 +45,7 @@ export function useHookGovernance() {
     })
 
   const load = useCallback(async () => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     try {
       setLoading(true)
@@ -66,7 +66,7 @@ export function useHookGovernance() {
   }, [])
 
   const save = useCallback(async () => {
-    if (!window.codeall || !governance) return
+    if (!window.godcode || !governance) return
 
     try {
       setSaving(true)
@@ -187,7 +187,7 @@ export function useHookGovernance() {
   }, [])
 
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     const remove = settingsApi.onHookAuditAppended((data: { record: HookGovernanceAuditRecord }) => {
       if (data?.record) appendRecentExecution(data.record)
     })

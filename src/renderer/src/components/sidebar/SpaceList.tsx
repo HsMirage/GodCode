@@ -13,11 +13,11 @@ export function SpaceList() {
   useEffect(() => {
     const loadSpaces = async () => {
       // Skip if not running in Electron environment
-      if (!window.codeall) {
-        console.warn('[SpaceList] window.codeall not available')
+      if (!window.godcode) {
+        console.warn('[SpaceList] window.godcode not available')
         return
       }
-      const result = (await window.codeall.invoke('space:list')) as SpaceListResult
+      const result = (await window.godcode.invoke('space:list')) as SpaceListResult
       if (result.success) {
         setSpaces(result.data)
         setCurrentSpaceId(prev => {

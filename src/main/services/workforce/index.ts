@@ -8,7 +8,7 @@
  *
  * Licensed under the Apache License, Version 2.0
  *
- * Modified by CodeAll project.
+ * Modified by GodCode project.
  */
 
 export { WorkforceEngine } from './workforce-engine'

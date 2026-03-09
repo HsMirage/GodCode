@@ -1,11 +1,11 @@
 {
-  "name": "codeall",
-  "productName": "CodeAll",
+  "name": "godcode",
+  "productName": "GodCode",
   "version": "1.0.0",
   "description": "Multi-LLM Collaborative Programming Platform",
   "type": "module",
   "main": "./out/main/index.js",
-  "author": "CodeAll Team",
+  "author": "GodCode Team",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",

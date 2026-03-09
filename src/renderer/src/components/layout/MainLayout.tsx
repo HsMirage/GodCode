@@ -33,13 +33,13 @@ export function MainLayout() {
 
   // 监听浏览器面板自动展开事件
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
-    const removeListener = window.codeall.on('browser:panel-show', () => {
+    const removeListener = window.godcode.on('browser:panel-show', () => {
       openBrowserPanel()
     })
 
-    const removeAIListener = window.codeall.on('browser:ai-operation', data => {
+    const removeAIListener = window.godcode.on('browser:ai-operation', data => {
       // Make sure panel opens and AI-controlled view is focused even if BrowserShell isn't mounted yet.
       openBrowserPanel()
       if (data.viewId) setActiveBrowserTab(data.viewId)
@@ -61,14 +61,14 @@ export function MainLayout() {
 
     resetBrowserWorkspace({ closePanel: true })
 
-    if (!window.codeall) {
+    if (!window.godcode) {
       return
     }
 
     void cleanupBrowserSessionViews(
       {
         listTabs: async () => {
-          const result = (await window.codeall.invoke('browser:list-tabs')) as {
+          const result = (await window.godcode.invoke('browser:list-tabs')) as {
             success?: boolean
             data?: Array<{ id: string }>
           }
@@ -76,10 +76,10 @@ export function MainLayout() {
           return result?.success ? result.data ?? [] : []
         },
         hide: async viewId => {
-          await window.codeall.invoke('browser:hide', { viewId })
+          await window.godcode.invoke('browser:hide', { viewId })
         },
         destroy: async viewId => {
-          await window.codeall.invoke('browser:destroy', { viewId })
+          await window.godcode.invoke('browser:destroy', { viewId })
         }
       },
       console

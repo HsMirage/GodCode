@@ -1,5 +1,5 @@
 /**
- * CodeAll IPC Channel Definitions
+ * GodCode IPC Channel Definitions
  *
  * This file acts as the Single Source of Truth for all IPC channels in the application.
  * All channels are categorized by their communication pattern.

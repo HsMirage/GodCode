@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to CodeAll will be documented in this file.
+All notable changes to GodCode will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Synced key behavioral updates from oh-my-opencode `v3.5.0` / `v3.5.1` into CodeAll orchestration flow:
+- Synced key behavioral updates from oh-my-opencode `v3.5.0` / `v3.5.1` into GodCode orchestration flow:
   - Boulder state now supports OMO-style minimal `boulder.json` payloads (`active_plan`, `session_ids`, `plan_name`, `agent`) with backward-compatible normalization.
   - Task continuation is now gated by active boulder `session_ids`, includes "plan-first" continuation instructions, and deduplicates near-duplicate idle triggers.
   - Agent run completion now ignores duplicate completion calls for terminal runs to prevent repeated completion notifications.
@@ -127,4 +127,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[1.0.0]: https://github.com/anthropics/codeall/releases/tag/v1.0.0
+[1.0.0]: https://github.com/anthropics/godcode/releases/tag/v1.0.0

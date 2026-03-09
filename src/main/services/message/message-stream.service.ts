@@ -1,11 +1,36 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import type { LLMChunk } from '@/main/services/llm/adapter.interface'
-import { llmRetryNotifier } from '@/main/services/llm/retry-notifier'
+import { llmRetryNotifier, type LLMRetryNotification } from '@/main/services/llm/retry-notifier'
 import { EVENT_CHANNELS } from '@/shared/ipc-channels'
 import type { MessageLogger } from './message.types'
 import { executionEventPersistenceService } from '../execution-event-persistence.service'
 
 const activeStreamControllers = new Map<string, AbortController>()
+
+function buildRetryNotice(notification: LLMRetryNotification): string {
+  const retryInSeconds = Math.max(1, Math.ceil(notification.delayMs / 1000))
+
+  const prefix = (() => {
+    switch (notification.classification) {
+      case 'NETWORK_ERROR':
+        return '模型连接异常，正在重试'
+      case 'TIMEOUT':
+      case 'GATEWAY_TIMEOUT':
+        return '模型请求超时，正在重试'
+      case 'RATE_LIMIT':
+        return '模型请求触发限流，正在重试'
+      case 'SERVICE_UNAVAILABLE':
+      case 'SERVER_ERROR':
+        return '模型服务暂时不可用，正在重试'
+      case 'RESOURCE_BUSY':
+        return '模型服务繁忙或响应不完整，正在重试'
+      default:
+        return '模型请求失败，正在重试'
+    }
+  })()
+
+  return `${prefix}（第${notification.attempt}次，约${retryInSeconds}秒后）`
+}
 
 export class MessageStreamSession {
   private readonly abortController = new AbortController()
@@ -34,10 +59,7 @@ export class MessageStreamSession {
       if (now - this.lastRetryNoticeAt < 1000) return
       this.lastRetryNoticeAt = now
 
-      this.sendError(
-        `api请求失败，正在尝试重连（第${notification.attempt}次，约${Math.max(1, Math.ceil(notification.delayMs / 1000))}秒后）`,
-        'API_RETRYING'
-      )
+      this.sendError(buildRetryNotice(notification), 'API_RETRYING')
     })
   }
 

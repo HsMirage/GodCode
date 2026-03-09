@@ -1,6 +1,9 @@
 import { Prisma, Space } from '@prisma/client'
 import { mkdirSync } from 'fs'
-import path from 'path'
+import {
+  getCanonicalWorkspaceScopedDir,
+  isGodCodeE2ETestEnvironment
+} from '@/main/services/brand-runtime-compat'
 import { DatabaseService } from './database'
 
 export async function createSpace(input: { name: string; workDir: string }): Promise<Space> {
@@ -9,8 +12,8 @@ export async function createSpace(input: { name: string; workDir: string }): Pro
     await dbService.init()
     const prisma = dbService.getClient()
 
-    const artifactsDir = path.join(input.workDir, '.codeall', 'artifacts')
-    const downloadsDir = path.join(input.workDir, '.codeall', 'downloads')
+    const artifactsDir = getCanonicalWorkspaceScopedDir(input.workDir, 'artifacts')
+    const downloadsDir = getCanonicalWorkspaceScopedDir(input.workDir, 'downloads')
 
     mkdirSync(artifactsDir, { recursive: true })
     mkdirSync(downloadsDir, { recursive: true })
@@ -35,7 +38,7 @@ export async function listSpaces(): Promise<Space[]> {
     const dbService = DatabaseService.getInstance()
     await dbService.init()
     // In E2E test environment, database may not be initialized
-    if (process.env.CODEALL_E2E_TEST === '1') {
+    if (isGodCodeE2ETestEnvironment()) {
       try {
         const prisma = dbService.getClient()
         const spaces = await prisma.space.findMany({

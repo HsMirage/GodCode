@@ -6,7 +6,7 @@ vi.mock('electron', () => {
   return {
     app: {
       getPath: vi.fn(name => {
-        if (name === 'userData') return '/tmp/codeall-perf-db'
+        if (name === 'userData') return '/tmp/godcode-perf-db'
         return '/tmp'
       })
     }

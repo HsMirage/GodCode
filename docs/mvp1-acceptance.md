@@ -1,6 +1,6 @@
 # MVP1 Acceptance Report
 
-**Project**: CodeAll  
+**Project**: GodCode  
 **Version**: 1.0.0 MVP1  
 **Date**: 2026-01-28  
 **Status**: ⚠️ PARTIAL COMPLETION (8/10 tasks)
@@ -292,7 +292,7 @@ MVP1 development has achieved **80% completion** (8/10 tasks). Core chat functio
 
 ```typescript
 // Type-safe overloaded signatures
-interface CodeAllAPI {
+interface GodCodeAPI {
   invoke(channel: 'message:send', data: { sessionId: string; content: string }): Promise<Message>
   on(
     channel: 'message:stream-chunk',

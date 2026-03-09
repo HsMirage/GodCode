@@ -1,6 +1,4 @@
 import { ipcMain, dialog } from 'electron'
-import os from 'os'
-import path from 'path'
 import {
   createSpace,
   listSpaces,
@@ -8,6 +6,10 @@ import {
   deleteSpace,
   updateSpace
 } from '../../services/space.service'
+import {
+  isGodCodeE2ETestEnvironment,
+  resolveGodCodeE2ESpaceDir
+} from '@/main/services/brand-runtime-compat'
 
 export function registerSpaceHandlers(): void {
   // 1. space:create
@@ -67,9 +69,8 @@ export function registerSpaceHandlers(): void {
   ipcMain.handle('dialog:select-folder', async () => {
     try {
       // Avoid native OS dialogs in E2E runs.
-      if (process.env.CODEALL_E2E_TEST === '1') {
-        const e2eDir =
-          process.env.CODEALL_E2E_SPACE_DIR ?? path.join(os.tmpdir(), 'codeall-e2e-space')
+      if (isGodCodeE2ETestEnvironment()) {
+        const e2eDir = resolveGodCodeE2ESpaceDir()
         return { success: true, data: e2eDir }
       }
 

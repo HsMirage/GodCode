@@ -1,12 +1,14 @@
 import { createRoot } from 'react-dom/client'
 import React from 'react'
+import { GODCODE_UI_STORAGE_KEY, LEGACY_CODEALL_UI_STORAGE_KEY } from '@shared/brand-compat'
 import './index.css'
 import { App } from './App'
+import { readCompatibleStorageValue } from './utils/storage-compat'
 
 // Initialize theme from localStorage before React renders
 const initializeTheme = () => {
   try {
-    const stored = localStorage.getItem('codeall-ui-storage')
+    const stored = readCompatibleStorageValue(GODCODE_UI_STORAGE_KEY, LEGACY_CODEALL_UI_STORAGE_KEY)
     if (stored) {
       const parsed = JSON.parse(stored)
       const theme = parsed?.state?.theme || 'dark'

@@ -1,6 +1,6 @@
-# CodeAll API 接口文档
+# GodCode API 接口文档
 
-本文档详细记录 CodeAll 应用的所有 IPC API 接口，供开发者和插件作者参考。
+本文档详细记录 GodCode 应用的所有 IPC API 接口，供开发者和插件作者参考。
 
 ## 目录
 
@@ -25,7 +25,7 @@
 
 ### 通信模式
 
-CodeAll 使用 Electron IPC 进行进程间通信，分为两种模式:
+GodCode 使用 Electron IPC 进行进程间通信，分为两种模式:
 
 1. **Invoke Channels** (请求-响应模式)
    - 方向: Renderer → Main
@@ -1307,7 +1307,7 @@ Artifact 创建事件。
 
 ## 数据库 Schema
 
-CodeAll 使用 Prisma + PostgreSQL。
+GodCode 使用 Prisma + PostgreSQL。
 
 ### Space
 

@@ -109,7 +109,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
   }, [sessionId])
 
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     setIsLoading(false)
     setSendError(null)
@@ -125,7 +125,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
   }, [reloadMessages, sessionId])
 
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     const removeRecovered = sessionApi.onRecovered(payload => {
       const { sessionId: recoveredSessionId, messages: recoveredMessages } = payload as {
@@ -156,7 +156,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
   }, [reloadMessages, reset, setMessages])
 
   useEffect(() => {
-    if (!window.codeall) return
+    if (!window.godcode) return
 
     const removeError = messageApi.onStreamError(payload => {
       const { sessionId: errSessionId, message, code } = payload as {
@@ -191,7 +191,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
   const handleSend = useCallback(
     async (payload: MessageInputSendPayload, agentCode?: string) => {
       const { content, skillCommand } = payload
-      if (!sessionId || !spaceId || !window.codeall) return false
+      if (!sessionId || !spaceId || !window.godcode) return false
 
       const targetSessionId = sessionId
       const userMessage: Message = {
@@ -271,7 +271,7 @@ export function useChatMessages(options: UseChatMessagesOptions) {
   )
 
   const handleStop = useCallback(async () => {
-    if (!sessionId || !window.codeall) return
+    if (!sessionId || !window.godcode) return
 
     const targetSessionId = sessionId
 

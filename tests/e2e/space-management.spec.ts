@@ -23,8 +23,8 @@ test.describe('Space Management', () => {
     await expect.poll(async () => window.locator('button[title="Rename space"]').count()).toBeGreaterThan(initialCount)
   })
 
-  test('CodeAll branding is clickable', async ({ window }) => {
-    const brand = window.locator('text=CodeAll').first()
+  test('GodCode branding is clickable', async ({ window }) => {
+    const brand = window.locator('text=GodCode').first()
     await expect(brand).toBeVisible()
     // Click should navigate to home
     await brand.click()

@@ -1,4 +1,0 @@
-- Used vi.useFakeTimers() and vi.advanceTimersByTime() to test setTimeout-based countdown logic.
-- Used vi.setSystemTime() to test time-based window for abort detection.
-- Verified that getState() lazily initializes session state.
-- Ensured cleanup() properly removes session data and cancels timers.

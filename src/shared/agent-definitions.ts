@@ -3,7 +3,6 @@
  * 基于中国神话/历史人物命名体系
  *
  * 多模型驱动：每个 Agent/Category 可配置独立的 LLM 模型和回退链
- * 参考 oh-my-opencode 的多模型编排架构
  */
 
 export type AgentType = 'primary' | 'subagent'

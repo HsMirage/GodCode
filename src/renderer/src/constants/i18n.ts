@@ -19,7 +19,7 @@ export const UI_TEXT = {
     install: '立即安装',
     dialogTitleReady: '更新已就绪',
     dialogTitleAvailable: '发现新版本',
-    versionLabel: (version: string) => `CodeAll v${version}`,
+    versionLabel: (version: string) => `GodCode v${version}`,
     downloadedDescription: '新版本已下载完成，重启后即可安装。',
     availableDescription: '检测到新版本，可立即下载。',
     releaseNotes: '更新说明',

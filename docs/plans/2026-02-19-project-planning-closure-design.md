@@ -1,7 +1,7 @@
 # 《项目规划.md》完善设计（进度差距闭环版）
 
 - 日期：2026-02-19
-- 目标文件：`/Users/mirage/AI/AiWork/CodeAll/项目规划.md`
+- 目标文件：`/Users/mirage/AI/AiWork/GodCode/项目规划.md`
 - 设计状态：已与用户逐节确认（骨架、判定口径、缺口分层、风险与验收）
 
 ## 1. 背景与目标

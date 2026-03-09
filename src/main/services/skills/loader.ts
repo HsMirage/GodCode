@@ -1,15 +1,19 @@
 /**
- * CodeAll Skill Loader
+ * GodCode Skill Loader
  *
  * Loads skills from various sources:
- * - Builtin skills (shipped with CodeAll)
+ * - Builtin skills (shipped with GodCode)
  * - User skills (from user config directory)
- * - Workspace skills (from .codeall/skills/ in workspace)
+ * - Workspace skills (preferring .godcode/skills/ with .codeall/skills/ fallback)
  */
 
 import * as fs from 'fs'
 import * as path from 'path'
 import { logger } from '@/shared/logger'
+import {
+  resolveUserSkillsDir,
+  resolveWorkspaceScopedDir
+} from '@/main/services/brand-runtime-compat'
 import { skillRegistry } from './registry'
 import type { Skill, SkillSource } from './types'
 
@@ -126,10 +130,10 @@ export async function loadUserSkills(userSkillsDir?: string): Promise<number> {
 }
 
 /**
- * Load workspace skills from .codeall/skills/
+ * Load workspace skills from the canonical GodCode path with legacy fallback
  */
 export async function loadWorkspaceSkills(workspaceDir: string): Promise<number> {
-  const skillsDir = path.join(workspaceDir, '.codeall', 'skills')
+  const skillsDir = resolveWorkspaceScopedDir(workspaceDir, 'skills')
   return loadSkillsFromDirectory(skillsDir, 'workspace')
 }
 
@@ -177,7 +181,7 @@ function parseSkillTriggers(data: unknown): Skill['triggers'] | undefined {
   const result: Skill['triggers'] = {}
 
   if (Array.isArray(triggers.keywords)) {
-    result.keywords = triggers.keywords.filter((k) => typeof k === 'string')
+    result.keywords = triggers.keywords.filter(k => typeof k === 'string')
   }
 
   if (typeof triggers.command === 'string') {
@@ -186,8 +190,8 @@ function parseSkillTriggers(data: unknown): Skill['triggers'] | undefined {
 
   if (Array.isArray(triggers.patterns)) {
     result.patterns = triggers.patterns
-      .filter((p) => typeof p === 'string')
-      .map((p) => {
+      .filter(p => typeof p === 'string')
+      .map(p => {
         try {
           return new RegExp(p, 'i')
         } catch {
@@ -205,5 +209,5 @@ function parseSkillTriggers(data: unknown): Skill['triggers'] | undefined {
  */
 function getDefaultUserSkillsDir(): string {
   const homeDir = process.env.HOME || process.env.USERPROFILE || ''
-  return path.join(homeDir, '.codeall', 'skills')
+  return resolveUserSkillsDir(homeDir)
 }

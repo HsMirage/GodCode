@@ -22,7 +22,7 @@ export function UpdateToast() {
         icon: <CheckCircle className="h-5 w-5 text-green-400" />,
         action: {
           label: UI_TEXT.updater.install,
-          onClick: () => window.codeall?.invoke(INVOKE_CHANNELS.UPDATER_QUIT_AND_INSTALL)
+          onClick: () => window.godcode?.invoke(INVOKE_CHANNELS.UPDATER_QUIT_AND_INSTALL)
         }
       })
     }

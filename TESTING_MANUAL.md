@@ -1,4 +1,4 @@
-# CodeAll Manual Testing Checklist
+# GodCode Manual Testing Checklist
 
 **Version**: 1.0.0  
 **Target Platform**: Windows 10/11  
@@ -19,16 +19,16 @@
 
 ### Test 1: NSIS Installer Execution
 
-**Location**: `dist/CodeAll Setup 1.0.0.exe` (after Wine build or Windows build)
+**Location**: `dist/GodCode Setup 1.0.0.exe` (after Wine build or Windows build)
 
 1. [ ] **Launch Installer**
-   - Double-click `CodeAll Setup 1.0.0.exe`
+   - Double-click `GodCode Setup 1.0.0.exe`
    - Verify: Installer window opens without errors
 
 2. [ ] **Installation Directory Selection**
    - Verify: Option to change installation directory is available
-   - Default: `C:\Users\<username>\AppData\Local\Programs\CodeAll`
-   - Test: Change to custom directory (e.g., `C:\CodeAll`)
+   - Default: `C:\Users\<username>\AppData\Local\Programs\GodCode`
+   - Test: Change to custom directory (e.g., `C:\GodCode`)
    - Verify: Custom path is accepted
 
 3. [ ] **Installation Progress**
@@ -37,13 +37,13 @@
    - Expected duration: 30-60 seconds
 
 4. [ ] **Shortcut Creation**
-   - Verify: Desktop shortcut "CodeAll" is created
-   - Verify: Start Menu entry exists in `Start Menu > CodeAll`
+   - Verify: Desktop shortcut "GodCode" is created
+   - Verify: Start Menu entry exists in `Start Menu > GodCode`
 
 5. [ ] **Completion**
    - Verify: "Finish" button appears
-   - Verify: Option to "Launch CodeAll" is present
-   - Click: Finish with "Launch CodeAll" checked
+   - Verify: Option to "Launch GodCode" is present
+   - Click: Finish with "Launch GodCode" checked
 
 ---
 
@@ -53,13 +53,13 @@
 
 1. [ ] **Application Starts**
    - Verify: Main window appears within 5 seconds
-   - Window title: "CodeAll"
-   - Window icon: CodeAll logo visible
+   - Window title: "GodCode"
+   - Window icon: GodCode logo visible
 
 2. [ ] **Database Initialization**
    - Verify: No database errors shown
    - Expected: Embedded PostgreSQL starts automatically
-   - Check logs: `%APPDATA%\CodeAll\logs\main.log`
+   - Check logs: `%APPDATA%\GodCode\logs\main.log`
 
 3. [ ] **Main UI Loads**
    - Verify: Chat interface visible
@@ -87,7 +87,7 @@
 ### Test 4: Chat Functionality
 
 1. [ ] **Send Message**
-   - Type: "Hello, CodeAll"
+   - Type: "Hello, GodCode"
    - Click: Send button
    - Verify: Message appears in chat
    - Verify: Waiting indicator shows
@@ -150,7 +150,7 @@
    - Settings > Data Management
    - Click: "Create Backup"
    - Verify: Backup file created
-   - Location: `%APPDATA%\CodeAll\backups\`
+   - Location: `%APPDATA%\GodCode\backups\`
 
 2. [ ] **Export Data**
    - Click: "Export Chat History"
@@ -169,7 +169,7 @@
    - Force close: Alt+F4 (or Task Manager kill)
 
 2. [ ] **Restart Application**
-   - Launch CodeAll again
+   - Launch GodCode again
    - Verify: Recovery prompt appears
    - Click: "Resume Session"
    - Verify: Previous chat context restored
@@ -188,7 +188,7 @@
 
 2. [ ] **Memory Usage**
    - Open Task Manager
-   - Verify: CodeAll.exe memory < 500MB during idle
+   - Verify: GodCode.exe memory < 500MB during idle
    - Verify: Memory < 1GB during active tasks
 
 ---
@@ -211,7 +211,7 @@
 
 1. [ ] **Uninstall via Control Panel**
    - Open: Settings > Apps > Apps & Features
-   - Find: CodeAll
+   - Find: GodCode
    - Click: Uninstall
    - Verify: Uninstaller runs
 
@@ -219,11 +219,11 @@
    - Check: Desktop shortcut removed
    - Check: Start Menu entry removed
    - Check: Installation folder deleted
-   - Note: User data in `%APPDATA%\CodeAll` is preserved (by design)
+   - Note: User data in `%APPDATA%\GodCode` is preserved (by design)
 
 3. [ ] **Complete Cleanup** (optional)
-   - Manually delete: `%APPDATA%\CodeAll`
-   - Verify: All CodeAll traces removed
+   - Manually delete: `%APPDATA%\GodCode`
+   - Verify: All GodCode traces removed
 
 ---
 

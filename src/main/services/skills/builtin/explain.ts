@@ -38,7 +38,7 @@ Output format:
   builtin: true,
   enabled: true,
   metadata: {
-    author: 'CodeAll Team',
+    author: 'GodCode Team',
     version: '1.1.0',
     pack: 'builtin-skill-pack',
     packVersion: '1.0.0',

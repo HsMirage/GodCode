@@ -1,4 +1,4 @@
-import type { AgentRoutingStrategy } from '@/shared/agent-definitions'
+import type { AgentRoutingStrategy } from './agent-definitions'
 
 export type TaskBenchmarkDimension =
   | 'simple_code_task'

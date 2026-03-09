@@ -6,7 +6,7 @@
  * Licensed under MIT
  *
  * This service creates and manages BrowserView instances for the Content Canvas,
- * enabling true browser functionality within CodeAll.
+ * enabling true browser functionality within GodCode.
  *
  * Key features:
  * - Multiple concurrent BrowserViews (one per tab)

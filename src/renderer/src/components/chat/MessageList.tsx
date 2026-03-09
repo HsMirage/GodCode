@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { GODCODE_CHAT_SCROLL_PREFIX, LEGACY_CODEALL_CHAT_SCROLL_PREFIX } from '@shared/brand-compat'
 import { Message, MessageCard } from './MessageCard'
 import { cn } from '../../utils'
+import { readCompatibleStorageValue, writeCompatibleStorageValue } from '../../utils/storage-compat'
 
 interface MessageListProps {
   messages: Message[]
@@ -44,7 +46,12 @@ export function MessageList({
 
   const storageKey = useMemo(() => {
     if (!scrollKey) return null
-    return `codeall:chat-scroll:${scrollKey}`
+    return `${GODCODE_CHAT_SCROLL_PREFIX}${scrollKey}`
+  }, [scrollKey])
+
+  const legacyStorageKey = useMemo(() => {
+    if (!scrollKey) return null
+    return `${LEGACY_CODEALL_CHAT_SCROLL_PREFIX}${scrollKey}`
   }, [scrollKey])
 
   useEffect(() => {
@@ -80,15 +87,16 @@ export function MessageList({
 
   useEffect(() => {
     const container = scrollContainerRef?.current
-    const key = storageKey
     if (!container) return
-    if (!key) return
+    if (!storageKey || !legacyStorageKey) return
     if (!pendingInitRef.current) return
 
     pendingInitRef.current = false
 
     const shouldRemember = rememberScroll ?? true
-    const savedTopRaw = shouldRemember ? localStorage.getItem(key) : null
+    const savedTopRaw = shouldRemember
+      ? readCompatibleStorageValue(storageKey, legacyStorageKey)
+      : null
 
     // Defer until DOM is painted, so scrollHeight is correct.
     requestAnimationFrame(() => {
@@ -107,13 +115,13 @@ export function MessageList({
         setShowJumpToLatest(!atBottomNow)
       })
     })
-  }, [messages.length, storageKey, rememberScroll, scrollContainerRef])
+  }, [storageKey, legacyStorageKey, rememberScroll, scrollContainerRef])
 
   useEffect(() => {
     const container = scrollContainerRef?.current
     if (!container) return
 
-    const shouldRemember = (rememberScroll ?? true) && !!storageKey
+    const shouldRemember = (rememberScroll ?? true) && !!storageKey && !!legacyStorageKey
 
     const onScroll = () => {
       const atBottomNow = isNearBottom(container, BOTTOM_THRESHOLD_PX)
@@ -126,8 +134,8 @@ export function MessageList({
       if (pendingSaveRafRef.current != null) return
       pendingSaveRafRef.current = requestAnimationFrame(() => {
         pendingSaveRafRef.current = null
-        if (!storageKey) return
-        localStorage.setItem(storageKey, String(pendingSaveTopRef.current))
+        if (!storageKey || !legacyStorageKey) return
+        writeCompatibleStorageValue(storageKey, legacyStorageKey, String(pendingSaveTopRef.current))
       })
     }
 
@@ -140,7 +148,7 @@ export function MessageList({
       if (pendingSaveRafRef.current != null) cancelAnimationFrame(pendingSaveRafRef.current)
       pendingSaveRafRef.current = null
     }
-  }, [scrollContainerRef, storageKey, rememberScroll])
+  }, [scrollContainerRef, storageKey, legacyStorageKey, rememberScroll])
 
   const scrollToLatest = () => {
     const container = scrollContainerRef?.current

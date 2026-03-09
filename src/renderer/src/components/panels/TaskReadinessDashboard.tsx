@@ -4,6 +4,12 @@ import type {
   TaskReadinessLayerSummary
 } from '@shared/task-readiness-dashboard'
 
+const ESSENTIAL_METRIC_KEYS = new Set([
+  'task_completion_rate',
+  'average_retry_count',
+  'manual_takeover_rate'
+])
+
 function formatMetricValue(metric: TaskReadinessDashboardMetricPoint): string {
   if (metric.value === null) {
     return '待接入'
@@ -12,34 +18,22 @@ function formatMetricValue(metric: TaskReadinessDashboardMetricPoint): string {
   return metric.unit === '%' ? `${metric.value}%` : String(metric.value)
 }
 
-function formatMetricDelta(metric: TaskReadinessDashboardMetricPoint, previousLabel: string | null): string {
-  if (!previousLabel || metric.trend === 'missing') {
-    return '当前暂无可用数据'
-  }
-
-  if (metric.trend === 'new') {
-    return `已开始记录，等待相较 ${previousLabel} 的趋势对比`
-  }
-
-  if (metric.delta === null) {
-    return `等待相较 ${previousLabel} 的趋势对比`
+function formatMetricDelta(
+  metric: TaskReadinessDashboardMetricPoint,
+  previousLabel: string | null
+): string | null {
+  if (!previousLabel || metric.trend === 'missing' || metric.trend === 'new' || metric.delta === null) {
+    return null
   }
 
   const deltaValue = Math.abs(metric.delta)
   const suffix = metric.unit === '%' ? 'pp' : ''
-  const verb = metric.trend === 'up' ? '改善' : metric.trend === 'down' ? '退化' : '持平'
-  return `相较 ${previousLabel}${verb} ${deltaValue}${suffix}`
-}
-
-function sourceStatusLabel(status: TaskReadinessDashboardMetricPoint['sourceStatus']): string {
-  switch (status) {
-    case 'measured':
-      return '实测'
-    case 'estimated':
-      return '估算'
-    case 'missing':
-      return '待接入'
+  if (metric.trend === 'flat' || deltaValue === 0) {
+    return `较 ${previousLabel} 持平`
   }
+
+  const verb = metric.trend === 'up' ? '改善' : '退化'
+  return `较 ${previousLabel}${verb} ${deltaValue}${suffix}`
 }
 
 function layerStatusLabel(status: TaskReadinessLayerSummary['status']): string {
@@ -64,7 +58,7 @@ function layerStatusClass(status: TaskReadinessLayerSummary['status']): string {
     case 'stable':
       return 'border-slate-600/60 bg-slate-800/60 text-slate-200'
     case 'insufficient-data':
-      return 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+      return 'ui-warning-surface ui-warning-text'
   }
 }
 
@@ -74,64 +68,66 @@ export function TaskReadinessDashboard({ dashboard }: { dashboard: TaskReadiness
   }
 
   const previousLabel = dashboard.previous?.label || null
+  const visibleMetrics = dashboard.metrics.filter(
+    metric => ESSENTIAL_METRIC_KEYS.has(metric.key) && metric.value !== null
+  )
+  const fallbackMetrics = dashboard.metrics.filter(metric => metric.value !== null).slice(0, 3)
+  const compactMetrics = visibleMetrics.length > 0 ? visibleMetrics : fallbackMetrics
+  const visibleLayers = dashboard.layers.filter(
+    layer => layer.status === 'regressed' || layer.status === 'improved'
+  )
+  const hasStableSignal = dashboard.layers.some(layer => layer.status === 'stable')
 
   return (
     <div className="rounded-lg border border-[var(--border-primary)] bg-[var(--bg-primary)] px-3 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-            任务 KPI 仪表盘
-          </p>
-          <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-            当前版本 {dashboard.latest.label}
-            {previousLabel ? ` · 对比 ${previousLabel}` : ' · 已记录首个版本基线'}
-          </p>
-        </div>
-        <span className="rounded bg-[var(--bg-tertiary)] px-2 py-1 text-[11px] text-[var(--text-secondary)]">
-          {new Date(dashboard.latest.capturedAt).toLocaleString()}
-        </span>
-      </div>
+      <p className="text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">
+        KPI 仪表盘
+      </p>
 
-      <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        {dashboard.metrics.map(metric => (
+      <div className="mt-3 grid gap-2 md:grid-cols-3">
+        {compactMetrics.map(metric => {
+          const deltaText = formatMetricDelta(metric, previousLabel)
+          return (
           <div
             key={metric.key}
             className="rounded-lg border border-[var(--border-primary)] bg-[var(--bg-secondary)] px-3 py-2 text-xs"
           >
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-[var(--text-muted)]">{metric.label}</p>
-              <span className="rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)]">
-                {sourceStatusLabel(metric.sourceStatus)}
-              </span>
-            </div>
+            <p className="text-[var(--text-muted)]">{metric.label}</p>
             <p className="mt-1 text-sm font-medium text-[var(--text-primary)]">
               {formatMetricValue(metric)}
             </p>
-            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
-              {formatMetricDelta(metric, previousLabel)}
-            </p>
-            {metric.note ? <p className="mt-1 text-[10px] text-[var(--text-muted)]">{metric.note}</p> : null}
+            {deltaText ? <p className="mt-1 text-[11px] text-[var(--text-secondary)]">{deltaText}</p> : null}
           </div>
-        ))}
+          )
+        })}
       </div>
 
       <div className="mt-3">
-        <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">分层退化定位</p>
-        <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
-          {dashboard.layers.map(layer => (
-            <div key={layer.layer} className={`rounded-lg border px-3 py-2 text-xs ${layerStatusClass(layer.status)}`}>
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-medium">{layer.label}</p>
-                <span className="text-[10px] uppercase tracking-wide">{layerStatusLabel(layer.status)}</span>
+        <p className="text-xs uppercase tracking-wide text-[var(--text-secondary)]">分层诊断</p>
+        {visibleLayers.length > 0 ? (
+          <div className="mt-2 space-y-2">
+            {visibleLayers.map(layer => (
+              <div
+                key={layer.layer}
+                className={`rounded-lg border px-3 py-2 text-xs ${layerStatusClass(layer.status)}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium">{layer.label}</p>
+                  <span className="text-[10px] uppercase tracking-wide">
+                    {layerStatusLabel(layer.status)}
+                  </span>
+                </div>
+                {layer.reasons[0] ? (
+                  <p className="mt-1 text-[11px]">{layer.reasons[0]}</p>
+                ) : null}
               </div>
-              <div className="mt-1 space-y-1 text-[11px]">
-                {layer.reasons.map(reason => (
-                  <p key={reason}>{reason}</p>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-[var(--text-muted)]">
+            {hasStableSignal ? '当前未发现明显退化。' : '当前暂无足够信号。'}
+          </p>
+        )}
       </div>
     </div>
   )

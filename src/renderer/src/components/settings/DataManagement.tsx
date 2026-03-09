@@ -46,13 +46,13 @@ export function DataManagement() {
 
   const fetchBackups = async () => {
     // Skip if not running in Electron environment
-    if (!window.codeall) {
-      console.warn('[DataManagement] window.codeall not available')
+    if (!window.godcode) {
+      console.warn('[DataManagement] window.godcode not available')
       return
     }
     try {
       setLoading(true)
-      const data = (await window.codeall.invoke('backup:list')) as BackupMetadata[]
+      const data = (await window.godcode.invoke('backup:list')) as BackupMetadata[]
       // Ensure dates are Date objects
       const processed = data.map(b => ({
         ...b,
@@ -80,10 +80,10 @@ export function DataManagement() {
   }, [message])
 
   const handleCreateBackup = async () => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     try {
       setProcessing('backup')
-      await window.codeall.invoke('backup:create')
+      await window.godcode.invoke('backup:create')
       setMessage({ type: 'success', text: '备份创建成功' })
       await fetchBackups()
     } catch (error) {
@@ -95,10 +95,10 @@ export function DataManagement() {
   }
 
   const handleRestore = async (path: string) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     try {
       setProcessing('restore')
-      await window.codeall.invoke('restore:from-file', path)
+      await window.godcode.invoke('restore:from-file', path)
       setMessage({ type: 'success', text: '数据恢复成功' })
       setConfirmRestore(null)
       // Ideally reload or re-fetch app state here if needed
@@ -111,10 +111,10 @@ export function DataManagement() {
   }
 
   const handleDelete = async (filename: string) => {
-    if (!window.codeall) return
+    if (!window.godcode) return
     try {
       setProcessing('delete')
-      await window.codeall.invoke('backup:delete', filename)
+      await window.godcode.invoke('backup:delete', filename)
       setMessage({ type: 'success', text: '备份已删除' })
       await fetchBackups()
     } catch (error) {

@@ -1,10 +1,10 @@
-# CodeAll Architecture Documentation
+# GodCode Architecture Documentation
 
-This document describes the high-level architecture and design principles of the CodeAll platform.
+This document describes the high-level architecture and design principles of the GodCode platform.
 
 ## 1. System Overview
 
-CodeAll is a desktop application built on **Electron**, designed to be a Multi-LLM Collaborative Programming Platform. It follows a multi-process architecture to ensure security, performance, and a responsive user experience.
+GodCode is a desktop application built on **Electron**, designed to be a Multi-LLM Collaborative Programming Platform. It follows a multi-process architecture to ensure security, performance, and a responsive user experience.
 
 ### Process Model
 
@@ -18,7 +18,7 @@ CodeAll is a desktop application built on **Electron**, designed to be a Multi-L
 
 ### 2.1 Workforce & Delegate System
 
-The core logic of CodeAll resides in its ability to decompose complex goals into executable tasks.
+The core logic of GodCode resides in its ability to decompose complex goals into executable tasks.
 
 - **Workforce Engine**: Responsible for high-level workflow orchestration. It decomposes a user request into a Directed Acyclic Graph (DAG) of sub-tasks.
 - **Delegate Engine**: Acts as the dispatcher. It assigns sub-tasks to specialized **Agents** based on their capabilities (e.g., coding, research, testing).
@@ -26,7 +26,7 @@ The core logic of CodeAll resides in its ability to decompose complex goals into
 
 ### 2.2 LLM Adapter Layer
 
-To support multiple providers, CodeAll implements a provider-agnostic adapter layer.
+To support multiple providers, GodCode implements a provider-agnostic adapter layer.
 
 - **Interface**: `LLMAdapter` defines a standard contract for completion and streaming.
 - **Implementations**: Support for Anthropic, OpenAI, Google Gemini, and OpenAI-compatible endpoints.
@@ -72,7 +72,7 @@ graph TD
 
 ### 4.1 Database Schema
 
-CodeAll uses **Prisma** with an **embedded PostgreSQL** instance for robust state management.
+GodCode uses **Prisma** with an **embedded PostgreSQL** instance for robust state management.
 
 - **Space**: Represents a project workspace mapped to a local directory.
 - **Session**: A persistent conversation or work stream within a Space.

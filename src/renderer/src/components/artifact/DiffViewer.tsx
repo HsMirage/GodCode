@@ -19,14 +19,14 @@ export function DiffViewer({ artifactId, filePath, onClose }: DiffViewerProps) {
 
   useEffect(() => {
     const loadDiff = async () => {
-      if (!window.codeall) {
+      if (!window.godcode) {
         setError('IPC not available')
         setLoading(false)
         return
       }
 
       try {
-        const diffContent = await window.codeall.invoke('artifact:get-diff', artifactId)
+        const diffContent = await window.godcode.invoke('artifact:get-diff', artifactId)
         setDiff(diffContent as string | null)
       } catch (err) {
         setError((err as Error).message)

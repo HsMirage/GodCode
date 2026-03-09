@@ -43,7 +43,7 @@ export interface LLMConfig {
   maxToolIterations?: number
   /** Fallback max output tokens for providers that require it (e.g., Anthropic) */
   defaultMaxTokens?: number
-  /** Explicit OpenAI-compatible API protocol selection */
+  /** Legacy OpenAI-compatible API protocol override. Omit to auto-adapt. */
   apiProtocol?: LLMConfigApiProtocol
 }
 

@@ -248,7 +248,7 @@ describe('<TaskPanel /> diagnostics view', () => {
     expect((await screen.findAllByText(content => content.includes('来源: 类别绑定'))).length).toBeGreaterThan(0)
     expect(screen.getByText(content => content.includes('命中: 命中类别绑定'))).toBeInTheDocument()
     expect(screen.getByText(content => content.includes('模型选择: 命中类别绑定'))).toBeInTheDocument()
-    expect(screen.getByText(content => content.includes('选择回退: 绑定已禁用'))).toBeInTheDocument()
+    expect(screen.queryByText(content => content.includes('选择回退:'))).not.toBeInTheDocument()
   })
 
   it('shows stuck diagnostic panel with approval blocker summary', async () => {

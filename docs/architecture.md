@@ -1,6 +1,6 @@
-# CodeAll Architecture
+# GodCode Architecture
 
-CodeAll is built on a modern Electron architecture, separating concerns between the Main Process (Node.js) and the Renderer Process (React). It leverages local databases, multi-LLM adapters, and browser automation to create a cohesive development environment.
+GodCode is built on a modern Electron architecture, separating concerns between the Main Process (Node.js) and the Renderer Process (React). It leverages local databases, multi-LLM adapters, and browser automation to create a cohesive development environment.
 
 ## 1. System Overview
 

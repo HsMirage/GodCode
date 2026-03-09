@@ -1,6 +1,6 @@
 # Database Schema Documentation
 
-This document describes the database structure for CodeAll, which uses PostgreSQL managed through Prisma ORM.
+This document describes the database structure for GodCode, which uses PostgreSQL managed through Prisma ORM.
 
 ## Entity Relationship Diagram (ERD)
 

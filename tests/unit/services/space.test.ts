@@ -84,10 +84,10 @@ describe('SpaceService', () => {
 
       // Verify fs calls
       expect(fs.mkdirSync).toHaveBeenCalledTimes(2)
-      expect(fs.mkdirSync).toHaveBeenCalledWith(path.join(input.workDir, '.codeall', 'artifacts'), {
+      expect(fs.mkdirSync).toHaveBeenCalledWith(path.join(input.workDir, '.godcode', 'artifacts'), {
         recursive: true
       })
-      expect(fs.mkdirSync).toHaveBeenCalledWith(path.join(input.workDir, '.codeall', 'downloads'), {
+      expect(fs.mkdirSync).toHaveBeenCalledWith(path.join(input.workDir, '.godcode', 'downloads'), {
         recursive: true
       })
 

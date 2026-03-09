@@ -57,7 +57,10 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
   const [loadState, setLoadState] = useState<WorkflowLoadState>('idle')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [checkpoints, setCheckpoints] = useState<CheckpointTimelineItem[]>([])
-  const [runtimeLookup, setRuntimeLookup] = useState<WorkflowRuntimeLookup>({ byTaskId: {}, byRunId: {} })
+  const [runtimeLookup, setRuntimeLookup] = useState<WorkflowRuntimeLookup>({
+    byTaskId: {},
+    byRunId: {}
+  })
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const runtimeLookupRef = useRef<WorkflowRuntimeLookup>({ byTaskId: {}, byRunId: {} })
   const selectedTaskIdRef = useRef<string | null>(null)
@@ -82,110 +85,113 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
     [requestNavigate]
   )
 
-  const convertTasksToFlow = useCallback((tasks: Task[], highlightedTaskId: string | null) => {
-    const flowNodes: Node<TaskNodeData>[] = []
-    const flowEdges: Edge[] = []
-    const taskMap = new Map<string, Task>()
-    const logicalTaskMap = new Map<string, string>()
+  const convertTasksToFlow = useCallback(
+    (tasks: Task[], highlightedTaskId: string | null) => {
+      const flowNodes: Node<TaskNodeData>[] = []
+      const flowEdges: Edge[] = []
+      const taskMap = new Map<string, Task>()
+      const logicalTaskMap = new Map<string, string>()
 
-    tasks.forEach(task => {
-      taskMap.set(task.id, task)
-      const logicalTaskId = task.metadata?.logicalTaskId
-      if (typeof logicalTaskId === 'string' && logicalTaskId.trim()) {
-        logicalTaskMap.set(logicalTaskId, task.id)
-      }
-    })
-
-    const resolveDependencyId = (depId: string): string | null => {
-      if (taskMap.has(depId)) return depId
-      if (logicalTaskMap.has(depId)) return logicalTaskMap.get(depId) || null
-      return null
-    }
-
-    const taskLevels = new Map<string, number>()
-    const calculateLevel = (task: Task, visited = new Set<string>()): number => {
-      if (taskLevels.has(task.id)) return taskLevels.get(task.id)!
-      if (visited.has(task.id)) return 0
-
-      visited.add(task.id)
-      const rawDependencies = [
-        ...(((task.metadata?.dependencies as string[]) || []).filter(Boolean)),
-        ...(((task.metadata?.logicalDependencies as string[]) || []).filter(Boolean))
-      ]
-      const dependencies = rawDependencies
-        .map(depId => resolveDependencyId(depId))
-        .filter((depId): depId is string => Boolean(depId))
-      const maxDepLevel = dependencies.reduce((max, depId) => {
-        const depTask = taskMap.get(depId)
-        return depTask ? Math.max(max, calculateLevel(depTask, visited)) : max
-      }, 0)
-
-      const level = maxDepLevel + 1
-      taskLevels.set(task.id, level)
-      return level
-    }
-
-    tasks.forEach(task => calculateLevel(task))
-
-    const levelGroups = new Map<number, Task[]>()
-    tasks.forEach(task => {
-      const level = taskLevels.get(task.id) || 0
-      if (!levelGroups.has(level)) {
-        levelGroups.set(level, [])
-      }
-      levelGroups.get(level)!.push(task)
-    })
-
-    tasks.forEach((task, _index) => {
-      const level = taskLevels.get(task.id) || 0
-      const levelTasks = levelGroups.get(level) || []
-      const positionInLevel = levelTasks.indexOf(task)
-
-      const duration =
-        task.startedAt && task.completedAt
-          ? (new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime()) / 1000
-          : undefined
-
-      flowNodes.push({
-        id: task.id,
-        type: 'task',
-        position: {
-          x: positionInLevel * 320 + 50,
-          y: level * 200 + 50
-        },
-        data: {
-          task,
-          duration,
-          highlighted: highlightedTaskId === task.id,
-          onSelectTask: handleTaskSelect
+      tasks.forEach(task => {
+        taskMap.set(task.id, task)
+        const logicalTaskId = task.metadata?.logicalTaskId
+        if (typeof logicalTaskId === 'string' && logicalTaskId.trim()) {
+          logicalTaskMap.set(logicalTaskId, task.id)
         }
       })
 
-      const rawDependencies = [
-        ...(((task.metadata?.dependencies as string[]) || []).filter(Boolean)),
-        ...(((task.metadata?.logicalDependencies as string[]) || []).filter(Boolean))
-      ]
-      const dependencies = rawDependencies
-        .map(depId => resolveDependencyId(depId))
-        .filter((depId): depId is string => Boolean(depId))
-      dependencies.forEach(depId => {
-        if (taskMap.has(depId)) {
-          flowEdges.push({
-            id: `${depId}-${task.id}`,
-            source: depId,
-            target: task.id,
-            type: 'default'
-          })
-        }
-      })
-    })
+      const resolveDependencyId = (depId: string): string | null => {
+        if (taskMap.has(depId)) return depId
+        if (logicalTaskMap.has(depId)) return logicalTaskMap.get(depId) || null
+        return null
+      }
 
-    return { nodes: flowNodes, edges: flowEdges }
-  }, [handleTaskSelect])
+      const taskLevels = new Map<string, number>()
+      const calculateLevel = (task: Task, visited = new Set<string>()): number => {
+        if (taskLevels.has(task.id)) return taskLevels.get(task.id)!
+        if (visited.has(task.id)) return 0
+
+        visited.add(task.id)
+        const rawDependencies = [
+          ...((task.metadata?.dependencies as string[]) || []).filter(Boolean),
+          ...((task.metadata?.logicalDependencies as string[]) || []).filter(Boolean)
+        ]
+        const dependencies = rawDependencies
+          .map(depId => resolveDependencyId(depId))
+          .filter((depId): depId is string => Boolean(depId))
+        const maxDepLevel = dependencies.reduce((max, depId) => {
+          const depTask = taskMap.get(depId)
+          return depTask ? Math.max(max, calculateLevel(depTask, visited)) : max
+        }, 0)
+
+        const level = maxDepLevel + 1
+        taskLevels.set(task.id, level)
+        return level
+      }
+
+      tasks.forEach(task => calculateLevel(task))
+
+      const levelGroups = new Map<number, Task[]>()
+      tasks.forEach(task => {
+        const level = taskLevels.get(task.id) || 0
+        if (!levelGroups.has(level)) {
+          levelGroups.set(level, [])
+        }
+        levelGroups.get(level)!.push(task)
+      })
+
+      tasks.forEach((task, _index) => {
+        const level = taskLevels.get(task.id) || 0
+        const levelTasks = levelGroups.get(level) || []
+        const positionInLevel = levelTasks.indexOf(task)
+
+        const duration =
+          task.startedAt && task.completedAt
+            ? (new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime()) / 1000
+            : undefined
+
+        flowNodes.push({
+          id: task.id,
+          type: 'task',
+          position: {
+            x: positionInLevel * 320 + 50,
+            y: level * 200 + 50
+          },
+          data: {
+            task,
+            duration,
+            highlighted: highlightedTaskId === task.id,
+            onSelectTask: handleTaskSelect
+          }
+        })
+
+        const rawDependencies = [
+          ...((task.metadata?.dependencies as string[]) || []).filter(Boolean),
+          ...((task.metadata?.logicalDependencies as string[]) || []).filter(Boolean)
+        ]
+        const dependencies = rawDependencies
+          .map(depId => resolveDependencyId(depId))
+          .filter((depId): depId is string => Boolean(depId))
+        dependencies.forEach(depId => {
+          if (taskMap.has(depId)) {
+            flowEdges.push({
+              id: `${depId}-${task.id}`,
+              source: depId,
+              target: task.id,
+              type: 'default'
+            })
+          }
+        })
+      })
+
+      return { nodes: flowNodes, edges: flowEdges }
+    },
+    [handleTaskSelect]
+  )
 
   const reloadTasks = useCallback(
     async (options?: { showLoading?: boolean }) => {
-      if (!window.codeall) return
+      if (!window.godcode) return
 
       const requestId = ++latestRequestIdRef.current
       if (options?.showLoading) {
@@ -194,7 +200,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
       }
 
       try {
-        const tasks = (await window.codeall.invoke('task:list', sessionId)) as Task[]
+        const tasks = (await window.godcode.invoke('task:list', sessionId)) as Task[]
         if (requestId !== latestRequestIdRef.current) {
           return
         }
@@ -202,7 +208,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
         let nextRuntimeLookup: WorkflowRuntimeLookup = { byTaskId: {}, byRunId: {} }
         const workflowTask = tasks.find(task => task.type === 'workflow')
         if (workflowTask) {
-          const snapshot = (await window.codeall.invoke(
+          const snapshot = (await window.godcode.invoke(
             'workflow-observability:get',
             workflowTask.id
           )) as {
@@ -226,9 +232,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
               ? snapshot.workflowId
               : undefined
           const safeSnapshot =
-            snapshotWorkflowId && snapshotWorkflowId !== workflowTask.id
-              ? null
-              : snapshot
+            snapshotWorkflowId && snapshotWorkflowId !== workflowTask.id ? null : snapshot
 
           if (requestId !== latestRequestIdRef.current) {
             return
@@ -238,10 +242,13 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
           const byRunId: Record<string, { taskId: string; agentId?: string }> = {}
           const selectionByTaskId: Record<string, WorkflowNodeSelectionSnapshot> = {}
 
-          const assignments = Array.isArray(safeSnapshot?.assignments) ? safeSnapshot.assignments : []
+          const assignments = Array.isArray(safeSnapshot?.assignments)
+            ? safeSnapshot.assignments
+            : []
           for (const assignment of assignments) {
             const taskId =
-              typeof assignment?.persistedTaskId === 'string' && assignment.persistedTaskId.trim().length > 0
+              typeof assignment?.persistedTaskId === 'string' &&
+              assignment.persistedTaskId.trim().length > 0
                 ? assignment.persistedTaskId
                 : null
             if (!taskId) continue
@@ -251,7 +258,8 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
                 ? assignment.runId
                 : undefined
             const agentId =
-              typeof assignment.assignedAgent === 'string' && assignment.assignedAgent.trim().length > 0
+              typeof assignment.assignedAgent === 'string' &&
+              assignment.assignedAgent.trim().length > 0
                 ? assignment.assignedAgent
                 : undefined
 
@@ -261,17 +269,26 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
             }
 
             selectionByTaskId[taskId] = {
-              modelSource: typeof assignment?.modelSource === 'string' ? assignment.modelSource : undefined,
+              modelSource:
+                typeof assignment?.modelSource === 'string' ? assignment.modelSource : undefined,
               modelSelectionReason:
-                typeof assignment?.modelSelectionReason === 'string' ? assignment.modelSelectionReason : undefined,
+                typeof assignment?.modelSelectionReason === 'string'
+                  ? assignment.modelSelectionReason
+                  : undefined,
               modelSelectionSummary:
-                typeof assignment?.modelSelectionSummary === 'string' ? assignment.modelSelectionSummary : undefined,
+                typeof assignment?.modelSelectionSummary === 'string'
+                  ? assignment.modelSelectionSummary
+                  : undefined,
               fallbackReason:
-                typeof assignment?.fallbackReason === 'string' ? assignment.fallbackReason : undefined,
+                typeof assignment?.fallbackReason === 'string'
+                  ? assignment.fallbackReason
+                  : undefined,
               fallbackAttemptSummary: Array.isArray(assignment?.fallbackAttemptSummary)
                 ? assignment.fallbackAttemptSummary
                 : undefined,
-              fallbackTrail: Array.isArray(assignment?.fallbackTrail) ? assignment.fallbackTrail : undefined
+              fallbackTrail: Array.isArray(assignment?.fallbackTrail)
+                ? assignment.fallbackTrail
+                : undefined
             }
           }
 
@@ -311,7 +328,10 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
                 return []
               }
               return raw
-                .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+                .filter(
+                  (item): item is Record<string, unknown> =>
+                    Boolean(item) && typeof item === 'object'
+                )
                 .map((item, index) => ({
                   key: `${task.id}-${String(item.persistedTaskId || item.timestamp || index)}`,
                   phase: typeof item.phase === 'string' ? item.phase : 'unknown',
@@ -320,9 +340,14 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
                   reason: typeof item.reason === 'string' ? item.reason : undefined
                 }))
             })
-            .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime())
+            .sort(
+              (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+            )
 
-          const { nodes: flowNodes, edges: flowEdges } = convertTasksToFlow(enrichedTasks, highlightedTaskId)
+          const { nodes: flowNodes, edges: flowEdges } = convertTasksToFlow(
+            enrichedTasks,
+            highlightedTaskId
+          )
 
           if (requestId !== latestRequestIdRef.current) {
             return
@@ -347,7 +372,9 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
               return []
             }
             return raw
-              .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+              .filter(
+                (item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object'
+              )
               .map((item, index) => ({
                 key: `${task.id}-${String(item.persistedTaskId || item.timestamp || index)}`,
                 phase: typeof item.phase === 'string' ? item.phase : 'unknown',
@@ -356,7 +383,9 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
                 reason: typeof item.reason === 'string' ? item.reason : undefined
               }))
           })
-          .sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime())
+          .sort(
+            (a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()
+          )
 
         const currentNavigationTarget = navigationTargetRef.current
         const highlightedTaskId =
@@ -399,8 +428,8 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
   }, [navigationTarget])
 
   useEffect(() => {
-    if (!window.codeall) {
-      console.warn('[WorkflowView] window.codeall not available')
+    if (!window.godcode) {
+      console.warn('[WorkflowView] window.godcode not available')
       setLoadState('ready')
       setLoadError(null)
       return
@@ -411,7 +440,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
 
   useEffect(() => {
     // Skip if not running in Electron environment
-    if (!window.codeall) {
+    if (!window.godcode) {
       return
     }
 
@@ -444,7 +473,7 @@ export function WorkflowView({ sessionId }: WorkflowViewProps) {
       })
     }
 
-    const removeListener = window.codeall.on('task:status-changed', handleStatusChange)
+    const removeListener = window.godcode.on('task:status-changed', handleStatusChange)
     return () => {
       removeListener()
     }

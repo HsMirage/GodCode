@@ -1,5 +1,5 @@
 /**
- * CodeAll Preload Script
+ * GodCode Preload Script
  *
  * This script runs in a privileged context before the renderer's web content loads.
  * It creates a secure bridge between the renderer process and the main process
@@ -12,16 +12,17 @@
  */
 
 import { contextBridge } from 'electron'
-import { createCodeAllAPI, type CodeAllAPI } from './api'
+import { GODCODE_RUNTIME_NAMESPACE, LEGACY_CODEALL_RUNTIME_NAMESPACE } from '../shared/brand-compat'
+import { createGodCodeAPI, type GodCodeAPI } from './api'
 
 // Create the API instance
-const codeallAPI = createCodeAllAPI()
+const godcodeAPI = createGodCodeAPI()
 
 // Expose the API to the renderer process
 if (process.contextIsolated) {
   try {
-    // Expose under 'codeall' namespace in window object
-    contextBridge.exposeInMainWorld('codeall', codeallAPI)
+    contextBridge.exposeInMainWorld(GODCODE_RUNTIME_NAMESPACE, godcodeAPI)
+    contextBridge.exposeInMainWorld(LEGACY_CODEALL_RUNTIME_NAMESPACE, godcodeAPI)
   } catch (error) {
     console.error('[Preload] Failed to expose API:', error)
   }
@@ -29,5 +30,6 @@ if (process.contextIsolated) {
   // Fallback for non-isolated contexts (development/testing)
   // This should not happen in production as contextIsolation should always be true
   console.warn('[Preload] Context isolation is disabled. Using direct window assignment.')
-  ;(window as unknown as { codeall: CodeAllAPI }).codeall = codeallAPI
+  ;(window as unknown as { godcode: GodCodeAPI; codeall: GodCodeAPI }).godcode = godcodeAPI
+  ;(window as unknown as { godcode: GodCodeAPI; codeall: GodCodeAPI }).codeall = godcodeAPI
 }

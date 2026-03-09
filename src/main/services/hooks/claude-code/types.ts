@@ -221,10 +221,10 @@ export interface TopLevelDecision extends CommonHookOutput {
 
 export type ClaudeCodeHookOutput = TopLevelDecision
 
-// ============= 事件映射到 CodeAll =============
+// ============= 事件映射到 GodCode =============
 
 /**
- * Claude Code 事件到 CodeAll 事件的映射
+ * Claude Code 事件到 GodCode 事件的映射
  */
 export const CLAUDE_TO_CODEALL_EVENT_MAP: Record<ClaudeCodeHookEvent, string> = {
   SessionStart: 'onSessionStart',

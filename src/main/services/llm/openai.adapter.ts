@@ -30,8 +30,70 @@ import {
 import { resolveLLMRuntimeConfig, type ResolvedLLMRuntimeConfig } from './runtime-config'
 import { getLLMRetryDecision } from './retry-utils'
 import { llmRetryNotifier } from './retry-notifier'
+import {
+  buildOpenAIProtocolCandidates,
+  getAlternateOpenAIProtocol,
+  normalizeOpenAIProtocol,
+  shouldRetryWithAlternateOpenAIProtocol
+} from './openai-protocol'
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
+
+class LLMRequestTimeoutError extends Error {
+  constructor(label: string, timeoutMs: number) {
+    super(`${label} timed out after ${timeoutMs}ms`)
+    this.name = 'TimeoutError'
+  }
+}
+
+async function withHardTimeout<T>(input: {
+  promise: Promise<T>
+  startedAt: number
+  timeoutMs: number
+  onTimeout: () => void
+  label: string
+}): Promise<T> {
+  const remainingMs = Math.max(0, input.timeoutMs - (Date.now() - input.startedAt))
+
+  if (remainingMs === 0) {
+    input.onTimeout()
+    throw new LLMRequestTimeoutError(input.label, input.timeoutMs)
+  }
+
+  return await new Promise<T>((resolve, reject) => {
+    let settled = false
+
+    const timeoutId = setTimeout(() => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      input.onTimeout()
+      reject(new LLMRequestTimeoutError(input.label, input.timeoutMs))
+    }, remainingMs)
+
+    input.promise
+      .then(value => {
+        if (settled) {
+          return
+        }
+
+        settled = true
+        clearTimeout(timeoutId)
+        resolve(value)
+      })
+      .catch(error => {
+        if (settled) {
+          return
+        }
+
+        settled = true
+        clearTimeout(timeoutId)
+        reject(error)
+      })
+  })
+}
 
 const hasUserCancellationMarker = (message: string): boolean => {
   const normalized = message.toLowerCase()
@@ -73,9 +135,7 @@ const getOpenAITools = (
   }))
 }
 
-const toStrictResponsesParameters = (
-  schema: Record<string, unknown>
-): Record<string, unknown> => {
+const toStrictResponsesParameters = (schema: Record<string, unknown>): Record<string, unknown> => {
   const normalize = (value: unknown): unknown => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return value
@@ -373,18 +433,17 @@ export const resolveApiProtocol = (
   config: LLMConfig,
   fallbackProtocol?: LLMConfigApiProtocol
 ): LLMConfigApiProtocol => {
-  const protocol = typeof config.apiProtocol === 'string' ? config.apiProtocol.trim() : ''
-  if (protocol === 'chat/completions' || protocol === 'responses') {
-    return protocol
-  }
-  if (!protocol && fallbackProtocol) {
-    return fallbackProtocol
-  }
-  throw new Error(
-    'MODEL_PROTOCOL_NOT_CONFIGURED: OpenAI-compatible 模型缺少 apiProtocol 配置。' +
-      '请在“设置 -> 模型”中将协议设置为 chat/completions 或 responses。'
-  )
+  return normalizeOpenAIProtocol(config.apiProtocol) ?? fallbackProtocol ?? 'responses'
 }
+
+export const resolveApiProtocolCandidates = (
+  config: LLMConfig,
+  fallbackProtocol?: LLMConfigApiProtocol
+): LLMConfigApiProtocol[] =>
+  buildOpenAIProtocolCandidates({
+    configured: config.apiProtocol,
+    preferred: fallbackProtocol ?? 'responses'
+  })
 
 const formatToolExecutionFallback = (outputs: ToolExecutionOutput[]): string => {
   if (!outputs.length) return ''
@@ -430,7 +489,19 @@ export class OpenAIAdapter implements LLMAdapter {
     return resolveApiProtocol(config)
   }
 
+  protected resolveApiProtocolCandidates(config: LLMConfig): LLMConfigApiProtocol[] {
+    return resolveApiProtocolCandidates(config)
+  }
+
   async sendMessage(messages: Message[], config: LLMConfig): Promise<LLMResponse> {
+    return this.sendMessageInternal(messages, config, new Set())
+  }
+
+  private async sendMessageInternal(
+    messages: Message[],
+    config: LLMConfig,
+    attemptedProtocols: Set<LLMConfigApiProtocol>
+  ): Promise<LLMResponse> {
     let openaiMessages: ChatCompletionMessageParam[] = toOpenAIMessages(messages)
     const runtime = resolveLLMRuntimeConfig(config)
     const model = (config.model || this.fallbackModel || '').trim()
@@ -438,8 +509,32 @@ export class OpenAIAdapter implements LLMAdapter {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
     const protocol = this.resolveApiProtocol(config)
-    if (protocol === 'responses') {
-      return this.sendMessageWithResponses(messages, config, model, runtime)
+    attemptedProtocols.add(protocol)
+
+    try {
+      if (protocol === 'responses') {
+        return await this.sendMessageWithResponses(messages, config, model, runtime)
+      }
+    } catch (error) {
+      const alternateProtocol = getAlternateOpenAIProtocol(protocol)
+      if (
+        attemptedProtocols.has(alternateProtocol) ||
+        !shouldRetryWithAlternateOpenAIProtocol({ error, attempted: protocol })
+      ) {
+        throw error
+      }
+
+      logger.warn('Responses protocol failed, retrying with alternate OpenAI endpoint', {
+        model,
+        attemptedProtocol: protocol,
+        alternateProtocol,
+        error
+      })
+      return this.sendMessageInternal(
+        messages,
+        { ...config, apiProtocol: alternateProtocol },
+        attemptedProtocols
+      )
     }
 
     const tools = getOpenAITools(config.tools)
@@ -450,7 +545,6 @@ export class OpenAIAdapter implements LLMAdapter {
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
       for (let attempt = 1; ; attempt++) {
-        let timeoutId: ReturnType<typeof setTimeout> | null = null
         let externalAbortHandler: (() => void) | null = null
         try {
           if (config.abortSignal?.aborted) {
@@ -458,28 +552,30 @@ export class OpenAIAdapter implements LLMAdapter {
           }
 
           const controller = new AbortController()
-          timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+          const requestStartedAt = Date.now()
 
           if (config.abortSignal) {
             externalAbortHandler = () => controller.abort()
             config.abortSignal.addEventListener('abort', externalAbortHandler, { once: true })
           }
 
-          const response = await this.client.chat.completions.create(
-            {
-              model,
-              messages: openaiMessages,
-              temperature: config.temperature,
-              max_tokens: config.maxTokens,
-              tools: tools.length > 0 ? tools : undefined
-            },
-            { signal: controller.signal }
-          )
+          const response = await withHardTimeout({
+            promise: this.client.chat.completions.create(
+              {
+                model,
+                messages: openaiMessages,
+                temperature: config.temperature,
+                max_tokens: config.maxTokens,
+                tools: tools.length > 0 ? tools : undefined
+              },
+              { signal: controller.signal }
+            ),
+            startedAt: requestStartedAt,
+            timeoutMs: runtime.timeoutMs,
+            onTimeout: () => controller.abort(),
+            label: 'OpenAI request'
+          })
 
-          if (timeoutId) {
-            clearTimeout(timeoutId)
-            timeoutId = null
-          }
           if (config.abortSignal && externalAbortHandler) {
             config.abortSignal.removeEventListener('abort', externalAbortHandler)
             externalAbortHandler = null
@@ -495,26 +591,32 @@ export class OpenAIAdapter implements LLMAdapter {
           if (!choice) {
             const recoveredText = extractResponseText(response)
             if (recoveredText.trim()) {
-              logger.warn('OpenAI-compatible response missing choices[0], recovered text from fallback fields', {
+              logger.warn(
+                'OpenAI-compatible response missing choices[0], recovered text from fallback fields',
+                {
+                  model,
+                  hasUsage: Boolean(response.usage),
+                  responseKeys:
+                    response && typeof response === 'object'
+                      ? Object.keys(response as unknown as Record<string, unknown>)
+                      : []
+                }
+              )
+              fullContent += recoveredText
+              return { content: fullContent, usage: totalUsage }
+            }
+
+            logger.error(
+              'OpenAI-compatible response missing choices[0] and no recoverable text payload',
+              {
                 model,
                 hasUsage: Boolean(response.usage),
                 responseKeys:
                   response && typeof response === 'object'
                     ? Object.keys(response as unknown as Record<string, unknown>)
                     : []
-              })
-              fullContent += recoveredText
-              return { content: fullContent, usage: totalUsage }
-            }
-
-            logger.error('OpenAI-compatible response missing choices[0] and no recoverable text payload', {
-              model,
-              hasUsage: Boolean(response.usage),
-              responseKeys:
-                response && typeof response === 'object'
-                  ? Object.keys(response as unknown as Record<string, unknown>)
-                  : []
-            })
+              }
+            )
             throw new Error(
               'OpenAI-compatible response missing choices[0] and no extractable text. Please verify provider compatibility.'
             )
@@ -526,27 +628,33 @@ export class OpenAIAdapter implements LLMAdapter {
           if (choiceText) {
             fullContent += choiceText
           } else if ((response.usage?.completion_tokens ?? 0) > 0) {
-            logger.warn('OpenAI-compatible response contained completion tokens but no extractable text', {
-              model,
-              finishReason: choice?.finish_reason,
-              choiceKeys:
-                choice && typeof choice === 'object'
-                  ? Object.keys(choice as unknown as Record<string, unknown>)
-                  : [],
-              messageKeys:
-                message && typeof message === 'object'
-                  ? Object.keys(message as unknown as Record<string, unknown>)
-                  : []
-            })
+            logger.warn(
+              'OpenAI-compatible response contained completion tokens but no extractable text',
+              {
+                model,
+                finishReason: choice?.finish_reason,
+                choiceKeys:
+                  choice && typeof choice === 'object'
+                    ? Object.keys(choice as unknown as Record<string, unknown>)
+                    : [],
+                messageKeys:
+                  message && typeof message === 'object'
+                    ? Object.keys(message as unknown as Record<string, unknown>)
+                    : []
+              }
+            )
           }
 
           const toolCalls = message?.tool_calls
           if (!toolCalls || toolCalls.length === 0) {
             if (!fullContent.trim() && lastToolExecutionFallback.trim()) {
-              logger.warn('OpenAI-compatible response returned no extractable text; using tool fallback summary', {
-                model,
-                finishReason: choice?.finish_reason
-              })
+              logger.warn(
+                'OpenAI-compatible response returned no extractable text; using tool fallback summary',
+                {
+                  model,
+                  finishReason: choice?.finish_reason
+                }
+              )
               return { content: lastToolExecutionFallback, usage: totalUsage }
             }
             return { content: fullContent, usage: totalUsage }
@@ -610,9 +718,6 @@ export class OpenAIAdapter implements LLMAdapter {
           // Continue to next iteration for follow-up response
           break // Break retry loop, continue tool loop
         } catch (error) {
-          if (timeoutId) {
-            clearTimeout(timeoutId)
-          }
           if (config.abortSignal && externalAbortHandler) {
             config.abortSignal.removeEventListener('abort', externalAbortHandler)
           }
@@ -620,6 +725,27 @@ export class OpenAIAdapter implements LLMAdapter {
           if (isAbortRequested(error, config.abortSignal)) {
             logger.info('OpenAI request aborted by user')
             throw error instanceof Error ? error : new Error('Request aborted by user')
+          }
+          const alternateProtocol = getAlternateOpenAIProtocol(protocol)
+          if (
+            attempt === 1 &&
+            !attemptedProtocols.has(alternateProtocol) &&
+            shouldRetryWithAlternateOpenAIProtocol({ error, attempted: protocol })
+          ) {
+            logger.warn(
+              'Chat Completions protocol failed, retrying with alternate OpenAI endpoint',
+              {
+                model,
+                attemptedProtocol: protocol,
+                alternateProtocol,
+                error
+              }
+            )
+            return this.sendMessageInternal(
+              messages,
+              { ...config, apiProtocol: alternateProtocol },
+              attemptedProtocols
+            )
           }
           const retryDecision = getLLMRetryDecision({
             error,
@@ -718,7 +844,6 @@ export class OpenAIAdapter implements LLMAdapter {
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
       for (let attempt = 1; ; attempt++) {
-        let timeoutId: ReturnType<typeof setTimeout> | null = null
         let externalAbortHandler: (() => void) | null = null
         try {
           if (config.abortSignal?.aborted) {
@@ -726,7 +851,7 @@ export class OpenAIAdapter implements LLMAdapter {
           }
 
           const controller = new AbortController()
-          timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+          const requestStartedAt = Date.now()
 
           if (config.abortSignal) {
             externalAbortHandler = () => controller.abort()
@@ -745,12 +870,14 @@ export class OpenAIAdapter implements LLMAdapter {
             previous_response_id: previousResponseId
           }
 
-          const response = await this.client.responses.create(request, { signal: controller.signal })
+          const response = await withHardTimeout({
+            promise: this.client.responses.create(request, { signal: controller.signal }),
+            startedAt: requestStartedAt,
+            timeoutMs: runtime.timeoutMs,
+            onTimeout: () => controller.abort(),
+            label: 'Responses request'
+          })
 
-          if (timeoutId) {
-            clearTimeout(timeoutId)
-            timeoutId = null
-          }
           if (config.abortSignal && externalAbortHandler) {
             config.abortSignal.removeEventListener('abort', externalAbortHandler)
             externalAbortHandler = null
@@ -768,9 +895,12 @@ export class OpenAIAdapter implements LLMAdapter {
           const toolCalls = parseResponseFunctionCalls(response)
           if (toolCalls.length === 0) {
             if (!fullContent.trim() && lastToolExecutionFallback.trim()) {
-              logger.warn('Responses API returned no extractable text; using tool fallback summary', {
-                model
-              })
+              logger.warn(
+                'Responses API returned no extractable text; using tool fallback summary',
+                {
+                  model
+                }
+              )
               return { content: lastToolExecutionFallback, usage: totalUsage }
             }
             return { content: fullContent, usage: totalUsage }
@@ -794,14 +924,13 @@ export class OpenAIAdapter implements LLMAdapter {
           })
 
           lastToolExecutionFallback = formatToolExecutionFallback(executionResult.outputs)
-          pendingInput = toResponseFunctionCallOutputs(executionResult.outputs) as unknown as ResponseInputItem[]
+          pendingInput = toResponseFunctionCallOutputs(
+            executionResult.outputs
+          ) as unknown as ResponseInputItem[]
           previousResponseId = response.id
 
           break
         } catch (error) {
-          if (timeoutId) {
-            clearTimeout(timeoutId)
-          }
           if (config.abortSignal && externalAbortHandler) {
             config.abortSignal.removeEventListener('abort', externalAbortHandler)
           }
@@ -878,7 +1007,6 @@ export class OpenAIAdapter implements LLMAdapter {
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
       for (let attempt = 1; ; attempt++) {
-        let timeoutId: ReturnType<typeof setTimeout> | null = null
         let externalAbortHandler: (() => void) | null = null
         try {
           if (config.abortSignal?.aborted) {
@@ -887,7 +1015,7 @@ export class OpenAIAdapter implements LLMAdapter {
           }
 
           const controller = new AbortController()
-          timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+          const requestStartedAt = Date.now()
 
           if (config.abortSignal) {
             externalAbortHandler = () => controller.abort()
@@ -907,13 +1035,34 @@ export class OpenAIAdapter implements LLMAdapter {
             previous_response_id: previousResponseId
           }
 
-          const stream = await this.client.responses.create(request, { signal: controller.signal })
+          const stream = await withHardTimeout({
+            promise: this.client.responses.create(request, { signal: controller.signal }),
+            startedAt: requestStartedAt,
+            timeoutMs: runtime.timeoutMs,
+            onTimeout: () => controller.abort(),
+            label: 'Responses streaming request'
+          })
 
           const functionArgChunks = new Map<string, { name: string; arguments: string }>()
           const functionCallIdByItemId = new Map<string, string>()
           let latestResponseId = previousResponseId
 
-          for await (const event of stream as AsyncIterable<ResponseStreamEvent>) {
+          const iterator = (stream as AsyncIterable<ResponseStreamEvent>)[Symbol.asyncIterator]()
+
+          while (true) {
+            const next = await withHardTimeout({
+              promise: iterator.next(),
+              startedAt: requestStartedAt,
+              timeoutMs: runtime.timeoutMs,
+              onTimeout: () => controller.abort(),
+              label: 'Responses streaming request'
+            })
+
+            if (next.done) {
+              break
+            }
+
+            const event = next.value
             if (event.type === 'response.output_text.delta') {
               if (event.delta) {
                 yield { content: event.delta, done: false, type: 'content' }
@@ -967,10 +1116,6 @@ export class OpenAIAdapter implements LLMAdapter {
             }
           }
 
-          if (timeoutId) {
-            clearTimeout(timeoutId)
-            timeoutId = null
-          }
           if (config.abortSignal && externalAbortHandler) {
             config.abortSignal.removeEventListener('abort', externalAbortHandler)
             externalAbortHandler = null
@@ -1041,15 +1186,13 @@ export class OpenAIAdapter implements LLMAdapter {
             }
           }
 
-          pendingInput = toResponseFunctionCallOutputs(executionResult.outputs) as unknown as ResponseInputItem[]
+          pendingInput = toResponseFunctionCallOutputs(
+            executionResult.outputs
+          ) as unknown as ResponseInputItem[]
           previousResponseId = latestResponseId
 
           break
         } catch (error) {
-          if (timeoutId) {
-            clearTimeout(timeoutId)
-            timeoutId = null
-          }
           if (config.abortSignal && externalAbortHandler) {
             config.abortSignal.removeEventListener('abort', externalAbortHandler)
             externalAbortHandler = null
@@ -1120,6 +1263,14 @@ export class OpenAIAdapter implements LLMAdapter {
   }
 
   async *streamMessage(messages: Message[], config: LLMConfig): AsyncGenerator<LLMChunk> {
+    yield* this.streamMessageInternal(messages, config, new Set())
+  }
+
+  private async *streamMessageInternal(
+    messages: Message[],
+    config: LLMConfig,
+    attemptedProtocols: Set<LLMConfigApiProtocol>
+  ): AsyncGenerator<LLMChunk> {
     let openaiMessages: ChatCompletionMessageParam[] = toOpenAIMessages(messages)
     const runtime = resolveLLMRuntimeConfig(config)
     const model = (config.model || this.fallbackModel || '').trim()
@@ -1127,9 +1278,34 @@ export class OpenAIAdapter implements LLMAdapter {
       throw new Error('No model configured. Please set a default model in Settings.')
     }
     const protocol = this.resolveApiProtocol(config)
+    attemptedProtocols.add(protocol)
+
     if (protocol === 'responses') {
-      yield* this.streamMessageWithResponses(messages, config, model, runtime)
-      return
+      try {
+        yield* this.streamMessageWithResponses(messages, config, model, runtime)
+        return
+      } catch (error) {
+        const alternateProtocol = getAlternateOpenAIProtocol(protocol)
+        if (
+          attemptedProtocols.has(alternateProtocol) ||
+          !shouldRetryWithAlternateOpenAIProtocol({ error, attempted: protocol })
+        ) {
+          throw error
+        }
+
+        logger.warn('Responses streaming failed, retrying with alternate OpenAI endpoint', {
+          model,
+          attemptedProtocol: protocol,
+          alternateProtocol,
+          error
+        })
+        yield* this.streamMessageInternal(
+          messages,
+          { ...config, apiProtocol: alternateProtocol },
+          attemptedProtocols
+        )
+        return
+      }
     }
 
     const tools = getOpenAITools(config.tools)
@@ -1145,7 +1321,6 @@ export class OpenAIAdapter implements LLMAdapter {
 
     for (let iteration = 0; iteration < runtime.maxToolIterations; iteration++) {
       for (let attempt = 1; ; attempt++) {
-        let timeoutId: ReturnType<typeof setTimeout> | null = null
         let externalAbortHandler: (() => void) | null = null
         try {
           if (config.abortSignal?.aborted) {
@@ -1154,33 +1329,60 @@ export class OpenAIAdapter implements LLMAdapter {
           }
 
           const controller = new AbortController()
-          timeoutId = setTimeout(() => controller.abort(), runtime.timeoutMs)
+          const requestStartedAt = Date.now()
 
           if (config.abortSignal) {
             externalAbortHandler = () => controller.abort()
             config.abortSignal.addEventListener('abort', externalAbortHandler, { once: true })
           }
 
-          const stream = await this.client.chat.completions.create(
-            {
-              model,
-              messages: openaiMessages,
-              temperature: config.temperature,
-              max_tokens: config.maxTokens,
-              tools: tools.length > 0 ? tools : undefined,
-              stream: true,
-              stream_options: { include_usage: true }
-            },
-            { signal: controller.signal }
-          )
+          const stream = await withHardTimeout({
+            promise: this.client.chat.completions.create(
+              {
+                model,
+                messages: openaiMessages,
+                temperature: config.temperature,
+                max_tokens: config.maxTokens,
+                tools: tools.length > 0 ? tools : undefined,
+                stream: true,
+                stream_options: { include_usage: true }
+              },
+              { signal: controller.signal }
+            ),
+            startedAt: requestStartedAt,
+            timeoutMs: runtime.timeoutMs,
+            onTimeout: () => controller.abort(),
+            label: 'OpenAI streaming request'
+          })
 
           // Accumulate tool calls from streaming deltas
           const streamingToolCalls: Map<number, StreamingToolCall> = new Map()
           let finishReason: string | null = null
           let assistantContent = ''
 
-          for await (const chunk of stream) {
-            const chunkUsage = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage
+          const iterator = (
+            stream as AsyncIterable<
+              Awaited<typeof stream> extends AsyncIterable<infer T> ? T : never
+            >
+          )[Symbol.asyncIterator]()
+
+          while (true) {
+            const next = await withHardTimeout({
+              promise: iterator.next(),
+              startedAt: requestStartedAt,
+              timeoutMs: runtime.timeoutMs,
+              onTimeout: () => controller.abort(),
+              label: 'OpenAI streaming request'
+            })
+
+            if (next.done) {
+              break
+            }
+
+            const chunk = next.value
+            const chunkUsage = (
+              chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number } }
+            ).usage
             if (chunkUsage) {
               totalUsage.prompt_tokens += chunkUsage.prompt_tokens ?? 0
               totalUsage.completion_tokens += chunkUsage.completion_tokens ?? 0
@@ -1248,9 +1450,6 @@ export class OpenAIAdapter implements LLMAdapter {
             }
           }
 
-          clearTimeout(timeoutId)
-          timeoutId = null
-
           if (config.abortSignal && externalAbortHandler) {
             config.abortSignal.removeEventListener('abort', externalAbortHandler)
             externalAbortHandler = null
@@ -1267,11 +1466,14 @@ export class OpenAIAdapter implements LLMAdapter {
           }
 
           if (finishReason && finishReason !== 'tool_calls') {
-            logger.warn('OpenAI-compatible stream emitted tool_calls but finish_reason is non-standard', {
-              model,
-              finishReason,
-              toolCallCount: streamingToolCalls.size
-            })
+            logger.warn(
+              'OpenAI-compatible stream emitted tool_calls but finish_reason is non-standard',
+              {
+                model,
+                finishReason,
+                toolCallCount: streamingToolCalls.size
+              }
+            )
           }
 
           // Parse accumulated tool calls
@@ -1361,10 +1563,6 @@ export class OpenAIAdapter implements LLMAdapter {
           // Continue to next iteration for follow-up streaming
           break // Break retry loop, continue tool loop
         } catch (error) {
-          if (timeoutId) {
-            clearTimeout(timeoutId)
-            timeoutId = null
-          }
           if (config.abortSignal && externalAbortHandler) {
             config.abortSignal.removeEventListener('abort', externalAbortHandler)
             externalAbortHandler = null
@@ -1373,6 +1571,28 @@ export class OpenAIAdapter implements LLMAdapter {
           if (isAbortRequested(error, config.abortSignal)) {
             logger.info('OpenAI streaming aborted by user')
             yield { content: '', done: true, type: 'done' }
+            return
+          }
+          const alternateProtocol = getAlternateOpenAIProtocol(protocol)
+          if (
+            attempt === 1 &&
+            !attemptedProtocols.has(alternateProtocol) &&
+            shouldRetryWithAlternateOpenAIProtocol({ error, attempted: protocol })
+          ) {
+            logger.warn(
+              'Chat Completions streaming failed, retrying with alternate OpenAI endpoint',
+              {
+                model,
+                attemptedProtocol: protocol,
+                alternateProtocol,
+                error
+              }
+            )
+            yield* this.streamMessageInternal(
+              messages,
+              { ...config, apiProtocol: alternateProtocol },
+              attemptedProtocols
+            )
             return
           }
           const retryDecision = getLLMRetryDecision({

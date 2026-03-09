@@ -23,13 +23,7 @@ type SkillCommandItem = {
   argsHint?: string
 }
 
-type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | { [key: string]: JsonValue }
-  | JsonValue[]
+type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[]
 
 type SettingValueType = 'string' | 'number' | 'boolean' | 'json'
 
@@ -103,7 +97,7 @@ type RecoveryTrackingMetadata = {
   recoveryUpdatedAt: string
 }
 
-interface CodeAllAPI {
+interface GodCodeAPI {
   invoke(channel: 'ping'): Promise<string>
 
   // Space
@@ -117,9 +111,14 @@ interface CodeAllAPI {
     spaceId: string,
     updates: { name?: string; workDir?: string }
   ): Promise<{ success: boolean; data?: Space | null; error?: string }>
-  invoke(channel: 'space:get', spaceId: string): Promise<{ success: boolean; data?: Space | null; error?: string }>
+  invoke(
+    channel: 'space:get',
+    spaceId: string
+  ): Promise<{ success: boolean; data?: Space | null; error?: string }>
   invoke(channel: 'space:delete', spaceId: string): Promise<{ success: boolean; error?: string }>
-  invoke(channel: 'dialog:select-folder'): Promise<{ success: boolean; data?: string | null; error?: string }>
+  invoke(
+    channel: 'dialog:select-folder'
+  ): Promise<{ success: boolean; data?: string | null; error?: string }>
   invoke(
     channel: 'model:create',
     data: {
@@ -265,7 +264,14 @@ interface CodeAllAPI {
         command: string
         description?: string
         cwd: string
-        status: 'pending' | 'running' | 'completed' | 'error' | 'interrupt' | 'cancelled' | 'timeout'
+        status:
+          | 'pending'
+          | 'running'
+          | 'completed'
+          | 'error'
+          | 'interrupt'
+          | 'cancelled'
+          | 'timeout'
         exitCode: number | null
         createdAt: string
         startedAt: string | null
@@ -350,17 +356,17 @@ interface CodeAllAPI {
       models: Array<{ id: string; modelName: string; provider: string }>
     }>
   >
-  invoke(channel: 'keychain:get-with-models', apiKeyId: string): Promise<
-    | {
-        id: string
-        provider: string
-        label: string | null
-        baseURL: string
-        apiKey: string
-        models: Array<{ id: string; modelName: string; provider: string }>
-      }
-    | null
-  >
+  invoke(
+    channel: 'keychain:get-with-models',
+    apiKeyId: string
+  ): Promise<{
+    id: string
+    provider: string
+    label: string | null
+    baseURL: string
+    apiKey: string
+    models: Array<{ id: string; modelName: string; provider: string }>
+  } | null>
   invoke(
     channel: 'keychain:set-password',
     data: { id?: string; label?: string; baseURL: string; apiKey: string; provider?: string }
@@ -437,10 +443,7 @@ interface CodeAllAPI {
 
   invoke(channel: 'setting:get', key: string): Promise<string | null>
   invoke(channel: 'setting:get', input: { key: string; spaceId?: string }): Promise<string | null>
-  invoke(
-    channel: 'setting:get-resolved',
-    key: string
-  ): Promise<SettingResolvedResult>
+  invoke(channel: 'setting:get-resolved', key: string): Promise<SettingResolvedResult>
   invoke(
     channel: 'setting:get-resolved',
     input: { key: string; spaceId?: string }
@@ -532,22 +535,40 @@ interface CodeAllAPI {
   invoke(channel: 'provider-cache:get-stats'): Promise<unknown>
   invoke(channel: 'provider-cache:is-connected', provider?: string): Promise<unknown>
   invoke(channel: 'provider-cache:get-available-models', provider?: string): Promise<unknown>
-  invoke(channel: 'provider-cache:set-status', provider: string, status: 'connected' | 'disconnected'): Promise<unknown>
+  invoke(
+    channel: 'provider-cache:set-status',
+    provider: string,
+    status: 'connected' | 'disconnected'
+  ): Promise<unknown>
 
   // Audit Log Channels
-  invoke(channel: 'audit-log:query', filters?: Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>
+  invoke(
+    channel: 'audit-log:query',
+    filters?: Record<string, unknown>,
+    options?: Record<string, unknown>
+  ): Promise<unknown>
   invoke(channel: 'audit-log:get-by-entity', entityType: string, entityId: string): Promise<unknown>
   invoke(channel: 'audit-log:get-by-session', sessionId: string): Promise<unknown>
   invoke(channel: 'audit-log:get-recent', limit?: number): Promise<unknown>
   invoke(channel: 'audit-log:count', filters?: Record<string, unknown>): Promise<unknown>
   invoke(channel: 'audit-log:get-failed', limit?: number): Promise<unknown>
-  invoke(channel: 'audit-log:export', format: 'json' | 'csv', filters?: Record<string, unknown>): Promise<unknown>
+  invoke(
+    channel: 'audit-log:export',
+    format: 'json' | 'csv',
+    filters?: Record<string, unknown>
+  ): Promise<unknown>
 
   // Session Continuity Channels
   invoke(channel: 'session-state:get', sessionId: string): Promise<unknown>
-  invoke(channel: 'session-state:checkpoint', sessionId: string): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'session-state:checkpoint',
+    sessionId: string
+  ): Promise<{ success: boolean; error?: string }>
   invoke(channel: 'session-recovery:plan', sessionId: string): Promise<unknown>
-  invoke(channel: 'session-recovery:execute', sessionId: string): Promise<{ success: boolean; error?: string }>
+  invoke(
+    channel: 'session-recovery:execute',
+    sessionId: string
+  ): Promise<{ success: boolean; error?: string }>
   invoke(channel: 'session-recovery:list'): Promise<unknown>
   invoke(channel: 'session-recovery:resume-prompt', sessionId: string): Promise<string>
 
@@ -596,7 +617,14 @@ interface CodeAllAPI {
         command: string
         description?: string
         cwd: string
-        status: 'pending' | 'running' | 'completed' | 'error' | 'interrupt' | 'cancelled' | 'timeout'
+        status:
+          | 'pending'
+          | 'running'
+          | 'completed'
+          | 'error'
+          | 'interrupt'
+          | 'cancelled'
+          | 'timeout'
         exitCode: number | null
         createdAt: string
         startedAt: string | null
@@ -623,7 +651,14 @@ interface CodeAllAPI {
         command: string
         description?: string
         cwd: string
-        status: 'pending' | 'running' | 'completed' | 'error' | 'interrupt' | 'cancelled' | 'timeout'
+        status:
+          | 'pending'
+          | 'running'
+          | 'completed'
+          | 'error'
+          | 'interrupt'
+          | 'cancelled'
+          | 'timeout'
         exitCode: number | null
         createdAt: string
         startedAt: string | null
@@ -643,7 +678,14 @@ interface CodeAllAPI {
         command: string
         description?: string
         cwd: string
-        status: 'pending' | 'running' | 'completed' | 'error' | 'interrupt' | 'cancelled' | 'timeout'
+        status:
+          | 'pending'
+          | 'running'
+          | 'completed'
+          | 'error'
+          | 'interrupt'
+          | 'cancelled'
+          | 'timeout'
         exitCode: number | null
         createdAt: string
         startedAt: string | null
@@ -698,7 +740,10 @@ interface CodeAllAPI {
   // Workflow Observability Channels
   invoke(channel: 'workflow-observability:get', workflowTaskId: string): Promise<any>
   invoke(channel: 'hook-governance:get'): Promise<HookGovernanceStatus>
-  invoke(channel: 'hook-governance:set', input: HookGovernanceUpdateInput): Promise<HookGovernanceUpdateResult>
+  invoke(
+    channel: 'hook-governance:set',
+    input: HookGovernanceUpdateInput
+  ): Promise<HookGovernanceUpdateResult>
 
   // Enhanced Artifact Channels
   invoke(channel: 'artifact:get-diff', artifactId: string): Promise<string | null>
@@ -728,6 +773,7 @@ interface CodeAllAPI {
 
 declare global {
   interface Window {
-    codeall: CodeAllAPI
+    godcode: GodCodeAPI
+    codeall: GodCodeAPI
   }
 }

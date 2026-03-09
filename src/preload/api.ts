@@ -1,5 +1,5 @@
 /**
- * CodeAll Preload API Definition
+ * GodCode Preload API Definition
  *
  * This file defines the API exposed to the renderer process via contextBridge.
  * It uses the centralized IPC channel definitions from shared/ipc-channels.ts.
@@ -19,9 +19,9 @@ const ALL_ALLOWED_CHANNELS = new Set<string>([
 ])
 
 /**
- * Type definition for the CodeAll API exposed to renderer
+ * Type definition for the GodCode API exposed to renderer
  */
-export interface CodeAllAPI {
+export interface GodCodeAPI {
   /**
    * Invoke an IPC channel and wait for a response (request-response pattern)
    * @param channel - The IPC channel name
@@ -61,9 +61,9 @@ function isAllowedChannel(channel: string): boolean {
 }
 
 /**
- * Creates the CodeAll API object
+ * Creates the GodCode API object
  */
-export function createCodeAllAPI(): CodeAllAPI {
+export function createGodCodeAPI(): GodCodeAPI {
   return {
     invoke: <T = unknown>(channel: string, ...args: unknown[]): Promise<T> => {
       if (!isAllowedChannel(channel)) {

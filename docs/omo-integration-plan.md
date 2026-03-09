@@ -2,10 +2,10 @@
 
 ## 概述
 
-本文档基于 `omo-3.4.0-analysis-report.md` 分析报告，为 CodeAll 项目制定详细的 Oh-My-OpenCode (OMO) 功能整合方案。
+本文档基于 `omo-3.4.0-analysis-report.md` 分析报告，为 GodCode 项目制定详细的 Oh-My-OpenCode (OMO) 功能整合方案。
 
 **编制日期**: 2026-02-09
-**目标版本**: CodeAll v1.0
+**目标版本**: GodCode v1.0
 **参考版本**: Oh-My-OpenCode 3.4.0
 
 ---
@@ -21,7 +21,7 @@
 
 ### 1.2 当前状态
 
-CodeAll 已完成的基础工作:
+GodCode 已完成的基础工作:
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
@@ -29,7 +29,7 @@ CodeAll 已完成的基础工作:
 | Category 定义 | ✅ 完成 | `shared/agent-definitions.ts` - 8 个 Category |
 | Agent Prompts | ✅ 完成 | `delegate/prompts/*.ts` - 9 个 Agent 模板 |
 | Category Prompts | ✅ 完成 | `delegate/prompts/categories/*.ts` - 8 个分类模板 |
-| 别名映射 | ✅ 完成 | OMO 名称 → CodeAll 拼音码 |
+| 别名映射 | ✅ 完成 | OMO 名称 → GodCode 拼音码 |
 | DelegateEngine | 🔄 基础 | 基本委托逻辑，缺少动态 Prompt |
 | 动态 Prompt 构建 | ❌ 缺失 | 需要整合 |
 | 委托协议 | ❌ 缺失 | 需要整合 |

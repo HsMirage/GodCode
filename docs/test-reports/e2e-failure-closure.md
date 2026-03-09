@@ -14,7 +14,7 @@
 失败主要来自历史选择器与当前 UI 不一致：
 - `Sessions` 头部在当前 UI 为 `Spaces`。
 - `Create New Space` / `Space name...` 为旧交互模型，当前为 `button[title="New Space"]` + 直接创建流程。
-- 部分 `CodeAll` 文本定位命中多个元素，触发 Playwright strict mode 冲突。
+- 部分 `GodCode` 文本定位命中多个元素，触发 Playwright strict mode 冲突。
 - `waitForAppReady` 使用 `.h-screen` 作为 readiness 条件，不够稳定。
 
 ## 4. 修复内容
@@ -29,15 +29,15 @@
   - 主布局断言从 `.h-screen` 改为 `h2:has-text("Spaces")`。
 - 文件：`tests/e2e/chat-workflow.spec.ts`
   - 主布局断言从 `.h-screen` 改为 `h2:has-text("Spaces")`。
-  - `CodeAll` 断言改为 `.first()` 避免 strict mode 冲突。
+  - `GodCode` 断言改为 `.first()` 避免 strict mode 冲突。
 - 文件：`tests/e2e/mvp1.spec.ts`
-  - `CodeAll` 断言改为 `.first()`。
+  - `GodCode` 断言改为 `.first()`。
 - 文件：`tests/e2e/mvp3.spec.ts`
   - `Sessions` 断言改为 `Spaces`。
   - 空间创建断言由旧选择器（`Create New Space` / `Space name...`）改为 `button[title="New Space"]` 并校验创建后侧边栏可交互。
   - 设置页访问改为点击后校验 `API服务商` 可见。
 - 文件：`tests/e2e/settings.spec.ts`
-  - `CodeAll` 断言改为 `.first()`。
+  - `GodCode` 断言改为 `.first()`。
 - 文件：`tests/e2e/space-management.spec.ts`
   - 旧选择器 `button[title="Create New Space"]` 替换为 `button[title="New Space"]`。
   - 旧“输入框出现/输入空间名”用例改为“创建后侧边栏保持可见”和“空间条目数量增加”断言（符合现实现实交互）。

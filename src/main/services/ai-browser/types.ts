@@ -8,7 +8,7 @@
  *
  * Released under the MIT License
  *
- * Modified by CodeAll project.
+ * Modified by GodCode project.
  */
 
 export interface JsonSchemaProperty {

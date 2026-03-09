@@ -11,14 +11,24 @@ import { sessionStateRecoveryService } from './services/session-state-recovery.s
 import { hookManager } from './services/hooks/manager'
 import { initializeDefaultHooks, restorePersistedHookGovernance } from './services/hooks'
 import { logger } from '../shared/logger'
+import {
+  GODCODE_ALLOW_CHROMIUM_NOISE_ENV,
+  LEGACY_CODEALL_ALLOW_CHROMIUM_NOISE_ENV
+} from '../shared/brand-compat'
+import { isGodCodeE2ETestEnvironment, readGodCodeEnvValue } from './services/brand-runtime-compat'
 import { initializePermissionTemplateFromSettings } from './services/tools/permission-policy'
+import { migrateLegacyPackagedUserDataIfNeeded } from './services/user-data-migration'
 
 // Chromium on some Windows environments emits a misleading stderr line like:
 //   ERROR:network_change_notifier_win.cc(...) WSALookupServiceBegin failed with: 0
 // It is typically benign (Chromium fails to query NLA once and falls back) but it
 // confuses users and pollutes logs. Filter only this exact known-noise line.
-// If you need raw Chromium logs for debugging, set `CODEALL_ALLOW_CHROMIUM_NOISE=1`.
-if (process.platform === 'win32' && process.env.CODEALL_ALLOW_CHROMIUM_NOISE !== '1') {
+// If you need raw Chromium logs for debugging, set `GODCODE_ALLOW_CHROMIUM_NOISE=1`.
+if (
+  process.platform === 'win32' &&
+  readGodCodeEnvValue(GODCODE_ALLOW_CHROMIUM_NOISE_ENV, LEGACY_CODEALL_ALLOW_CHROMIUM_NOISE_ENV) !==
+    '1'
+) {
   const noisyLineRe =
     /^\[\d+:\d+\/\d{6}\.\d+:ERROR:network_change_notifier_win\.cc\(\d+\)\] WSALookupServiceBegin failed with: 0\r?\n?$/gm
 
@@ -44,7 +54,7 @@ if (process.platform === 'win32' && process.env.CODEALL_ALLOW_CHROMIUM_NOISE !==
 
 // In dev, keep app data under the repo so it is easy to reset between runs.
 // This also prevents accidentally mixing dev/test data with the packaged app's userData.
-if (!app.isPackaged && process.env.CODEALL_E2E_TEST !== '1') {
+if (!app.isPackaged && !isGodCodeE2ETestEnvironment()) {
   const devUserData = path.join(process.cwd(), 'dev-data')
   app.setPath('userData', devUserData)
   // Helpful when debugging "data not reset" / "changes not applied" issues.
@@ -81,6 +91,11 @@ if (!gotTheLock) {
   }
 
   app.whenReady().then(async () => {
+    const migratedFrom = migrateLegacyPackagedUserDataIfNeeded()
+    if (migratedFrom) {
+      console.info(`[Main] Migrated packaged userData from ${migratedFrom}`)
+    }
+
     logger.info('Application starting')
     hookManager.getStats()
     initializeDefaultHooks()
@@ -91,7 +106,7 @@ if (!gotTheLock) {
     registerIpcHandlers(mainWindow)
     initEventBridge()
     // Skip database initialization in E2E test environment
-    if (process.env.CODEALL_E2E_TEST === '1') {
+    if (isGodCodeE2ETestEnvironment()) {
       logger.info('[E2E] Skipping database initialization in test environment')
     } else {
       try {
@@ -137,7 +152,7 @@ if (!gotTheLock) {
         const title = isChinese ? '数据库初始化失败' : 'Database Initialization Failed'
 
         const message = isChinese
-          ? `CodeAll 无法初始化数据库。\n\n` +
+          ? `GodCode 无法初始化数据库。\n\n` +
             `可能原因：\n` +
             `1. 杀毒软件拦截\n` +
             `2. 磁盘空间不足\n` +
@@ -147,7 +162,7 @@ if (!gotTheLock) {
             `2. 检查磁盘空间\n` +
             `3. 查看日志获取详细信息：${logPathHint}\n\n` +
             `错误详情：${error instanceof Error ? error.message : String(error)}`
-          : `CodeAll failed to initialize the database.\n\n` +
+          : `GodCode failed to initialize the database.\n\n` +
             `Possible causes:\n` +
             `1. Antivirus software blocking\n` +
             `2. Insufficient disk space\n` +

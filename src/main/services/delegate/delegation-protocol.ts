@@ -1,21 +1,10 @@
 /**
- * @license
- * Copyright (c) 2024-2026 opencode-ai
+ * Copyright (c) 2026 GodCode Team
+ * SPDX-License-Identifier: MIT
  *
- * This file is adapted from oh-my-opencode
- * Original source: https://github.com/opencode-ai/oh-my-opencode
- * License: SUL-1.0
+ * 委托协议 — 6 节结构化任务委托格式
  *
- * This code is used under the Sustainable Use License for internal/non-commercial purposes only.
- *
- * Modified by CodeAll project.
- */
-
-/**
- * 委托协议 - 6 节结构化任务委托格式
- *
- * 基于现有委托最佳实践，每个委托必须包含完整的 6 节结构，
- * 确保子代理有足够的上下文执行任务。
+ * 每个委托必须包含完整的 6 节结构，确保子代理有足够的上下文执行任务。
  */
 
 /**

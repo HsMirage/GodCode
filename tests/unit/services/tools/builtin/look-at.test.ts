@@ -11,7 +11,7 @@ vi.mock('@/main/services/llm/multimodal-looker.service', () => ({
 
 describe('lookAtTool', () => {
   const context: ToolExecutionContext = {
-    workspaceDir: 'D:/AiWork/CodeAll',
+    workspaceDir: 'D:/AiWork/GodCode',
     sessionId: 'test-session'
   }
 

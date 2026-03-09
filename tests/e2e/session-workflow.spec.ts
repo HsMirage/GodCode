@@ -56,11 +56,13 @@ test.describe('Session Workflow', () => {
 
     const getModelId = async () =>
       window.evaluate(async targetModelName => {
-        const api = (window as unknown as {
-          codeall?: {
-            invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+        const api = (
+          window as unknown as {
+            godcode?: {
+              invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+            }
           }
-        }).codeall
+        ).godcode
         if (!api) return null
         const models = (await api.invoke('model:list')) as Array<{ id: string; modelName: string }>
         return models.find(model => model.modelName === targetModelName)?.id ?? null
@@ -71,11 +73,13 @@ test.describe('Session Workflow', () => {
     if (!modelId) throw new Error(`Failed to resolve model id for ${modelName}`)
 
     await window.evaluate(async targetModelId => {
-      const api = (window as unknown as {
-        codeall?: {
-          invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+      const api = (
+        window as unknown as {
+          godcode?: {
+            invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+          }
         }
-      }).codeall
+      ).godcode
       if (!api) return
       await api.invoke('setting:set', { key: 'defaultModelId', value: targetModelId })
     }, modelId)
@@ -91,7 +95,9 @@ test.describe('Session Workflow', () => {
     await expect(window.locator(`text=${prompt}`).first()).toBeVisible()
   })
 
-  test('still sends successfully after agent/category reset with system default model', async ({ window }) => {
+  test('still sends successfully after agent/category reset with system default model', async ({
+    window
+  }) => {
     await navigateTo(window, 'settings')
 
     const addProviderBtn = window.locator('button:has-text("Add Provider")').first()
@@ -103,7 +109,9 @@ test.describe('Session Workflow', () => {
     const modelName = `e2e-reset-model-${ts}`
 
     await window.locator('input[placeholder="My Provider"]').fill(providerName)
-    await window.locator('input[placeholder="https://api.example.com/v1"]').fill('https://api.reset-e2e.local/v1')
+    await window
+      .locator('input[placeholder="https://api.example.com/v1"]')
+      .fill('https://api.reset-e2e.local/v1')
     await window.locator('input[placeholder="sk-..."]').fill(`sk-e2e-reset-${ts}`)
     await window.locator('input[placeholder="例如: gpt-4, claude-3-opus..."]').fill(modelName)
     await window.locator('button:has-text("添加模型")').first().click()
@@ -111,11 +119,13 @@ test.describe('Session Workflow', () => {
 
     const getModelId = async () =>
       window.evaluate(async targetModelName => {
-        const api = (window as unknown as {
-          codeall?: {
-            invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+        const api = (
+          window as unknown as {
+            godcode?: {
+              invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+            }
           }
-        }).codeall
+        ).godcode
         if (!api) return null
         const models = (await api.invoke('model:list')) as Array<{ id: string; modelName: string }>
         return models.find(model => model.modelName === targetModelName)?.id ?? null
@@ -126,11 +136,13 @@ test.describe('Session Workflow', () => {
     if (!modelId) throw new Error(`Failed to resolve model id for ${modelName}`)
 
     await window.evaluate(async targetModelId => {
-      const api = (window as unknown as {
-        codeall?: {
-          invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+      const api = (
+        window as unknown as {
+          godcode?: {
+            invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+          }
         }
-      }).codeall
+      ).godcode
       if (!api) return
       await api.invoke('setting:set', { key: 'defaultModelId', value: targetModelId })
     }, modelId)
@@ -161,17 +173,20 @@ test.describe('Session Workflow', () => {
   test('manual resume sends continuation prompt through message pipeline', async ({ window }) => {
     const resolveSessionId = async () =>
       window.evaluate(async () => {
-        const api = (window as unknown as {
-          codeall?: {
-            invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+        const api = (
+          window as unknown as {
+            godcode?: {
+              invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+            }
           }
-        }).codeall
+        ).godcode
 
         if (!api) return null
 
         const sessions = (await api.invoke('session:list')) as Array<{ id?: string }>
-        const firstId = sessions.find(session => typeof session?.id === 'string' && session.id.length > 0)
-          ?.id
+        const firstId = sessions.find(
+          session => typeof session?.id === 'string' && session.id.length > 0
+        )?.id
 
         return firstId ?? null
       })
@@ -184,7 +199,7 @@ test.describe('Session Workflow', () => {
     }
 
     const boulderPath = path.join(
-      process.env.CODEALL_E2E_SPACE_DIR ?? process.cwd(),
+      process.env.GODCODE_E2E_SPACE_DIR ?? process.env.CODEALL_E2E_SPACE_DIR ?? process.cwd(),
       '.fuxi',
       'boulder.json'
     )
@@ -203,14 +218,16 @@ test.describe('Session Workflow', () => {
     )
 
     await window.evaluate(async targetSessionId => {
-      const api = (window as unknown as {
-        codeall?: {
-          invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+      const api = (
+        window as unknown as {
+          godcode?: {
+            invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+          }
         }
-      }).codeall
+      ).godcode
 
       if (!api) {
-        throw new Error('window.codeall is unavailable')
+        throw new Error('window.godcode is unavailable')
       }
 
       await api.invoke('task-continuation:set-todos', {
@@ -243,11 +260,13 @@ test.describe('Session Workflow', () => {
     await expect
       .poll(async () => {
         return window.evaluate(async targetSessionId => {
-          const api = (window as unknown as {
-            codeall?: {
-              invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+          const api = (
+            window as unknown as {
+              godcode?: {
+                invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+              }
             }
-          }).codeall
+          ).godcode
 
           if (!api) return null
 
@@ -261,11 +280,13 @@ test.describe('Session Workflow', () => {
       .not.toBeNull()
 
     const expectedContinuationPrompt = await window.evaluate(async targetSessionId => {
-      const api = (window as unknown as {
-        codeall?: {
-          invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+      const api = (
+        window as unknown as {
+          godcode?: {
+            invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+          }
         }
-      }).codeall
+      ).godcode
 
       if (!api) return null
 
@@ -286,11 +307,13 @@ test.describe('Session Workflow', () => {
       .poll(async () => {
         return window.evaluate(
           async ({ targetSessionId, prompt }) => {
-            const api = (window as unknown as {
-              codeall?: {
-                invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+            const api = (
+              window as unknown as {
+                godcode?: {
+                  invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
+                }
               }
-            }).codeall
+            ).godcode
 
             if (!api) return false
 

@@ -137,7 +137,7 @@ You are capable of extraordinary creative work—don't hold back.
   builtin: true,
   enabled: true,
   metadata: {
-    author: 'CodeAll Team',
+    author: 'GodCode Team',
     version: '1.0.0',
     tags: ['frontend', 'ui', 'ux', 'design', 'css', 'styling']
   }

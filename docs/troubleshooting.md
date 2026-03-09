@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-This guide provides solutions for common issues encountered when setting up, developing, or using CodeAll.
+This guide provides solutions for common issues encountered when setting up, developing, or using GodCode.
 
 ## 1. E2E Testing & Electron Launch Issues
 
@@ -54,7 +54,7 @@ If the AI agents fail to respond or return error messages related to authenticat
 
 ### Symptom: "Failed to initialize database"
 
-CodeAll uses an embedded PostgreSQL database powered by Prisma.
+GodCode uses an embedded PostgreSQL database powered by Prisma.
 
 **Solutions:**
 
@@ -70,7 +70,7 @@ CodeAll uses an embedded PostgreSQL database powered by Prisma.
 
 ### Symptom: Hook occasionally times out or is skipped with circuit-open status
 
-CodeAll’s unified hook entry includes reliability protections:
+GodCode’s unified hook entry includes reliability protections:
 
 - **Timeout control**: a single hook call is capped (default 2000ms).
 - **Graceful degradation**: timeout or hook error is recorded, but the main pipeline continues.

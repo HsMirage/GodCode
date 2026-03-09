@@ -1,16 +1,16 @@
-# CodeAll
+# GodCode
 
 **Version 1.0.0** | **Beta** | **开发中**
 
-CodeAll 是一个多模型协作编程平台（Multi-LLM Collaborative Programming Platform），是一个独立多agent协同（并且不同agent由不同LLM模型驱动）的方式工作软件。通过将本地工作区、多样化 AI 模型和浏览器自动化集成到统一的高性能环境中，帮助开发者编排复杂的软件开发任务。
+GodCode 是一个多模型协作编程平台（Multi-LLM Collaborative Programming Platform），是一个独立多agent协同（并且不同agent由不同LLM模型驱动）的方式工作软件。通过将本地工作区、多样化 AI 模型和浏览器自动化集成到统一的高性能环境中，帮助开发者编排复杂的软件开发任务。
 
-基于 Electron 和 React 构建，CodeAll 作为一个强大的工作引擎，将高层级目标分解为可执行的子任务，由专门的 AI 智能体处理。
+基于 Electron 和 React 构建，GodCode 作为一个强大的工作引擎，将高层级目标分解为可执行的子任务，由专门的 AI 智能体处理。
 
 > **项目状态**: 积极开发中。Agent 系统基于中国神话命名体系，灵感来源于 oh-my-opencode 项目。
 
 ## 获取安装包
 
-- **发布页**：`https://github.com/CakeSystem/CodeAll/releases`
+- **发布页**：`https://github.com/CakeSystem/GodCode/releases`
 - **本地构建产物**：执行 `pnpm build:mac` / `pnpm build:win` / `pnpm build:linux` 后，安装包输出到 `dist/`
 - **更新策略**：当前保持手动更新模式，`electron-builder.yml` 尚未配置远程发布源
 
@@ -66,7 +66,7 @@ CodeAll 是一个多模型协作编程平台（Multi-LLM Collaborative Programmi
 
 ## 智能体系统
 
-CodeAll 采用中国神话命名体系，包含 9 个专业化智能体：
+GodCode 采用中国神话命名体系，包含 9 个专业化智能体：
 
 ### 主要智能体（Primary Agents）
 
@@ -91,7 +91,7 @@ CodeAll 采用中国神话命名体系，包含 9 个专业化智能体：
 
 ## 工具系统
 
-CodeAll 提供丰富的内置工具供智能体使用：
+GodCode 提供丰富的内置工具供智能体使用：
 
 ### 文件操作
 - **file-read**: 读取文件内容，支持行范围
@@ -156,8 +156,8 @@ CodeAll 提供丰富的内置工具供智能体使用：
 1. **克隆仓库**
 
    ```bash
-   git clone https://github.com/your-repo/codeall.git
-   cd codeall
+   git clone https://github.com/your-repo/godcode.git
+   cd godcode
    ```
 
 2. **安装依赖**
@@ -207,7 +207,7 @@ pnpm build:linux
 3. 输入目标，例如“分析仓库并修复测试失败”
 4. 在任务面板中查看拆解后的工作流、后台任务和产物
 
-> CodeAll 接受任何 OpenAI 兼容的端点，包括 Azure OpenAI、Ollama、vLLM 等。
+> GodCode 接受任何 OpenAI 兼容的端点，包括 Azure OpenAI、Ollama、vLLM 等。
 
 ---
 
@@ -299,7 +299,7 @@ src/
 
 ## 致谢
 
-CodeAll 的设计灵感来源于以下开源项目：
+GodCode 的设计灵感来源于以下开源项目：
 
 - [oh-my-opencode](https://github.com/opencode-ai/oh-my-opencode): 多智能体协作概念和委托系统
 - [eigent](https://github.com/stackframe-projects/eigent): 工作引擎任务分解架构

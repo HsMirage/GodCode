@@ -1,10 +1,10 @@
-# CodeAll Agent 开发指南
+# GodCode Agent 开发指南
 
-本文档介绍了 CodeAll 的 Agent 系统架构、配置方法以及如何创建和调试自定义 Agent。
+本文档介绍了 GodCode 的 Agent 系统架构、配置方法以及如何创建和调试自定义 Agent。
 
 ## 1. 系统架构
 
-CodeAll 的 Agent 系统由两个核心引擎驱动：
+GodCode 的 Agent 系统由两个核心引擎驱动：
 
 ### 1.1 WorkforceEngine (劳动力引擎)
 

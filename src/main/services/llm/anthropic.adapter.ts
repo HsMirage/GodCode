@@ -43,7 +43,7 @@ const isAbortRequested = (error: unknown, signal?: AbortSignal): boolean => {
 }
 
 /**
- * Convert CodeAll messages to Anthropic message format
+ * Convert GodCode messages to Anthropic message format
  */
 function toAnthropicMessages(messages: Message[]): {
   systemPrompt: string | undefined

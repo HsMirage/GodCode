@@ -10,6 +10,11 @@ import type {
   ModelSelectionTrace
 } from '@/shared/model-selection-contract'
 import type { LLMConfigApiProtocol } from './adapter.interface'
+import {
+  inferPreferredOpenAIProtocol,
+  isOpenAIProtocolProvider,
+  normalizeOpenAIProtocol
+} from './openai-protocol'
 
 export type { ModelSelectionSource as ModelSource } from '@/shared/model-selection-contract'
 
@@ -48,15 +53,6 @@ interface ResolveModelSelectionInput {
   categoryCode?: string
   temperatureFallback?: number
 }
-
-const OPENAI_PROTOCOL_REQUIRED_PROVIDERS = new Set([
-  'openai',
-  'openai-compatible',
-  'openai-compat',
-  'custom',
-  'azure-openai',
-  'azure'
-])
 
 function normalizeProvider(provider: string): string {
   return provider.trim().toLowerCase()
@@ -124,20 +120,12 @@ function readModelProtocol(model: { provider: string; config: unknown; modelName
   | LLMConfigApiProtocol
   | undefined {
   const provider = normalizeProvider(model.provider)
-  if (!OPENAI_PROTOCOL_REQUIRED_PROVIDERS.has(provider)) {
+  if (!isOpenAIProtocolProvider(provider)) {
     return undefined
   }
 
   const config = model.config && typeof model.config === 'object' ? (model.config as Record<string, unknown>) : {}
-  const value = typeof config.apiProtocol === 'string' ? config.apiProtocol.trim() : ''
-  if (value === 'chat/completions' || value === 'responses') {
-    return value
-  }
-
-  throw new Error(
-    `MODEL_PROTOCOL_NOT_CONFIGURED: 模型「${model.modelName}」缺少 apiProtocol 配置。` +
-      '请在“设置 -> 模型”中为该模型设置协议（chat/completions 或 responses）。'
-  )
+  return normalizeOpenAIProtocol(config.apiProtocol) ?? inferPreferredOpenAIProtocol(provider)
 }
 
 export class ModelSelectionService {

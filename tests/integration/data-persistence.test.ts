@@ -149,7 +149,7 @@ const mocks = vi.hoisted(() => {
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn((name: string) => {
-      if (name === 'userData') return '/tmp/codeall-test-userdata'
+      if (name === 'userData') return '/tmp/godcode-test-userdata'
       return '/tmp'
     })
   }
@@ -167,7 +167,7 @@ vi.mock('@/main/services/database', () => ({
 vi.mock('@/main/services/data-directory.service', () => ({
   DataDirectoryService: {
     getInstance: () => ({
-      getBackupDir: vi.fn().mockReturnValue('/tmp/codeall-backups')
+      getBackupDir: vi.fn().mockReturnValue('/tmp/godcode-backups')
     })
   }
 }))
@@ -185,7 +185,7 @@ vi.mock('fs', async () => {
   const mockFiles: Record<string, string> = {}
   return {
     ...actual,
-    existsSync: vi.fn((path: string) => path in mockFiles || path === '/tmp/codeall-backups'),
+    existsSync: vi.fn((path: string) => path in mockFiles || path === '/tmp/godcode-backups'),
     mkdirSync: vi.fn(),
     writeFileSync: vi.fn((path: string, content: string) => {
       mockFiles[path] = content

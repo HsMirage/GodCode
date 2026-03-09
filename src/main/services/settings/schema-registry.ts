@@ -457,7 +457,7 @@ const BUILTIN_SETTING_SCHEMAS: SettingSchemaDefinition[] = [
     validation: {
       enum: ['safe', 'balanced', 'full']
     },
-    description: '工具权限模板（safe/balanced/full）'
+    description: '工具权限模板（safe/balanced/full，工具调用默认自动执行）'
   }
 ]
 

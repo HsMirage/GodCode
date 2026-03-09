@@ -21,4 +21,14 @@ const rendererLogger = winston.createLogger({
   ]
 })
 
-export const logger = isRenderer ? rendererLogger : LoggerService.getInstance().getLogger()
+function getActiveLogger(): winston.Logger {
+  return isRenderer ? rendererLogger : LoggerService.getInstance().getLogger()
+}
+
+export const logger = new Proxy(rendererLogger, {
+  get(_target, property, receiver) {
+    const activeLogger = getActiveLogger()
+    const value = Reflect.get(activeLogger, property, receiver)
+    return typeof value === 'function' ? value.bind(activeLogger) : value
+  }
+}) as winston.Logger

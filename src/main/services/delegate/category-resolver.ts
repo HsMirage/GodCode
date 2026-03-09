@@ -1,14 +1,8 @@
 /**
- * @license
- * Copyright (c) 2024-2026 opencode-ai
+ * Copyright (c) 2026 GodCode Team
+ * SPDX-License-Identifier: MIT
  *
- * This file is adapted from oh-my-opencode
- * Original source: https://github.com/opencode-ai/oh-my-opencode
- * License: SUL-1.0
- *
- * This code is used under the Sustainable Use License for internal/non-commercial purposes only.
- *
- * Modified by CodeAll project.
+ * CategoryResolver — 解析 Agent 和 Category 的元数据
  */
 
 import type { AgentPromptMetadata, AgentCategory, AgentCost } from './category-constants'

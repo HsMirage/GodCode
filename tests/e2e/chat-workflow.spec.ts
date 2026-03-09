@@ -19,8 +19,8 @@ test.describe('Chat Workflow', () => {
     const mainLayout = window.locator('h2:has-text("Spaces")')
     await expect(mainLayout).toBeVisible()
 
-    // Check CodeAll branding
-    const branding = window.locator('text=CodeAll').first()
+    // Check GodCode branding
+    const branding = window.locator('text=GodCode').first()
     await expect(branding).toBeVisible()
   })
 })

@@ -6,7 +6,7 @@ vi.mock('electron', () => {
   return {
     app: {
       getPath: vi.fn(name => {
-        if (name === 'userData') return '/tmp/codeall-perf-startup'
+        if (name === 'userData') return '/tmp/godcode-perf-startup'
         return '/tmp'
       }),
       isPackaged: false
@@ -124,59 +124,57 @@ async function measureDatabaseInitMs(): Promise<number> {
 }
 
 describe('Performance: Startup Time', () => {
-  test(
-    'database init remains stable under repeated runs (<5s avg, <5.5s worst)',
-    async () => {
-      const warmupMs = await measureDatabaseInitMs()
+  test('database init remains stable under repeated runs (<5s avg, <5.5s worst)', async () => {
+    const warmupMs = await measureDatabaseInitMs()
 
-      const sampleResults: Array<{
-        elapsedMs: number
-        heapUsedMB: number
-        rssMB: number
-        externalMB: number
-      }> = []
+    const sampleResults: Array<{
+      elapsedMs: number
+      heapUsedMB: number
+      rssMB: number
+      externalMB: number
+    }> = []
 
-      for (let i = 0; i < 3; i++) {
-        const elapsedMs = await measureDatabaseInitMs()
-        const usage = process.memoryUsage()
-        sampleResults.push({
-          elapsedMs,
-          heapUsedMB: Math.round((usage.heapUsed / 1024 / 1024) * 100) / 100,
-          rssMB: Math.round((usage.rss / 1024 / 1024) * 100) / 100,
-          externalMB: Math.round((usage.external / 1024 / 1024) * 100) / 100
-        })
-      }
+    for (let i = 0; i < 3; i++) {
+      const elapsedMs = await measureDatabaseInitMs()
+      const usage = process.memoryUsage()
+      sampleResults.push({
+        elapsedMs,
+        heapUsedMB: Math.round((usage.heapUsed / 1024 / 1024) * 100) / 100,
+        rssMB: Math.round((usage.rss / 1024 / 1024) * 100) / 100,
+        externalMB: Math.round((usage.external / 1024 / 1024) * 100) / 100
+      })
+    }
 
-      const samples = sampleResults.map(item => item.elapsedMs)
-      const averageMs = Math.round(samples.reduce((sum, value) => sum + value, 0) / samples.length)
-      const worstMs = Math.max(...samples)
+    const samples = sampleResults.map(item => item.elapsedMs)
+    const averageMs = Math.round(samples.reduce((sum, value) => sum + value, 0) / samples.length)
+    const worstMs = Math.max(...samples)
 
-      const startupSamplesDir = '/tmp/codeall-performance-samples'
-      const startupSamplesPath = `${startupSamplesDir}/startup-memory-samples.json`
-      const peakHeapMB = Math.max(...sampleResults.map(item => item.heapUsedMB))
-      const peakRssMB = Math.max(...sampleResults.map(item => item.rssMB))
+    const startupSamplesDir = '/tmp/godcode-performance-samples'
+    const startupSamplesPath = `${startupSamplesDir}/startup-memory-samples.json`
+    const peakHeapMB = Math.max(...sampleResults.map(item => item.heapUsedMB))
+    const peakRssMB = Math.max(...sampleResults.map(item => item.rssMB))
 
-      const fs = await import('node:fs')
-      fs.mkdirSync(startupSamplesDir, { recursive: true })
-      fs.writeFileSync(
-        startupSamplesPath,
-        JSON.stringify(
-          {
-            timestamp: new Date().toISOString(),
-            warmupMs,
-            samples,
-            averageMs,
-            worstMs,
-            sampleResults,
-            peakHeapMB,
-            peakRssMB
-          },
-          null,
-          2
-        )
+    const fs = await import('node:fs')
+    fs.mkdirSync(startupSamplesDir, { recursive: true })
+    fs.writeFileSync(
+      startupSamplesPath,
+      JSON.stringify(
+        {
+          timestamp: new Date().toISOString(),
+          warmupMs,
+          samples,
+          averageMs,
+          worstMs,
+          sampleResults,
+          peakHeapMB,
+          peakRssMB
+        },
+        null,
+        2
       )
+    )
 
-      console.log(`
+    console.log(`
 === Startup Stability Sampling ===
 Warmup: ${warmupMs}ms
 Samples: ${samples.join(', ')}ms
@@ -187,18 +185,16 @@ Peak RSS: ${peakRssMB}MB
 Memory Samples: ${startupSamplesPath}
 `)
 
-      expect(averageMs).toBeLessThan(5000)
-      expect(worstMs).toBeLessThan(5500)
+    expect(averageMs).toBeLessThan(5000)
+    expect(worstMs).toBeLessThan(5500)
 
-      // Verify service can still be initialized after sampled runs
-      // @ts-ignore
-      DatabaseService.instance = undefined
-      const db = DatabaseService.getInstance()
-      await db.init()
-      const client = db.getClient()
-      expect(client).toBeDefined()
-      await db.shutdown()
-    },
-    30000
-  )
+    // Verify service can still be initialized after sampled runs
+    // @ts-ignore
+    DatabaseService.instance = undefined
+    const db = DatabaseService.getInstance()
+    await db.init()
+    const client = db.getClient()
+    expect(client).toBeDefined()
+    await db.shutdown()
+  }, 30000)
 })

@@ -1,6 +1,6 @@
-# CodeAll 快速开始指南
+# GodCode 快速开始指南
 
-欢迎使用 CodeAll - 多模型协作编程平台。本指南将帮助你快速安装、配置并开始使用 CodeAll。
+欢迎使用 GodCode - 多模型协作编程平台。本指南将帮助你快速安装、配置并开始使用 GodCode。
 
 ## 目录
 
@@ -35,16 +35,16 @@
 
 ### 方式一: 使用预编译版本 (推荐)
 
-1. 从 [Releases 页面](https://github.com/your-repo/codeall/releases) 下载对应平台的安装包
+1. 从 [Releases 页面](https://github.com/your-repo/godcode/releases) 下载对应平台的安装包
 2. 运行安装程序
-3. 启动 CodeAll 应用
+3. 启动 GodCode 应用
 
 ### 方式二: 从源码构建
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-repo/codeall.git
-cd codeall
+git clone https://github.com/your-repo/godcode.git
+cd godcode
 
 # 2. 安装依赖 (需要 pnpm)
 pnpm install
@@ -106,7 +106,7 @@ pnpm build:linux
 
 ## 创建第一个工作空间
 
-工作空间 (Space) 是 CodeAll 中组织项目的基本单位，对应本地的一个目录。
+工作空间 (Space) 是 GodCode 中组织项目的基本单位，对应本地的一个目录。
 
 ### 创建工作空间
 
@@ -254,5 +254,5 @@ AI: 我来搜索 React 19 的相关信息...
 如果遇到问题:
 
 1. 查看 [常见问题](./faq.md)
-2. 在 GitHub 提交 [Issue](https://github.com/your-repo/codeall/issues)
+2. 在 GitHub 提交 [Issue](https://github.com/your-repo/godcode/issues)
 3. 加入社区讨论

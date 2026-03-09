@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IpcMainInvokeEvent } from 'electron'
+import { GODCODE_KEYCHAIN_SERVICE } from '@/shared/brand-compat'
 import {
   handleKeychainGetPassword,
   handleKeychainGetWithModels,
@@ -201,7 +202,7 @@ describe('keychain list/get with models', () => {
     })
 
     const result = await handleKeychainGetPassword({} as IpcMainInvokeEvent, {
-      service: 'codeall-app',
+      service: GODCODE_KEYCHAIN_SERVICE,
       account: 'custom-b-api-key'
     })
 

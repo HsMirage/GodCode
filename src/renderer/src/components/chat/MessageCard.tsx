@@ -134,7 +134,7 @@ export function MessageCard({ message }: MessageCardProps) {
             isUser ? 'justify-end' : 'justify-start'
           )}
         >
-          <span className="font-medium text-[var(--text-secondary)]">{isUser ? 'You' : 'CodeAll'}</span>
+          <span className="font-medium text-[var(--text-secondary)]">{isUser ? 'You' : 'GodCode'}</span>
           {timestamp && <span>• {timestamp}</span>}
           {message.isStreaming && (
             <span className="text-emerald-500 animate-pulse">Streaming...</span>

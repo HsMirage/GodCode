@@ -126,7 +126,7 @@ GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash $MERGE_BASE
   builtin: true,
   enabled: true,
   metadata: {
-    author: 'CodeAll Team',
+    author: 'GodCode Team',
     version: '1.0.0',
     tags: ['git', 'vcs', 'commit', 'rebase']
   }

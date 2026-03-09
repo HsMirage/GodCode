@@ -91,7 +91,7 @@ export function ModelConfigForm({
   const [apiKeys, setApiKeys] = useState<ApiKeyOption[]>([])
 
   useEffect(() => {
-    window.codeall
+    window.godcode
       .invoke('keychain:list')
       .then(keys => {
         setApiKeys(keys)

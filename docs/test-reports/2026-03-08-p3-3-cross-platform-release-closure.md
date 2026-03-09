@@ -28,7 +28,7 @@
 
 ```bash
 pnpm vitest tests/unit/shared/release-gate-matrix.test.ts --run
-pnpm verify:release-smoke --platform current --candidate "$(command -v node)" --arg -e --arg "setInterval(() => {}, 1000)" --timeout-ms 300 --report /tmp/codeall-release-smoke.json
+pnpm verify:release-smoke --platform current --candidate "$(command -v node)" --arg -e --arg "setInterval(() => {}, 1000)" --timeout-ms 300 --report /tmp/godcode-release-smoke.json
 pnpm exec eslint src/shared/release-gate-matrix.ts scripts/release-smoke-check.ts tests/unit/shared/release-gate-matrix.test.ts
 pnpm typecheck
 ruby -e "require 'yaml'; YAML.load_file('.github/workflows/ci.yml'); puts 'ci-yaml-ok'"

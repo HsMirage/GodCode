@@ -15,7 +15,7 @@ const highlightElementScript = (uid: string, color: string = '#3b82f6') => `
 
     // Create highlight overlay
     const highlight = document.createElement('div');
-    highlight.id = 'codeall-ai-highlight';
+    highlight.id = 'godcode-ai-highlight';
     highlight.style.cssText = \`
       position: absolute;
       border: 3px solid ${color};
@@ -28,7 +28,7 @@ const highlightElementScript = (uid: string, color: string = '#3b82f6') => `
     \`;
 
     // Remove any existing highlight
-    const existing = document.getElementById('codeall-ai-highlight');
+    const existing = document.getElementById('godcode-ai-highlight');
     if (existing) existing.remove();
 
     // Position the highlight
@@ -55,7 +55,7 @@ const highlightElementScript = (uid: string, color: string = '#3b82f6') => `
 const ELEMENT_LOOKUP_MAX_RETRIES = 2
 const ELEMENT_LOOKUP_RETRY_DELAY_MS = 500
 
-const ELEMENT_NOT_FOUND_ERROR_PREFIX = '__CODEALL_ELEMENT_NOT_FOUND__:'
+const ELEMENT_NOT_FOUND_ERROR_PREFIX = '__GODCODE_ELEMENT_NOT_FOUND__:'
 
 function makeElementNotFoundError(uid: string): Error {
   return new Error(`${ELEMENT_NOT_FOUND_ERROR_PREFIX}${uid}`)
