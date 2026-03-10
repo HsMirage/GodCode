@@ -92,5 +92,8 @@ dev-ps.err
 # Test artifacts
 test-results/
 playwright-report/
+
+# Reference projects
+参考项目/
 nul
 .ace-tool/
