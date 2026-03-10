@@ -10,7 +10,7 @@ GodCode 是一个多模型协作编程平台（Multi-LLM Collaborative Programmi
 
 ## 获取安装包
 
-- **发布页**：`https://github.com/CakeSystem/GodCode/releases`
+- **发布页**：`https://github.com/HsMirage/GodCode/releases`
 - **本地构建产物**：执行 `pnpm build:mac` / `pnpm build:win` / `pnpm build:linux` 后，安装包输出到 `dist/`
 - **更新策略**：当前保持手动更新模式，`electron-builder.yml` 尚未配置远程发布源
 
@@ -310,4 +310,5 @@ GodCode 的设计灵感来源于以下开源项目：
 ---
 
 _Powered by Electron + React + Multi-LLM_
+
 
