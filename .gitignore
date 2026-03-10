@@ -61,7 +61,10 @@ temp/
 dev-data/
 certs/
 experiments/
-/.claude/settings.json
+# Claude / Codex / iFlow — internal tooling, not for public release
+.claude/
+.codex/
+.iflow/
 /.fuxi/boulder.json
 网站CodeAlltemp_eigent/
 网站GodCodetemp_eigent/
