@@ -6,7 +6,7 @@ GodCode 是一个多模型协作编程平台（Multi-LLM Collaborative Programmi
 
 基于 Electron 和 React 构建，GodCode 作为一个强大的工作引擎，将高层级目标分解为可执行的子任务，由专门的 AI 智能体处理。
 
-> **项目状态**: 积极开发中。Agent 系统基于中国神话命名体系，灵感来源于 oh-my-opencode 项目。
+> **项目状态**: 开发暂停中。。。本人精力能力有限，暂时开发到这里来。
 
 ## 获取安装包
 
@@ -310,3 +310,4 @@ GodCode 的设计灵感来源于以下开源项目：
 ---
 
 _Powered by Electron + React + Multi-LLM_
+
