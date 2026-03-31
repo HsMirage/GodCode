@@ -1,5 +1,11 @@
 # GodCode
 
+---
+
+<p align="center"><strong>⭐ <a href="https://github.com/HsMirage/AIPlanHub">AIPlanHub</a> — 一站式对比国内主流 AI 编程订阅方案，覆盖 9 大平台、25+ 套餐，帮你找到性价比最高的选择 ⭐</strong></p>
+
+---
+
 **Version 1.0.0** | **Beta** | **开发中**
 
 GodCode 是一个多模型协作编程平台（Multi-LLM Collaborative Programming Platform），是一个独立多agent协同（并且不同agent由不同LLM模型驱动）的方式工作软件。通过将本地工作区、多样化 AI 模型和浏览器自动化集成到统一的高性能环境中，帮助开发者编排复杂的软件开发任务。
